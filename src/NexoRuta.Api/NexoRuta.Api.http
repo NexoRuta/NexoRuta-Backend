@@ -1,0 +1,6 @@
+@NexoRuta.Api_HostAddress = http://localhost:5041
+
+GET {{NexoRuta.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

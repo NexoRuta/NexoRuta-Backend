@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>dotnet-NexoRuta.Worker-d87a2b6d-c9a4-4606-9332-7e286c876f20</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.12" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NexoRuta.Application\NexoRuta.Application.csproj" />
+    <ProjectReference Include="..\NexoRuta.Infrastructure\NexoRuta.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>
