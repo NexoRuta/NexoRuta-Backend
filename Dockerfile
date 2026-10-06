@@ -1,3 +1,5 @@
+ARG RUNTIME_IMAGE=mcr.microsoft.com/dotnet/aspnet:10.0
+
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 
 ARG PROJECT=src/NexoRuta.Api/NexoRuta.Api.csproj
@@ -8,7 +10,6 @@ COPY . .
 RUN dotnet restore "$PROJECT"
 RUN dotnet publish "$PROJECT" -c Release -o /app/publish /p:UseAppHost=false
 
-ARG RUNTIME_IMAGE=mcr.microsoft.com/dotnet/aspnet:10.0
 FROM ${RUNTIME_IMAGE} AS final
 
 WORKDIR /app
