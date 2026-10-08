@@ -480,3 +480,8 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# Version the release scripts, not build output.
+!/scripts/release/
+!/scripts/release/deploy.sh
+!/scripts/release/test-deploy.sh

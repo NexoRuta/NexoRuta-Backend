@@ -206,8 +206,9 @@ public sealed class EnvioPostgresRoundTripTests : IAsyncLifetime
         var vinculoDos = new OperadorComercio(opDos.Id, comercio.Id);
         db.AddRange(opUno, opDos, comercio, usuario, vinculoUno, vinculoDos);
         await db.SaveChangesAsync();
-        var cuentaAnterior = Guid.CreateVersion7();
-        var segundoAcceso = Guid.CreateVersion7();
+        // ponytail: migration retains the lowest UUID; same-millisecond UUIDv7 calls are not ordered.
+        var cuentaAnterior = Guid.Parse("018f0000-0000-7000-8000-000000000001");
+        var segundoAcceso = Guid.Parse("018f0000-0000-7000-8000-000000000002");
         await db.Database.ExecuteSqlInterpolatedAsync(
             $"INSERT INTO \"AccesosUsuario\" (\"Id\", \"UsuarioId\", \"OperadorId\", \"OperadorComercioId\") VALUES ({cuentaAnterior}, {usuario.Id}, {opUno.Id}, {vinculoUno.Id}), ({segundoAcceso}, {usuario.Id}, {opDos.Id}, {vinculoDos.Id})");
         var destinatario = new Destinatario(opUno.Id, "Destinatario anterior");
