@@ -53,7 +53,7 @@ El Compose local vive en el repositorio principal y publica la API en `http://lo
 | --- | --- |
 | Organización | Monolito modular .NET 10 por capacidad de negocio; Worker separado para procesamiento asíncrono. |
 | Dependencias | `Domain` no depende de frameworks, datos ni presentación; `Application` depende de `Domain`; `Infrastructure` implementa contratos de aplicación; API y Worker son adaptadores. Una prueba de arquitectura debe proteger esta regla en CI. |
-| Persistencia | PostgreSQL y EF Core con migraciones. El operador es el tenant; una base y tablas compartidas con RLS como segunda barrera. El comercio es un segundo nivel de acceso dentro del operador. |
+| Persistencia | PostgreSQL y EF Core con migraciones. El operador es el tenant; una base y tablas compartidas con RLS como segunda barrera. Cada envío guarda el operador elegido y el comercio de origen, sin vínculo previo entre ambos; las cuentas de comercio consultan sus propios envíos. |
 | Modelo inicial | IDs `Guid`/UUIDv7; `Destinatario` y `Direccion` separados; peso del `Bulto` en gramos y dimensiones en centímetros. Estas decisiones fueron acordadas para el primer corte. |
 | Reglas centrales | Estados de envío explícitos, eventos inmutables, configuración tarifaria y operativa versionada, concurrencia optimista e idempotencia donde correspondan. |
 | Integraciones | Cola de trabajo, patrón outbox y Worker idempotente son obligatorios. RabbitMQ es la propuesta; Redis, SignalR, Serilog y OpenTelemetry figuran en el diseño para caché, tiempo real y observabilidad. |

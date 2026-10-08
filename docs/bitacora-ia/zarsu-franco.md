@@ -83,3 +83,21 @@ Para el CU de alta queda por comprobar, en su integración, que el envío tenga 
 Se actualizó `README.md`; se trasladó la entrada de entidades a `docs/bitacora-ia/zarsu-franco.md`; y se crearon `docs/workflow/arquitectura-backend.md`, `docs/workflow/alcance-funcional.md`, `docs/workflow/implementar-cu.md` y `docs/cu/_plantilla.md`. Se verificaron rutas relativas, referencias y espacios finales. Esta tarea solo cambia documentación; no se ejecutaron pruebas funcionales.
 
 **Mi revisión pendiente con el equipo:** confirmar que el resumen distingue correctamente requisitos, decisiones adoptadas, propuestas y funcionalidades todavía no implementadas; actualizarlo cuando se cierren los ADR pendientes.
+
+
+## 2026-10-08 — Eliminación de OperadorComercio
+
+- **Solicitud:** permitir que un comercio cree envíos con cualquier operador registrado, eliminando el vínculo previo. Mantener las funcionalidades actuales; no implementar el listado de comercios atendidos por operador.
+- **Asistencia:** Codex revisó la letra en `Laboratorio__NET_2026.pdf` (§§3.3–3.4), las especificaciones CU-01/CU-07 y los consumidores existentes antes de modificar dominio, aplicación, persistencia, API y cliente web.
+- **Resultado:** `Envio` conserva `OperadorId` y `ComercioId` directamente. El selector lista todos los operadores registrados y el alta comprueba su existencia. Se mantienen las cuentas separadas, el bulto y los filtros de lectura. La migración obtiene el comercio antes de eliminar el vínculo y conserva los registros operativos; al revertir reconstruye únicamente los pares con envíos, con nuevos IDs.
+- **Verificación:** 8 pruebas unitarias, 13 de integración PostgreSQL y 26 del frontend contra OpenAPI actual y su copia; migración/reversión/reaplicación y modelo EF sin cambios pendientes. Chrome comprobó el alta con un operador nuevo sin vínculo previo y el mismo envío/bulto/comercio en Backoffice con el filtro del operador. Ambas soluciones compilan; las tres advertencias MSB3277 de EF Core en Worker también se reprodujeron en el commit anterior.
+- **Límites:** validación en bases temporales, sin modificar la base persistente ni ejecutar CI remota. Backend y frontend deben actualizarse juntos porque las respuestas ahora incluyen `comercioId` en lugar de `operadorComercioId`. Revisión del equipo pendiente.
+
+
+## 2026-10-08 — Contexto de usuario por petición y cancelación de Blazor
+
+- **Solicitud:** eliminar la consulta repetida del usuario actual y conectar el token de cancelación del portal Blazor.
+- **Asistencia y cambio:** Codex conservó el contexto validado por autenticación en `HttpContext.Items`; `UsuarioActualHttp` verifica el principal y reutiliza ese contexto durante la misma petición. Commerce pasa un token propio a las consultas y al alta, y lo cancela/libera en `Dispose`, tratando la cancelación esperada sin un mensaje de error.
+- **Evidencia:** la prueba previa reprodujo tres consultas al autenticar y leer dos veces el usuario. Después se comprueba una sola consulta, validación independiente por petición, separación de usuarios, rechazo de accesos inválidos y de contexto incompatible con el principal, y respeto de la cancelación. Las pruebas del cliente comprueban la cancelación real de sus tres llamadas HTTP utilizadas por el componente.
+- **Verificación funcional:** Chrome navegó fuera del formulario durante una consulta y un alta pendientes; un proxy temporal registró la cancelación de ambas conexiones y la navegación continuó sin error del circuito. El proxy retuvo el POST antes de enviarlo a la API para no crear un envío de prueba. API y Commerce locales se reconstruyeron con los cambios, manteniendo PostgreSQL en 5432.
+- **Límites:** la cancelación no revierte operaciones ya confirmadas por la API. El contexto se reutiliza solo durante la petición; no se agrega caché entre peticiones ni se cambia el esquema de autenticación. La CI remota no se ejecutó. Revisión del equipo pendiente.

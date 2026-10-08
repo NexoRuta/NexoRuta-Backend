@@ -39,9 +39,9 @@ public sealed class EnviosController(
 
             return Created("/api/envios", created);
         }
-        catch (OperadorNoVinculadoException exception)
+        catch (OperadorNoDisponibleException exception)
         {
-            return Problem(exception.Message, statusCode: StatusCodes.Status403Forbidden);
+            return BadRequest(new { message = exception.Message });
         }
         catch (AccesoNoPermitidoException exception)
         {

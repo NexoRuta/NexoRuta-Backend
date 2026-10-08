@@ -70,10 +70,6 @@ public sealed class DatosInicialesSeeder(NexoRutaDbContext db, AccesoInicial acc
             db.Entry(cuentaComercio).Property(x => x.EsPropietario).CurrentValue = true;
         if (cuentaOperador is null)
             db.AccesosUsuario.Add(new AccesoUsuario(usuarioOperador.Id, operador.Id, null));
-        if (!await db.OperadoresComercios.AnyAsync(
-            x => x.OperadorId == operador.Id && x.ComercioId == comercio.Id, cancellationToken))
-            db.OperadoresComercios.Add(new OperadorComercio(operador.Id, comercio.Id));
-
         await db.SaveChangesAsync(cancellationToken);
     }
 }

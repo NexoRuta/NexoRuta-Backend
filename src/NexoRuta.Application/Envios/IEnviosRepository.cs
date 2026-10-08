@@ -15,7 +15,7 @@ public sealed record CrearEnvioCommand(
 public sealed record EnvioCreado(
     Guid Id,
     Guid OperadorId,
-    Guid OperadorComercioId,
+    Guid ComercioId,
     Guid CreadoPorUsuarioId,
     string UsuarioEmail,
     string OperadorNombre,
@@ -36,7 +36,7 @@ public sealed record BultoDetalle(
 public sealed record EnvioDetalle(
     Guid Id,
     Guid OperadorId,
-    Guid OperadorComercioId,
+    Guid ComercioId,
     Guid CreadoPorUsuarioId,
     string UsuarioEmail,
     string OperadorNombre,

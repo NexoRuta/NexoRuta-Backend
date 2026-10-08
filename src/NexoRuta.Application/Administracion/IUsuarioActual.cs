@@ -27,4 +27,4 @@ public sealed class AccesoActualNoDisponibleException() : Exception(
 
 public sealed class AccesoNoPermitidoException() : Exception("Solo los usuarios de comercio pueden dar de alta envíos.");
 
-public sealed class OperadorNoVinculadoException() : Exception("El operador seleccionado no trabaja con este comercio.");
+public sealed class OperadorNoDisponibleException() : Exception("El operador seleccionado no existe.");
