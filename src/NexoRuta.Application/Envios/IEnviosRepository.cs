@@ -2,15 +2,8 @@ using NexoRuta.Domain.Envios;
 
 namespace NexoRuta.Application.Envios;
 
-public sealed record DemoComercioContext(
-    Guid UsuarioId,
-    Guid OperadorId,
-    Guid OperadorComercioId,
-    string UsuarioEmail,
-    string OperadorNombre,
-    string ComercioNombre);
-
 public sealed record CrearEnvioCommand(
+    Guid OperadorId,
     string DestinatarioNombre,
     string Direccion,
     string CodigoBulto,
@@ -55,8 +48,6 @@ public sealed record EnvioDetalle(
 
 public interface IEnviosRepository
 {
-    Task<DemoComercioContext?> ObtenerContextoDemoAsync(CancellationToken cancellationToken = default);
-
     Task GuardarAsync(
         Envio envio,
         Destinatario destinatario,
@@ -65,6 +56,7 @@ public interface IEnviosRepository
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<EnvioDetalle>> ListarAsync(
-        DemoComercioContext contexto,
+        Guid? operadorId,
+        Guid? comercioId,
         CancellationToken cancellationToken = default);
 }

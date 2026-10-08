@@ -3,6 +3,7 @@ namespace NexoRuta.Domain.Envios;
 public sealed class Destinatario
 {
     public Guid Id { get; private set; }
+    // Aísla los datos del envío; el destinatario no tiene cuenta ni membresía en el operador.
     public Guid OperadorId { get; private set; }
     public string Nombre { get; private set; }
 

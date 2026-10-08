@@ -2,7 +2,7 @@
 
 Backend de la plataforma multioperador de distribución de última milla del Taller .NET 2026. Este repositorio usa .NET 10 y está organizado como base de un **monolito modular**, con un Worker independiente. La entrega de análisis y diseño del 04/10/2026 y el enunciado del laboratorio fundamentan las decisiones resumidas aquí.
 
-> **Estado actual:** están creados los proyectos Domain, Application, Infrastructure, Api y Worker y las entidades base de M01/M02 para el primer monitoreo. Los casos de uso, persistencia, autenticación, mensajería y aplicaciones web descritos en el diseño aún no están implementados en este repositorio. Una tecnología o un requisito documentado no debe confundirse con una funcionalidad terminada.
+> **Estado actual (08/10/2026):** están implementados los recortes del primer monitoreo: [CU-01 — datos iniciales y acceso directo](docs/cu/CU-01-comercios-usuarios.md), [CU-07 — alta individual de envíos](docs/cu/CU-07-alta-envios.md) y [CU-08 — bulto](docs/cu/CU-08-bultos.md), con EF Core/PostgreSQL. Autenticación, CRUD de administración, RLS y mensajería siguen pendientes.
 
 ## Estructura y estado verificado
 
@@ -12,8 +12,8 @@ src/
   NexoRuta.Api/             # API ASP.NET Core y OpenAPI de desarrollo
   NexoRuta.Worker/          # BackgroundService de plantilla
   NexoRuta.Domain/          # Modelos iniciales de administración y envíos
-  NexoRuta.Application/     # Capa/proyecto; casos de uso pendientes
-  NexoRuta.Infrastructure/  # Capa/proyecto; adaptadores pendientes
+  NexoRuta.Application/     # Casos de uso de envíos y contrato de usuario actual
+  NexoRuta.Infrastructure/  # EF Core, migraciones, inicialización y acceso directo
 tests/
   NexoRuta.UnitTests/
   NexoRuta.IntegrationTests/
@@ -21,7 +21,7 @@ tests/
 Dockerfile
 ```
 
-La solución compila con .NET 10. En la validación local del 7 de octubre de 2026, restore y build finalizaron sin advertencias ni errores; el comando de test terminó con código 0, pero los tres proyectos informaron que no había pruebas disponibles: **se ejecutaron cero pruebas**. No hay CI verificada. La API todavía no declara rutas de negocio (la raíz devuelve 404); el Worker únicamente registra actividad periódica. EF Core, RLS, autenticación, persistencia y mensajería son pendientes, no funciones comprobadas.
+La solución compila con .NET 10 e incluye pruebas unitarias e integración PostgreSQL de los casos de uso y la inicialización. El proyecto ArchitectureTests todavía no tiene pruebas. El workflow de backend compila y ejecuta las pruebas en PRs de `develop` hacia `main`; su presencia no acredita una ejecución remota. Worker registra actividad periódica y todavía no procesa envíos.
 
 ## Requisitos y comandos locales
 
@@ -36,16 +36,16 @@ dotnet build NexoRuta.sln --no-restore --nologo
 dotnet test NexoRuta.sln --no-build --no-restore --nologo
 ```
 
-Para ejecutar las plantillas localmente:
+Para ejecutar la API y el Worker localmente:
 
 ```bash
 dotnet run --project src/NexoRuta.Api/NexoRuta.Api.csproj --launch-profile http
 dotnet run --project src/NexoRuta.Worker/NexoRuta.Worker.csproj
 ```
 
-El perfil `http` de la API usa `http://localhost:5041`; OpenAPI de desarrollo está en `http://localhost:5041/openapi/v1.json`. No hay endpoints de negocio. El Worker no abre un puerto HTTP y registra un mensaje periódico. Ninguno requiere base de datos o RabbitMQ para este comportamiento de plantilla.
+El perfil `http` de la API usa `http://localhost:5041`; OpenAPI de desarrollo está en `http://localhost:5041/openapi/v1.json`. La API necesita PostgreSQL mediante `ConnectionStrings:Postgres`; al arrancar aplica migraciones e inicializa los datos configurados en `AccesoInicial`. `GET /api/accesos?tipo=Comercio|Operador` alimenta los selectores; `GET /api/usuarios/actual` y `GET/POST /api/envios` requieren una selección válida mediante `X-NexoRuta-Acceso`. Se separan ámbitos de operador/comercio, sin perfiles laborales ni autenticación por credenciales en este recorte. Liveness/readiness están en `/health/live` y `/health/ready`. El Worker no abre un puerto HTTP.
 
-El Compose local vive en el repositorio principal y publica la API en `http://localhost:5000` (puerto 8080 del contenedor). Que el contenedor arranque no demuestra que use PostgreSQL, Redis o RabbitMQ.
+El Compose local vive en el repositorio principal y publica la API en `http://localhost:5000` (puerto 8080 del contenedor). La inicialización puede repetirse sin duplicar los registros iniciales. Las pruebas de integración crean una base propia por escenario usando el servidor configurado en `NEXORUTA_TEST_POSTGRES`, y la eliminan al terminar; el rol de pruebas requiere permiso para crear bases. Redis y RabbitMQ aún no participan del flujo de envíos.
 
 ## Decisiones de arquitectura
 

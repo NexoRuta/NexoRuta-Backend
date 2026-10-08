@@ -52,15 +52,16 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
 
         modelBuilder.Entity<AccesoUsuario>(entity =>
         {
-            entity.ToTable("AccesosUsuario");
+            entity.ToTable("AccesosUsuario", table =>
+            {
+                table.HasCheckConstraint("CK_AccesosUsuario_Pertenencia", "(\"OperadorId\" IS NULL) <> (\"ComercioId\" IS NULL)");
+                table.HasCheckConstraint("CK_AccesosUsuario_Propietario", "NOT \"EsPropietario\" OR \"ComercioId\" IS NOT NULL");
+            });
             entity.HasKey(x => x.Id);
-            entity.HasIndex(x => new { x.UsuarioId, x.OperadorComercioId }).IsUnique();
+            entity.HasIndex(x => x.UsuarioId).IsUnique();
             entity.HasOne<Usuario>().WithMany().HasForeignKey(x => x.UsuarioId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<Operador>().WithMany().HasForeignKey(x => x.OperadorId).OnDelete(DeleteBehavior.Restrict);
-            entity.HasOne<OperadorComercio>().WithMany()
-                .HasForeignKey(x => new { x.OperadorId, x.OperadorComercioId })
-                .HasPrincipalKey(x => new { x.OperadorId, x.Id })
-                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Comercio>().WithMany().HasForeignKey(x => x.ComercioId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<Destinatario>(entity =>

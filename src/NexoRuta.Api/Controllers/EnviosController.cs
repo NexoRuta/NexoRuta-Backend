@@ -1,27 +1,26 @@
-using System.ComponentModel.DataAnnotations;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using NexoRuta.Api.Contracts.Envios;
+using NexoRuta.Application.Administracion;
 using NexoRuta.Application.Envios;
+using NexoRuta.Domain.Administracion;
 
 namespace NexoRuta.Api.Controllers;
 
 [ApiController]
+[Authorize]
 [Route("api")]
 public sealed class EnviosController(
     CrearEnvioUseCase crearEnvio,
-    ObtenerContextoDemoUseCase obtenerContexto,
     ListarEnviosUseCase listarEnvios) : ControllerBase
 {
-    [HttpGet("demo/context")]
-    [ProducesResponseType<DemoComercioContext>(StatusCodes.Status200OK)]
-    public async Task<IActionResult> GetContext(CancellationToken cancellationToken)
-    {
-        var context = await obtenerContexto.EjecutarAsync(cancellationToken);
-        return context is null ? NotFound(new { message = "No hay datos de demo inicializados." }) : Ok(context);
-    }
-
     [HttpPost("envios")]
+    [Authorize(Policy = nameof(TipoAccesoUsuario.Comercio))]
     [ProducesResponseType<EnvioCreado>(StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> CreateShipment(
         [FromBody] CrearEnvioRequest request,
         CancellationToken cancellationToken)
@@ -29,6 +28,7 @@ public sealed class EnviosController(
         try
         {
             var created = await crearEnvio.EjecutarAsync(new CrearEnvioCommand(
+                request.OperadorId!.Value,
                 request.DestinatarioNombre,
                 request.Direccion,
                 request.CodigoBulto,
@@ -39,9 +39,17 @@ public sealed class EnviosController(
 
             return Created("/api/envios", created);
         }
-        catch (InvalidOperationException)
+        catch (OperadorNoVinculadoException exception)
         {
-            return Problem("El usuario de demo no está vinculado a un comercio.", statusCode: StatusCodes.Status503ServiceUnavailable);
+            return Problem(exception.Message, statusCode: StatusCodes.Status403Forbidden);
+        }
+        catch (AccesoNoPermitidoException exception)
+        {
+            return Problem(exception.Message, statusCode: StatusCodes.Status403Forbidden);
+        }
+        catch (AccesoActualNoDisponibleException exception)
+        {
+            return Problem(exception.Message, statusCode: StatusCodes.Status503ServiceUnavailable);
         }
         catch (ArgumentException exception)
         {
@@ -50,15 +58,18 @@ public sealed class EnviosController(
     }
 
     [HttpGet("envios")]
+    [ProducesResponseType<IReadOnlyList<EnvioDetalle>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> GetShipments(CancellationToken cancellationToken)
-        => Ok(await listarEnvios.EjecutarAsync(cancellationToken));
+    {
+        try
+        {
+            return Ok(await listarEnvios.EjecutarAsync(cancellationToken));
+        }
+        catch (AccesoActualNoDisponibleException exception)
+        {
+            return Problem(exception.Message, statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
+    }
 }
-
-public sealed record CrearEnvioRequest(
-    [param: Required, StringLength(160)] string DestinatarioNombre,
-    [param: Required, StringLength(240)] string Direccion,
-    [param: Required, StringLength(80)] string CodigoBulto,
-    [param: Range(typeof(decimal), "0.01", "999999999")] decimal PesoGramos,
-    [param: Range(typeof(decimal), "0.01", "999999999")] decimal LargoCentimetros,
-    [param: Range(typeof(decimal), "0.01", "999999999")] decimal AnchoCentimetros,
-    [param: Range(typeof(decimal), "0.01", "999999999")] decimal AltoCentimetros);
