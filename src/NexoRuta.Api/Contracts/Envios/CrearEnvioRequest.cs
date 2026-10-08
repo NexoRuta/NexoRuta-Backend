@@ -4,6 +4,9 @@ namespace NexoRuta.Api.Contracts.Envios;
 
 public sealed class CrearEnvioRequest
 {
+    [Required(ErrorMessage = "Seleccioná un operador para el envío.")]
+    public Guid? OperadorId { get; set; }
+
     [Required, StringLength(160)]
     public string DestinatarioNombre { get; set; } = "";
 

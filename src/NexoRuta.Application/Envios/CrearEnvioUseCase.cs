@@ -1,26 +1,31 @@
+using NexoRuta.Application.Administracion;
 using NexoRuta.Domain.Envios;
 
 namespace NexoRuta.Application.Envios;
 
-public sealed class CrearEnvioUseCase(IEnviosRepository repository)
+public sealed class CrearEnvioUseCase(IEnviosRepository repository, IUsuarioActual usuarioActual, IAccesosUsuarioRepository cuentas)
 {
     public async Task<EnvioCreado> EjecutarAsync(
         CrearEnvioCommand command,
         CancellationToken cancellationToken = default)
     {
-        var contexto = await repository.ObtenerContextoDemoAsync(cancellationToken)
-            ?? throw new InvalidOperationException("No existe el usuario de demo vinculado a un comercio.");
+        var contexto = await usuarioActual.ObtenerAsync(cancellationToken);
+        var comercioId = contexto.ComercioId ?? throw new AccesoNoPermitidoException();
+        if (command.OperadorId == Guid.Empty)
+            throw new ArgumentException("Seleccioná un operador para el envío.", nameof(command.OperadorId));
+        var operador = await cuentas.ObtenerOperadorAsync(comercioId, command.OperadorId, cancellationToken)
+            ?? throw new OperadorNoVinculadoException();
 
-        var destinatario = new Destinatario(contexto.OperadorId, command.DestinatarioNombre);
-        var direccion = new Direccion(contexto.OperadorId, command.Direccion);
+        var destinatario = new Destinatario(operador.OperadorId, command.DestinatarioNombre);
+        var direccion = new Direccion(operador.OperadorId, command.Direccion);
         var envio = new Envio(
-            contexto.OperadorId,
-            contexto.OperadorComercioId,
+            operador.OperadorId,
+            operador.OperadorComercioId,
             contexto.UsuarioId,
             destinatario.Id,
             direccion.Id);
         var bulto = new Bulto(
-            contexto.OperadorId,
+            operador.OperadorId,
             envio.Id,
             command.CodigoBulto,
             command.PesoGramos,
@@ -36,8 +41,8 @@ public sealed class CrearEnvioUseCase(IEnviosRepository repository)
             envio.OperadorComercioId,
             envio.CreadoPorUsuarioId,
             contexto.UsuarioEmail,
-            contexto.OperadorNombre,
-            contexto.ComercioNombre,
+            operador.Nombre,
+            contexto.ComercioNombre!,
             bulto.Codigo,
             bulto.PesoGramos,
             bulto.LargoCentimetros,

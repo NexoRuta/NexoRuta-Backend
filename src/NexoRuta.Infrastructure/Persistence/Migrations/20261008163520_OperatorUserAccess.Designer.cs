@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using NexoRuta.Infrastructure.Persistence;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace NexoRuta.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(NexoRutaDbContext))]
-    partial class NexoRutaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261008163520_OperatorUserAccess")]
+    partial class OperatorUserAccess
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -28,13 +31,10 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<Guid?>("ComercioId")
+                    b.Property<Guid?>("OperadorComercioId")
                         .HasColumnType("uuid");
 
-                    b.Property<bool>("EsPropietario")
-                        .HasColumnType("boolean");
-
-                    b.Property<Guid?>("OperadorId")
+                    b.Property<Guid>("OperadorId")
                         .HasColumnType("uuid");
 
                     b.Property<Guid>("UsuarioId")
@@ -42,19 +42,16 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ComercioId");
+                    b.HasIndex("OperadorId", "OperadorComercioId");
 
-                    b.HasIndex("OperadorId");
-
-                    b.HasIndex("UsuarioId")
+                    b.HasIndex("UsuarioId", "OperadorComercioId")
                         .IsUnique();
 
-                    b.ToTable("AccesosUsuario", null, t =>
-                        {
-                            t.HasCheckConstraint("CK_AccesosUsuario_Pertenencia", "(\"OperadorId\" IS NULL) <> (\"ComercioId\" IS NULL)");
+                    b.HasIndex("UsuarioId", "OperadorId")
+                        .IsUnique()
+                        .HasFilter("\"OperadorComercioId\" IS NULL");
 
-                            t.HasCheckConstraint("CK_AccesosUsuario_Propietario", "NOT \"EsPropietario\" OR \"ComercioId\" IS NOT NULL");
-                        });
+                    b.ToTable("AccesosUsuario", (string)null);
                 });
 
             modelBuilder.Entity("NexoRuta.Domain.Administracion.Comercio", b =>
@@ -249,21 +246,23 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("NexoRuta.Domain.Administracion.AccesoUsuario", b =>
                 {
-                    b.HasOne("NexoRuta.Domain.Administracion.Comercio", null)
-                        .WithMany()
-                        .HasForeignKey("ComercioId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("NexoRuta.Domain.Administracion.Operador", null)
                         .WithMany()
                         .HasForeignKey("OperadorId")
-                        .OnDelete(DeleteBehavior.Restrict);
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
 
                     b.HasOne("NexoRuta.Domain.Administracion.Usuario", null)
                         .WithMany()
                         .HasForeignKey("UsuarioId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("NexoRuta.Domain.Administracion.OperadorComercio", null)
+                        .WithMany()
+                        .HasForeignKey("OperadorId", "OperadorComercioId")
+                        .HasPrincipalKey("OperadorId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("NexoRuta.Domain.Administracion.OperadorComercio", b =>
