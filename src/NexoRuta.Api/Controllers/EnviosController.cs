@@ -1,5 +1,5 @@
-using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Mvc;
+using NexoRuta.Api.Contracts.Envios;
 using NexoRuta.Application.Envios;
 
 namespace NexoRuta.Api.Controllers;
@@ -50,15 +50,7 @@ public sealed class EnviosController(
     }
 
     [HttpGet("envios")]
+    [ProducesResponseType<IReadOnlyList<EnvioDetalle>>(StatusCodes.Status200OK)]
     public async Task<IActionResult> GetShipments(CancellationToken cancellationToken)
         => Ok(await listarEnvios.EjecutarAsync(cancellationToken));
 }
-
-public sealed record CrearEnvioRequest(
-    [param: Required, StringLength(160)] string DestinatarioNombre,
-    [param: Required, StringLength(240)] string Direccion,
-    [param: Required, StringLength(80)] string CodigoBulto,
-    [param: Range(typeof(decimal), "0.01", "999999999")] decimal PesoGramos,
-    [param: Range(typeof(decimal), "0.01", "999999999")] decimal LargoCentimetros,
-    [param: Range(typeof(decimal), "0.01", "999999999")] decimal AnchoCentimetros,
-    [param: Range(typeof(decimal), "0.01", "999999999")] decimal AltoCentimetros);
