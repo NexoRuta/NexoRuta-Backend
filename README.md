@@ -4,6 +4,49 @@ Backend de la plataforma multioperador de distribución de última milla del Tal
 
 > **Estado actual:** están creados los proyectos Domain, Application, Infrastructure, Api y Worker y las entidades base de M01/M02 para el primer monitoreo. Los casos de uso, persistencia, autenticación, mensajería y aplicaciones web descritos en el diseño aún no están implementados en este repositorio. Una tecnología o un requisito documentado no debe confundirse con una funcionalidad terminada.
 
+## Estructura y estado verificado
+
+```text
+NexoRuta.sln
+src/
+  NexoRuta.Api/             # API ASP.NET Core y OpenAPI de desarrollo
+  NexoRuta.Worker/          # BackgroundService de plantilla
+  NexoRuta.Domain/          # Modelos iniciales de administración y envíos
+  NexoRuta.Application/     # Capa/proyecto; casos de uso pendientes
+  NexoRuta.Infrastructure/  # Capa/proyecto; adaptadores pendientes
+tests/
+  NexoRuta.UnitTests/
+  NexoRuta.IntegrationTests/
+  NexoRuta.ArchitectureTests/
+Dockerfile
+```
+
+La solución compila con .NET 10. En la validación local del 7 de octubre de 2026, restore y build finalizaron sin advertencias ni errores; el comando de test terminó con código 0, pero los tres proyectos informaron que no había pruebas disponibles: **se ejecutaron cero pruebas**. No hay CI verificada. La API todavía no declara rutas de negocio (la raíz devuelve 404); el Worker únicamente registra actividad periódica. EF Core, RLS, autenticación, persistencia y mensajería son pendientes, no funciones comprobadas.
+
+## Requisitos y comandos locales
+
+- .NET SDK 10. En el checkout combinado, `global.json` de la raíz selecciona SDK `10.0.401`; un clon aislado de este submódulo no incluye ese selector.
+- Docker Desktop/Engine solo para la imagen o el entorno Compose del repositorio principal. Este repositorio no contiene un `compose.yaml`.
+
+Desde la raíz de este repositorio:
+
+```bash
+dotnet restore NexoRuta.sln --nologo
+dotnet build NexoRuta.sln --no-restore --nologo
+dotnet test NexoRuta.sln --no-build --no-restore --nologo
+```
+
+Para ejecutar las plantillas localmente:
+
+```bash
+dotnet run --project src/NexoRuta.Api/NexoRuta.Api.csproj --launch-profile http
+dotnet run --project src/NexoRuta.Worker/NexoRuta.Worker.csproj
+```
+
+El perfil `http` de la API usa `http://localhost:5041`; OpenAPI de desarrollo está en `http://localhost:5041/openapi/v1.json`. No hay endpoints de negocio. El Worker no abre un puerto HTTP y registra un mensaje periódico. Ninguno requiere base de datos o RabbitMQ para este comportamiento de plantilla.
+
+El Compose local vive en el repositorio principal y publica la API en `http://localhost:5000` (puerto 8080 del contenedor). Que el contenedor arranque no demuestra que use PostgreSQL, Redis o RabbitMQ.
+
 ## Decisiones de arquitectura
 
 | Tema | Decisión o requisito vigente |
