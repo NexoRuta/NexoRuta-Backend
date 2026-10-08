@@ -17,10 +17,14 @@ public static class DependencyInjection
             ?? throw new InvalidOperationException("Falta ConnectionStrings:Postgres.");
 
         services.AddDbContext<NexoRutaDbContext>(options => options.UseNpgsql(connectionString));
+        var demoFlag = configuration["Demo:Enabled"];
+        var demoEnabled = false;
+        if (demoFlag is not null && !bool.TryParse(demoFlag, out demoEnabled))
+            throw new InvalidOperationException("Demo:Enabled must be true or false.");
         services.AddSingleton(new AccesoInicial(
-            ValorRequerido("AccesoInicial:UsuarioEmail"),
+            demoEnabled ? "demo@nexoruta.local" : ValorRequerido("AccesoInicial:UsuarioEmail"),
             ValorRequerido("AccesoInicial:OperadorNombre"),
-            ValorRequerido("AccesoInicial:ComercioNombre"),
+            demoEnabled ? "Comercio Demo" : ValorRequerido("AccesoInicial:ComercioNombre"),
             ValorRequerido("AccesoInicial:OperadorUsuarioEmail")));
         services.AddScoped<IAccesosUsuarioRepository, EfAccesosUsuarioRepository>();
         services.AddScoped<IEnviosRepository, EfEnviosRepository>();
