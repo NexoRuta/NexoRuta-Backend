@@ -30,19 +30,15 @@ public sealed class EfAccesosUsuarioRepository(NexoRutaDbContext db) : IAccesosU
     public Task<ContextoUsuario?> ObtenerAsync(Guid accesoId, CancellationToken cancellationToken = default)
         => Consulta(db.AccesosUsuario.Where(x => x.Id == accesoId)).SingleOrDefaultAsync(cancellationToken);
 
-    private IQueryable<OperadorDisponible> OperadoresDelComercio(IQueryable<OperadorComercio> relaciones) =>
-        from relacion in relaciones
-        join operador in db.Operadores on relacion.OperadorId equals operador.Id
-        orderby operador.Nombre
-        select new OperadorDisponible(operador.Id, relacion.Id, operador.Nombre);
-
     public async Task<IReadOnlyList<OperadorDisponible>> ListarOperadoresAsync(
-        Guid comercioId, CancellationToken cancellationToken = default)
-        => await OperadoresDelComercio(db.OperadoresComercios.Where(x => x.ComercioId == comercioId))
+        CancellationToken cancellationToken = default)
+        => await db.Operadores.OrderBy(x => x.Nombre)
+            .Select(x => new OperadorDisponible(x.Id, x.Nombre))
             .ToListAsync(cancellationToken);
 
     public Task<OperadorDisponible?> ObtenerOperadorAsync(
-        Guid comercioId, Guid operadorId, CancellationToken cancellationToken = default)
-        => OperadoresDelComercio(db.OperadoresComercios.Where(x => x.ComercioId == comercioId && x.OperadorId == operadorId))
+        Guid operadorId, CancellationToken cancellationToken = default)
+        => db.Operadores.Where(x => x.Id == operadorId)
+            .Select(x => new OperadorDisponible(x.Id, x.Nombre))
             .SingleOrDefaultAsync(cancellationToken);
 }

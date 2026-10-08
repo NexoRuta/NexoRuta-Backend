@@ -42,13 +42,13 @@ Cada CU tiene **un módulo principal**, aunque pueda consumir contratos de otro.
 
 ## Multitenancy y seguridad de datos
 
-ADR-002 adopta **PostgreSQL con base y tablas compartidas y Row-Level Security (RLS)**. El operador logístico es el tenant. Un comercio puede pertenecer a más de un operador, por lo que el acceso de comercio se evalúa dentro del vínculo operador–comercio. `Usuario` y `Comercio` pueden ser identidades globales; los datos operativos deben conservar el contexto del operador y, cuando aplique, del comercio.
+ADR-002 adopta **PostgreSQL con base y tablas compartidas y Row-Level Security (RLS)**. El operador logístico es el tenant. Un comercio puede enviar con cualquier operador registrado, sin un vínculo comercial previo. Cada envío conserva `OperadorId` y `ComercioId`; las cuentas pertenecen a un operador o a un comercio y las lecturas se filtran por esa organización. `Usuario` y `Comercio` pueden ser identidades globales; los datos operativos deben conservar el contexto del operador y, cuando aplique, del comercio.
 
-- Resolver operador y comercio desde identidad y relaciones validadas en el servidor. Un ID enviado por el cliente no concede acceso por sí solo.
+- Resolver el comercio desde la cuenta validada en el servidor y comprobar la existencia del operador elegido para cada envío. Un ID enviado por el cliente no concede acceso por sí solo.
 - Comprobar pertenencia al mismo operador al relacionar envío, destinatario, dirección, bulto, ruta u otros datos. Proteger **lecturas y escrituras**; el filtrado de API/EF no sustituye RLS.
 - El rol normal de la aplicación no debe ser dueño de tablas, superusuario ni tener `BYPASSRLS`. Usar credenciales separadas para migraciones. Establecer el contexto validado en la misma transacción; sin contexto, denegar acceso. Definir políticas `USING` y `WITH CHECK`, y `FORCE ROW LEVEL SECURITY` donde corresponda.
 - Aplicar el mismo criterio al Worker y al seguimiento público, resolviendo el contexto desde mensajes confiables o enlaces opacos validados. No exponer IDs internos como mecanismo de acceso público.
-- Probar con dos operadores y comercios relacionados: lectura, inserción, actualización, borrado, SQL directo, importaciones, Worker, acceso público y reutilización de conexiones. Ejecutar esas pruebas con el rol restringido real de la aplicación.
+- Probar con dos operadores y comercios con envíos: lectura, inserción, actualización, borrado, SQL directo, importaciones, Worker, acceso público y reutilización de conexiones. Ejecutar esas pruebas con el rol restringido real de la aplicación.
 
 El mecanismo concreto de contexto RLS, sus migraciones y las pruebas todavía deben implementarse. No se debe dar por conseguido el aislamiento por tener `OperadorId` en una clase.
 
