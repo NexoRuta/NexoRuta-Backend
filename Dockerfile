@@ -12,6 +12,13 @@ RUN dotnet publish "$PROJECT" -c Release -o /app/publish /p:UseAppHost=false
 
 FROM ${RUNTIME_IMAGE} AS final
 
+ARG RUNTIME_TOOLS=false
+RUN if [ "$RUNTIME_TOOLS" = "true" ]; then \
+        apt-get update \
+        && apt-get install -y --no-install-recommends curl libgssapi-krb5-2 \
+        && rm -rf /var/lib/apt/lists/*; \
+    fi
+
 WORKDIR /app
 COPY --from=build /app/publish .
 
