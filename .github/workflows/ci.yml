@@ -2,7 +2,7 @@ name: Backend CI
 
 on:
   pull_request:
-    types: [closed]
+    types: [opened, reopened, synchronize]
     branches: [main]
 
 permissions:
@@ -10,10 +10,6 @@ permissions:
 
 jobs:
   build-and-test:
-    if: >-
-      github.event.pull_request.merged == true &&
-      github.event.pull_request.head.ref == 'develop' &&
-      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -32,9 +28,17 @@ jobs:
     env:
       NEXORUTA_TEST_POSTGRES: Host=localhost;Port=5432;Database=nexoruta;Username=nexoruta;Password=nexoruta_dev
     steps:
+      - name: Validate PR source
+        env:
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPOSITORY: ${{ github.repository }}
+        run: |
+          if [[ "$PR_HEAD_REF" != "develop" || "$PR_HEAD_REPOSITORY" != "$BASE_REPOSITORY" ]]; then
+            echo "This workflow only accepts PRs from develop in the same repository." >&2
+            exit 1
+          fi
       - uses: actions/checkout@v4
-        with:
-          ref: main
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
