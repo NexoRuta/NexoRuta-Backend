@@ -1,9 +1,43 @@
-# Shipment boundary refactor
+# Backend refactor: actual branch scope
 
-Application results no longer define the HTTP response. The API explicitly flattens
-`OrigenEnvio` and package data into the existing public shipment schemas. Operator
-remains the tenant and commerce remains global. No domain entity, EF model,
-migration, seeder, FK, or transaction boundary changed.
+`feature/refactor-envios` targets `develop` according to the local branch history.
+It includes structural changes **and** changes to internal contracts, validation,
+bootstrap and runtime dependencies. It is not a file-move-only refactor.
+
+## Structural work: REF-01 to REF-04
+
+- One main public Application type per file.
+- Administration and shipment files grouped by functional module and responsibility.
+- Namespaces aligned with folders and consumers updated.
+- Existing types retained without duplicate declarations.
+
+## Additional work already present in the branch
+
+| Area | Actual change |
+| --- | --- |
+| Application results | `EnvioCreado` now groups `Id`, `OrigenEnvio` and `BultoDetalle`; `EnvioDetalle` groups provenance in `OrigenEnvio` and retains its package list. These are changed constructors and property shapes, not just file moves. |
+| HTTP boundary | API-owned response records explicitly flatten Application results into the existing JSON property names and types. |
+| Context validation | `ContextoUsuario.RequerirComercio()` checks the commerce ID and name before shipment persistence; tests cover incomplete contexts and invalid IDs. |
+| Decimal validation | `ParseLimitsInInvariantCulture = true` makes all four decimal bounds independent of process culture. |
+| REF-05 bootstrap | `AccesoInicial` and `DatosInicialesSeeder` remain; configuration is explicit and required. Demo flag branches and historical name-based transformations were removed without deleting existing records. |
+| EST-03 runtime | Infrastructure explicitly references `Microsoft.EntityFrameworkCore.Relational` 10.0.12; Worker resolves the same EF runtime version. Npgsql provider 10.0.3 is unchanged. |
+
+Internal Application contracts changed; **source or binary compatibility with
+their former constructors and properties is not promised**. JSON compatibility
+at the existing shipment endpoints is a separate boundary, preserved by explicit
+mapping. Decimal validation is an intentional behavior correction, so byte-for-byte
+OpenAPI compatibility is not claimed.
+
+During the original shipment boundary refactor, the seeder was left unchanged.
+REF-05 subsequently changed its configuration and removed legacy Demo conversion.
+Across the accumulated backend changes, Domain entities, EF model, migrations,
+FKs, transaction boundaries and server routes remain unchanged. Operator remains
+the tenant and commerce remains global.
+
+The existing backend commits `269a74f` and `59a60b8` contain these accumulated
+changes. EST-03 adds the runtime reference; EST-05 documents their actual scope
+without rewriting history. Frontend changes are separate repository work and
+must not be silently included in the backend PR.
 
 ## Trace and responsibilities
 
@@ -27,8 +61,9 @@ that provenance. One shared grouping removes that duplication; named arguments
 remove positional ID/decimal ambiguity. API response DTOs are necessary public
 boundaries, not intermediate copies introduced between identical DTOs.
 
-`AccesoUsuario` keeps its validated constructor because changing it would require
-touching the explicitly frozen seeder. Its mutually exclusive organizations,
+`AccesoUsuario` keeps its existing validated constructor. The original boundary
+refactor did not change it or the seeder; REF-05 later changed bootstrap only.
+Its mutually exclusive organizations,
 nonempty IDs and commerce-only ownership remain domain invariants. Tests explicitly
 distinguish access IDs from a shared person ID. No uniqueness invariant was added
 to the domain.
@@ -37,10 +72,10 @@ to the domain.
 
 - Create/list JSON property names, types, response schema names, status codes and
   Location remain unchanged. No server route changed.
-- Decimal annotations now use `ParseLimitsInInvariantCulture = true`. The baseline
-  live OpenAPI incorrectly emitted minimum `1`; the only four schema changes are
-  those minima becoming `0.01`, matching the already-published frontend bounds.
-  Claiming byte-for-byte OpenAPI equality would be incorrect.
+- Decimal annotations now use `ParseLimitsInInvariantCulture = true`. The
+  intended lower bound is `0.01`, regardless of process culture; backend tests
+  check all four properties under `es-UY` and `en-US`. This can change generated
+  OpenAPI numeric bounds. Claiming byte-for-byte OpenAPI equality would be incorrect.
 - A pre-existing cross-repository mismatch made Commerce request `/api/operadores`
   while backend published `/api/comercio/operadores`. The client, snapshot and route
   checks now match the existing backend API, without changing operator eligibility.
@@ -50,8 +85,24 @@ to the domain.
   recipient or address. Architecture tests enforce inner-layer independence and
   API-owned shipment responses rather than retesting individual mapping assignments.
 
-Exact commands, counts, failures and HTTP evidence are recorded in
-`odd/tasks/refactor-shipment-boundaries.md` (locally ignored, not committed).
+## Reproducible checks and retained baseline
+
+The versioned [backend README](../../README.md#pruebas-postgresql-destino-aislado-obligatorio)
+contains the commands, PostgreSQL isolation requirements and the retained EST-04
+baseline: restore succeeded; build had zero errors and warnings; unit tests 19/19,
+architecture tests 3/3 and integration tests 42/42. Configuration/DI tests 17/17
+are included in integration and were also run separately; do not add them twice.
+
+PostgreSQL scenarios use temporary `nexoruta_test_<UUIDv7>` databases and call
+`EnsureDeletedAsync()` during disposal. Set `NEXORUTA_TEST_POSTGRES` only for the
+test process, verify the isolated PostgreSQL 18 identity before running, and
+never use a shared persistent instance. The current fallback targets loopback
+port 5432 without an isolation check; on Windows it may reach another server.
+EST-02 to EST-04 used exclusive temporary PostgreSQL 18 containers.
+
+EST-05 changes documentation only and did not rerun technical suites. These
+results are local historical evidence, not remote CI proof. No ignored local
+task file is required to understand the scope or reproduce the checks.
 
 ## Separate functional task: D01 eligibility and contextual authorization
 
