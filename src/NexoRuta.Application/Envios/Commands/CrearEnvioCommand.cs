@@ -1,4 +1,4 @@
-namespace NexoRuta.Application.Envios;
+namespace NexoRuta.Application.Envios.Commands;
 
 public sealed record CrearEnvioCommand(
     Guid OperadorId,

@@ -1,8 +1,12 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
-using NexoRuta.Application.Administracion;
-using NexoRuta.Application.Envios;
+using NexoRuta.Application.Administracion.Context;
+using NexoRuta.Application.Administracion.Exceptions;
+using NexoRuta.Application.Administracion.Interfaces;
+using NexoRuta.Application.Envios.Commands;
+using NexoRuta.Application.Envios.Results;
+using NexoRuta.Application.Envios.UseCases;
 using NexoRuta.Domain.Administracion;
 using NexoRuta.Domain.Envios;
 using NexoRuta.Infrastructure.Administracion;
@@ -168,6 +172,31 @@ public sealed class EnvioPostgresRoundTripTests : IAsyncLifetime
         Assert.Equal(1, await db.Comercios.CountAsync());
         Assert.Equal(1, await db.Operadores.CountAsync());
         Assert.Equal(2, await db.AccesosUsuario.CountAsync());
+    }
+
+    [Fact]
+    public async Task Inicializacion_NoConvierteDatosHistoricosPorSusNombres()
+    {
+        var inicial = Datos();
+        await using var db = new NexoRutaDbContext(options);
+        var usuario = new Usuario("demo@nexoruta.local");
+        var comercio = new Comercio("Comercio Demo");
+        var operador = new Operador("Operador Demo");
+        var acceso = new AccesoUsuario(usuario.Id, null, comercio.Id, true);
+        db.AddRange(usuario, comercio, operador, acceso);
+        await db.SaveChangesAsync();
+
+        await new DatosInicialesSeeder(db, inicial).SeedAsync();
+        db.ChangeTracker.Clear();
+
+        Assert.Equal("demo@nexoruta.local", (await db.Usuarios.SingleAsync(x => x.Id == usuario.Id)).Email);
+        Assert.Equal("Comercio Demo", (await db.Comercios.SingleAsync(x => x.Id == comercio.Id)).Nombre);
+        Assert.Equal("Operador Demo", (await db.Operadores.SingleAsync(x => x.Id == operador.Id)).Nombre);
+        Assert.Equal(comercio.Id, (await db.AccesosUsuario.SingleAsync(x => x.Id == acceso.Id)).ComercioId);
+        var configurada = await Cuenta(db, inicial.UsuarioEmail, TipoAccesoUsuario.Comercio);
+        Assert.NotEqual(usuario.Id, configurada.UsuarioId);
+        Assert.NotEqual(comercio.Id, configurada.ComercioId);
+        Assert.NotEqual(operador.Id, (await Cuenta(db, inicial.OperadorUsuarioEmail, TipoAccesoUsuario.Operador)).OperadorId);
     }
 
     [Fact]

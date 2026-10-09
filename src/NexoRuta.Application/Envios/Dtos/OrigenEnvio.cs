@@ -1,4 +1,4 @@
-namespace NexoRuta.Application.Envios;
+namespace NexoRuta.Application.Envios.Dtos;
 
 public sealed record OrigenEnvio(
     Guid OperadorId,

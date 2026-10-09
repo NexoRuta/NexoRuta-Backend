@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using NexoRuta.Application.Envios;
+using NexoRuta.Application.Envios.Dtos;
+using NexoRuta.Application.Envios.Repositories;
+using NexoRuta.Application.Envios.Results;
 using NexoRuta.Domain.Envios;
 
 namespace NexoRuta.Infrastructure.Persistence;

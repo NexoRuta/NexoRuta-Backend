@@ -1,6 +1,8 @@
-using NexoRuta.Application.Administracion;
+using NexoRuta.Application.Administracion.Interfaces;
+using NexoRuta.Application.Envios.Repositories;
+using NexoRuta.Application.Envios.Results;
 
-namespace NexoRuta.Application.Envios;
+namespace NexoRuta.Application.Envios.UseCases;
 
 public sealed class ListarEnviosUseCase(IEnviosRepository repository, IUsuarioActual usuarioActual)
 {

@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using NexoRuta.Api.Controllers;
-using NexoRuta.Application.Envios;
+using NexoRuta.Application.Envios.UseCases;
 using NexoRuta.Domain.Envios;
 
 namespace NexoRuta.ArchitectureTests;

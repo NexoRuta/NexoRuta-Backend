@@ -1,7 +1,13 @@
-using NexoRuta.Application.Administracion;
+using NexoRuta.Application.Administracion.Exceptions;
+using NexoRuta.Application.Administracion.Interfaces;
+using NexoRuta.Application.Administracion.Repositories;
+using NexoRuta.Application.Envios.Commands;
+using NexoRuta.Application.Envios.Dtos;
+using NexoRuta.Application.Envios.Repositories;
+using NexoRuta.Application.Envios.Results;
 using NexoRuta.Domain.Envios;
 
-namespace NexoRuta.Application.Envios;
+namespace NexoRuta.Application.Envios.UseCases;
 
 public sealed class CrearEnvioUseCase(IEnviosRepository repository, IUsuarioActual usuarioActual, IAccesosUsuarioRepository cuentas)
 {

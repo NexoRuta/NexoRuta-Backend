@@ -71,7 +71,7 @@ Before implementing the next functional change:
 3. At the operator catalog and before creation, enforce the approved eligibility
    rule. Add allow/deny, inactive/revoked relationship and multi-operator tests only
    after that rule is approved. Do not infer membership from an existing shipment.
-4. Replace demo account selection in `AccesoSeleccionadoHandler` / `UsuarioActualHttp`
+4. Replace temporary account selection in `AccesoSeleccionadoHandler` / `UsuarioActualHttp`
    and frontend login with verified Identity membership. Never trust the submitted
    access header or an operator ID as authorization.
 5. Apply contextual role policies at create/list and catalog boundaries. Validate

@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using NexoRuta.Application.Administracion;
+using NexoRuta.Application.Administracion.Context;
+using NexoRuta.Application.Administracion.Exceptions;
+using NexoRuta.Application.Administracion.Interfaces;
 
 namespace NexoRuta.Api.Controllers;
 

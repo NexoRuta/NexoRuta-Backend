@@ -1,4 +1,5 @@
-namespace NexoRuta.Application.Envios;
+using NexoRuta.Application.Envios.Dtos;
+namespace NexoRuta.Application.Envios.Results;
 
 public sealed record EnvioDetalle(
     Guid Id,

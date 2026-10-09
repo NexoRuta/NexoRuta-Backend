@@ -2,7 +2,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.EntityFrameworkCore;
 using NexoRuta.Api;
 using NexoRuta.Api.Seguridad;
-using NexoRuta.Application.Administracion;
+using NexoRuta.Application.Administracion.Interfaces;
 using NexoRuta.Domain.Administracion;
 using NexoRuta.Infrastructure.Persistence;
 using OpenTelemetry.Metrics;

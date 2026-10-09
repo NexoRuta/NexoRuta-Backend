@@ -29,32 +29,6 @@ public sealed class DatosInicialesSeeder(NexoRutaDbContext db, AccesoInicial acc
             ? await db.Operadores.SingleAsync(x => x.Id == operadorId, cancellationToken)
             : await db.Operadores.SingleOrDefaultAsync(x => x.Nombre == accesoInicial.OperadorNombre, cancellationToken);
 
-        // Reutilizar el alta inicial anterior conserva los IDs y los envíos ya registrados.
-        if (usuarioComercio is null && comercio is null)
-        {
-            var anterior = await (
-                from cuenta in db.AccesosUsuario
-                join usuario in db.Usuarios on cuenta.UsuarioId equals usuario.Id
-                join cliente in db.Comercios on cuenta.ComercioId equals (Guid?)cliente.Id
-                where usuario.Email == "demo@nexoruta.local" && cliente.Nombre == "Comercio Demo"
-                select new { Usuario = usuario, Comercio = cliente, Cuenta = cuenta })
-                .SingleOrDefaultAsync(cancellationToken);
-            if (anterior is not null)
-            {
-                usuarioComercio = anterior.Usuario;
-                comercio = anterior.Comercio;
-                cuentaComercio = anterior.Cuenta;
-                db.Entry(usuarioComercio).Property(x => x.Email).CurrentValue = accesoInicial.UsuarioEmail;
-                db.Entry(comercio).Property(x => x.Nombre).CurrentValue = accesoInicial.ComercioNombre;
-                if (operador is null)
-                {
-                    operador = await db.Operadores.SingleOrDefaultAsync(x => x.Nombre == "Operador Demo", cancellationToken);
-                    if (operador is not null)
-                        db.Entry(operador).Property(x => x.Nombre).CurrentValue = accesoInicial.OperadorNombre;
-                }
-            }
-        }
-
         if (operador is null)
             db.Operadores.Add(operador = new Operador(accesoInicial.OperadorNombre));
         if (comercio is null)

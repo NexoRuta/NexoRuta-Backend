@@ -15,7 +15,7 @@ public sealed record EnvioCreado(
     decimal AnchoCentimetros,
     decimal AltoCentimetros)
 {
-    public static EnvioCreado Desde(Application.Envios.EnvioCreado envio) => new(
+    public static EnvioCreado Desde(Application.Envios.Results.EnvioCreado envio) => new(
         Id: envio.Id,
         OperadorId: envio.Origen.OperadorId,
         ComercioId: envio.Origen.ComercioId,
@@ -43,7 +43,7 @@ public sealed record EnvioDetalle(
     string Estado,
     IReadOnlyList<BultoDetalle> Bultos)
 {
-    public static EnvioDetalle Desde(Application.Envios.EnvioDetalle envio) => new(
+    public static EnvioDetalle Desde(Application.Envios.Results.EnvioDetalle envio) => new(
         Id: envio.Id,
         OperadorId: envio.Origen.OperadorId,
         ComercioId: envio.Origen.ComercioId,

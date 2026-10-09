@@ -16,7 +16,7 @@ La cuenta inicial del comercio tiene `EsPropietario = true` y representa al due�
 
 ## Inicialización e ingreso
 
-La API aplica migraciones y `DatosInicialesSeeder` inicializa un operador, un comercio, la cuenta del dueño y una cuenta del operador. El seed conserva las identidades y los envíos existentes y no duplica datos al repetirse. Su configuración está en `AccesoInicial`: `UsuarioEmail`, `OperadorUsuarioEmail`, `OperadorNombre` y `ComercioNombre`.
+La API aplica migraciones y `DatosInicialesSeeder` inicializa un operador, un comercio, la cuenta del dueño y una cuenta del operador. El seed conserva las identidades y los envíos existentes y no duplica datos al repetirse. Su configuración está en `AccesoInicial`: `UsuarioEmail`, `OperadorUsuarioEmail`, `OperadorNombre` y `ComercioNombre`. Los cuatro valores son explícitos y obligatorios; no existe una bandera de modo Demo. Los registros históricos no se convierten ni renombran automáticamente: se reutilizan solo por las identidades configuradas y sus cuentas existentes.
 
 Las cuentas iniciales son `usuario@nexoruta.local` (dueño del comercio) y `operador@nexoruta.local` (usuario interno del operador). Las listas de `/ingresar` se leen de PostgreSQL; la entrada al portal muestra el usuario y comercio, sin seleccionar un operador. El servidor comprueba el tipo de cuenta antes de emitir la cookie. Cada aplicación usa cookies de sesión y antiforgery independientes y ofrece `POST /salir` para cambiar de cuenta.
 

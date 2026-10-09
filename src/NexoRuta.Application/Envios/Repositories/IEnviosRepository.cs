@@ -1,6 +1,7 @@
+using NexoRuta.Application.Envios.Results;
 using NexoRuta.Domain.Envios;
 
-namespace NexoRuta.Application.Envios;
+namespace NexoRuta.Application.Envios.Repositories;
 
 public interface IEnviosRepository
 {
