@@ -4,6 +4,8 @@ using NexoRuta.Api.Contracts.Envios;
 using NexoRuta.Application.Administracion;
 using NexoRuta.Application.Envios;
 using NexoRuta.Domain.Administracion;
+using EnvioCreado = NexoRuta.Api.Contracts.Envios.EnvioCreado;
+using EnvioDetalle = NexoRuta.Api.Contracts.Envios.EnvioDetalle;
 
 namespace NexoRuta.Api.Controllers;
 
@@ -28,16 +30,16 @@ public sealed class EnviosController(
         try
         {
             var created = await crearEnvio.EjecutarAsync(new CrearEnvioCommand(
-                request.OperadorId!.Value,
-                request.DestinatarioNombre,
-                request.Direccion,
-                request.CodigoBulto,
-                request.PesoGramos,
-                request.LargoCentimetros,
-                request.AnchoCentimetros,
-                request.AltoCentimetros), cancellationToken);
+                OperadorId: request.OperadorId!.Value,
+                DestinatarioNombre: request.DestinatarioNombre,
+                Direccion: request.Direccion,
+                CodigoBulto: request.CodigoBulto,
+                PesoGramos: request.PesoGramos,
+                LargoCentimetros: request.LargoCentimetros,
+                AnchoCentimetros: request.AnchoCentimetros,
+                AltoCentimetros: request.AltoCentimetros), cancellationToken);
 
-            return Created("/api/envios", created);
+            return Created("/api/envios", EnvioCreado.Desde(created));
         }
         catch (OperadorNoDisponibleException exception)
         {
@@ -65,7 +67,8 @@ public sealed class EnviosController(
     {
         try
         {
-            return Ok(await listarEnvios.EjecutarAsync(cancellationToken));
+            var envios = await listarEnvios.EjecutarAsync(cancellationToken);
+            return Ok(envios.Select(EnvioDetalle.Desde).ToArray());
         }
         catch (AccesoActualNoDisponibleException exception)
         {

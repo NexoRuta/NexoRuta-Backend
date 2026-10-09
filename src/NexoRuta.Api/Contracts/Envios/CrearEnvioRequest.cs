@@ -16,15 +16,15 @@ public sealed class CrearEnvioRequest
     [Required, StringLength(80)]
     public string CodigoBulto { get; set; } = "";
 
-    [Required, Range(typeof(decimal), "0.01", "999999999")]
+    [Required, Range(typeof(decimal), "0.01", "999999999", ParseLimitsInInvariantCulture = true)]
     public decimal PesoGramos { get; set; }
 
-    [Required, Range(typeof(decimal), "0.01", "999999999")]
+    [Required, Range(typeof(decimal), "0.01", "999999999", ParseLimitsInInvariantCulture = true)]
     public decimal LargoCentimetros { get; set; }
 
-    [Required, Range(typeof(decimal), "0.01", "999999999")]
+    [Required, Range(typeof(decimal), "0.01", "999999999", ParseLimitsInInvariantCulture = true)]
     public decimal AnchoCentimetros { get; set; }
 
-    [Required, Range(typeof(decimal), "0.01", "999999999")]
+    [Required, Range(typeof(decimal), "0.01", "999999999", ParseLimitsInInvariantCulture = true)]
     public decimal AltoCentimetros { get; set; }
 }

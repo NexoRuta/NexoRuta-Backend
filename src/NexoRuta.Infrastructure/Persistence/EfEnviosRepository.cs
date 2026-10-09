@@ -53,21 +53,23 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
         var packages = await db.Bultos
             .Where(x => ids.Contains(x.EnvioId))
             .Select(x => new { x.EnvioId, Detail = new BultoDetalle(
-                x.Codigo, x.PesoGramos, x.LargoCentimetros, x.AnchoCentimetros, x.AltoCentimetros) })
+                Codigo: x.Codigo, PesoGramos: x.PesoGramos, LargoCentimetros: x.LargoCentimetros,
+                AnchoCentimetros: x.AnchoCentimetros, AltoCentimetros: x.AltoCentimetros) })
             .ToListAsync(cancellationToken);
         var packagesByShipment = packages.ToLookup(x => x.EnvioId, x => x.Detail);
 
         return shipments.Select(x => new EnvioDetalle(
-            x.Id,
-            x.OperadorId,
-            x.ComercioId,
-            x.CreadoPorUsuarioId,
-            x.UsuarioEmail,
-            x.OperadorNombre,
-            x.ComercioNombre,
-            x.DestinatarioNombre,
-            x.Direccion,
-            x.Estado,
-            packagesByShipment[x.Id].ToArray())).ToArray();
+            Id: x.Id,
+            Origen: new OrigenEnvio(
+                OperadorId: x.OperadorId,
+                ComercioId: x.ComercioId,
+                CreadoPorUsuarioId: x.CreadoPorUsuarioId,
+                UsuarioEmail: x.UsuarioEmail,
+                OperadorNombre: x.OperadorNombre,
+                ComercioNombre: x.ComercioNombre),
+            DestinatarioNombre: x.DestinatarioNombre,
+            Direccion: x.Direccion,
+            Estado: x.Estado,
+            Bultos: packagesByShipment[x.Id].ToArray())).ToArray();
     }
 }

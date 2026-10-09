@@ -15,6 +15,15 @@ public sealed record ContextoUsuario(
     public string Tipo => ComercioId.HasValue
         ? nameof(TipoAccesoUsuario.Comercio)
         : nameof(TipoAccesoUsuario.Operador);
+
+    public (Guid Id, string Nombre) RequerirComercio()
+    {
+        var id = ComercioId ?? throw new AccesoNoPermitidoException();
+        if (id == Guid.Empty || string.IsNullOrWhiteSpace(ComercioNombre))
+            throw new AccesoActualNoDisponibleException();
+
+        return (id, ComercioNombre);
+    }
 }
 
 public interface IUsuarioActual

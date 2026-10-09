@@ -485,3 +485,4 @@ $RECYCLE.BIN/
 !/scripts/release/
 !/scripts/release/deploy.sh
 !/scripts/release/test-deploy.sh
+odd/

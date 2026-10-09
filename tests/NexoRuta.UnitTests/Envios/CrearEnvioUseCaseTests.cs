@@ -16,12 +16,12 @@ public sealed class CrearEnvioUseCaseTests
 
         var result = await useCase.EjecutarAsync(Comando(operador.OperadorId));
 
-        Assert.Equal(operador.OperadorId, result.OperadorId);
-        Assert.Equal(cuenta.ComercioId, result.ComercioId);
+        Assert.Equal(operador.OperadorId, result.Origen.OperadorId);
+        Assert.Equal(cuenta.ComercioId, result.Origen.ComercioId);
         Assert.Equal(cuenta.ComercioId, repository.Guardado!.Value.Envio.ComercioId);
-        Assert.Equal(cuenta.UsuarioId, result.CreadoPorUsuarioId);
-        Assert.Equal(operador.Nombre, result.OperadorNombre);
-        Assert.Equal(cuenta.ComercioNombre, result.ComercioNombre);
+        Assert.Equal(cuenta.UsuarioId, result.Origen.CreadoPorUsuarioId);
+        Assert.Equal(operador.Nombre, result.Origen.OperadorNombre);
+        Assert.Equal(cuenta.ComercioNombre, result.Origen.ComercioNombre);
         Assert.Equal(result.Id, repository.Guardado!.Value.Envio.Id);
         Assert.Equal(1250m, repository.Guardado.Value.Bulto.PesoGramos);
         Assert.Null(cuenta.OperadorId);
@@ -101,6 +101,34 @@ public sealed class CrearEnvioUseCaseTests
         Assert.Equal((cuenta.OperadorId, cuenta.ComercioId), repository.Filtro);
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    public async Task Crear_ContextoDeComercioIncompletoNoPersiste(string? nombre)
+    {
+        var cuenta = CuentaComercio() with { ComercioNombre = nombre };
+        var operador = new OperadorDisponible(Guid.CreateVersion7(), "Operador");
+        var repository = new FakeEnviosRepository();
+
+        await Assert.ThrowsAsync<AccesoActualNoDisponibleException>(() =>
+            new CrearEnvioUseCase(repository, new UsuarioActual(cuenta), new Cuentas(operador))
+                .EjecutarAsync(Comando(operador.OperadorId)));
+
+        Assert.Null(repository.Guardado);
+    }
+
+    [Fact]
+    public async Task Crear_ComercioVacioNoPersiste()
+    {
+        var cuenta = CuentaComercio() with { ComercioId = Guid.Empty };
+        var repository = new FakeEnviosRepository();
+        await Assert.ThrowsAsync<AccesoActualNoDisponibleException>(() =>
+            new CrearEnvioUseCase(repository, new UsuarioActual(cuenta), new Cuentas(null))
+                .EjecutarAsync(Comando(Guid.CreateVersion7())));
+        Assert.Null(repository.Guardado);
+    }
+
     private static ContextoUsuario CuentaComercio()
         => new(Guid.CreateVersion7(), Guid.CreateVersion7(), null, Guid.CreateVersion7(),
             "dueno@comercio.local", null, "Comercio Centro", true);
@@ -110,7 +138,8 @@ public sealed class CrearEnvioUseCaseTests
             "operador@empresa.local", "Distribución Sur", null, false);
 
     private static CrearEnvioCommand Comando(Guid operadorId)
-        => new(operadorId, "Ana", "18 de Julio 123", "B-001", 1250m, 30m, 20m, 10m);
+        => new(OperadorId: operadorId, DestinatarioNombre: "Ana", Direccion: "18 de Julio 123",
+            CodigoBulto: "B-001", PesoGramos: 1250m, LargoCentimetros: 30m, AnchoCentimetros: 20m, AltoCentimetros: 10m);
 
     private sealed class UsuarioActual(ContextoUsuario cuenta) : IUsuarioActual
     {

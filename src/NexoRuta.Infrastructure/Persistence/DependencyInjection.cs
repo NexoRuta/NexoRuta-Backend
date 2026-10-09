@@ -21,16 +21,19 @@ public static class DependencyInjection
         var demoEnabled = false;
         if (demoFlag is not null && !bool.TryParse(demoFlag, out demoEnabled))
             throw new InvalidOperationException("Demo:Enabled must be true or false.");
+
         services.AddSingleton(new AccesoInicial(
             demoEnabled ? "demo@nexoruta.local" : ValorRequerido("AccesoInicial:UsuarioEmail"),
             ValorRequerido("AccesoInicial:OperadorNombre"),
             demoEnabled ? "Comercio Demo" : ValorRequerido("AccesoInicial:ComercioNombre"),
             ValorRequerido("AccesoInicial:OperadorUsuarioEmail")));
+
         services.AddScoped<IAccesosUsuarioRepository, EfAccesosUsuarioRepository>();
         services.AddScoped<IEnviosRepository, EfEnviosRepository>();
         services.AddScoped<DatosInicialesSeeder>();
         services.AddScoped<CrearEnvioUseCase>();
         services.AddScoped<ListarEnviosUseCase>();
+
         return services;
 
         string ValorRequerido(string clave)
