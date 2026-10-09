@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using NexoRuta.Api.Seguridad;
 using NexoRuta.Application.Administracion;
+using NexoRuta.Application.Administracion.Excepciones;
 using NexoRuta.Domain.Administracion;
 
 namespace NexoRuta.IntegrationTests.Seguridad;
@@ -142,12 +143,6 @@ public sealed class UsuarioActualHttpTests
         }
 
         public Task<IReadOnlyList<ContextoUsuario>> ListarAsync(TipoAccesoUsuario tipo, CancellationToken cancellationToken = default)
-            => throw new NotSupportedException();
-
-        public Task<IReadOnlyList<OperadorDisponible>> ListarOperadoresAsync(CancellationToken cancellationToken = default)
-            => throw new NotSupportedException();
-
-        public Task<OperadorDisponible?> ObtenerOperadorAsync(Guid operadorId, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
     }
 }

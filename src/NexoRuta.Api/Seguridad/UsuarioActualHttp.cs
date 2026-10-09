@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using NexoRuta.Application.Administracion;
+using NexoRuta.Application.Administracion.Excepciones;
 
 namespace NexoRuta.Api.Seguridad;
 

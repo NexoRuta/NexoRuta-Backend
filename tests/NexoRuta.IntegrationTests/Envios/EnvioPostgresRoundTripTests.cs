@@ -1,7 +1,10 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using NexoRuta.Application.Administracion;
+using NexoRuta.Application.Administracion.Excepciones;
 using NexoRuta.Application.Envios;
 using NexoRuta.Domain.Administracion;
 using NexoRuta.Domain.Envios;
@@ -30,6 +33,56 @@ public sealed class EnvioPostgresRoundTripTests : IAsyncLifetime
     {
         await using var db = new NexoRutaDbContext(options);
         await db.Database.EnsureDeletedAsync();
+    }
+
+    [Fact]
+    public async Task Repositorios_ConsultanEmpresasSinUsuariosNiEnvios()
+    {
+        using var servicios = Servicios();
+        using var scope = servicios.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<NexoRutaDbContext>();
+        var operadorAlfa = new Operador("Alfa repartos");
+        var operadorBeta = new Operador("Beta repartos");
+        var comercioAlfa = new Comercio("Alfa ventas");
+        var comercioBeta = new Comercio("Beta ventas");
+        db.AddRange(operadorBeta, operadorAlfa, comercioBeta, comercioAlfa);
+        await db.SaveChangesAsync();
+
+        var operadores = scope.ServiceProvider.GetRequiredService<IOperadoresRepository>();
+        var comercios = scope.ServiceProvider.GetRequiredService<IComerciosRepository>();
+        Assert.Equal(new[] {
+            new OperadorDisponible(operadorAlfa.Id, operadorAlfa.Nombre),
+            new OperadorDisponible(operadorBeta.Id, operadorBeta.Nombre)
+        }, (await operadores.ListarAsync()).ToArray());
+        Assert.Equal(new[] {
+            new ComercioResumen(comercioAlfa.Id, comercioAlfa.Nombre),
+            new ComercioResumen(comercioBeta.Id, comercioBeta.Nombre)
+        }, (await comercios.ListarAsync()).ToArray());
+        Assert.Equal(new OperadorDisponible(operadorBeta.Id, operadorBeta.Nombre), await operadores.ObtenerAsync(operadorBeta.Id));
+        Assert.Equal(new ComercioResumen(comercioBeta.Id, comercioBeta.Nombre), await comercios.ObtenerAsync(comercioBeta.Id));
+        Assert.Null(await operadores.ObtenerAsync(Guid.CreateVersion7()));
+        Assert.Null(await comercios.ObtenerAsync(Guid.CreateVersion7()));
+        var accesos = scope.ServiceProvider.GetRequiredService<IAccesosUsuarioRepository>();
+        Assert.Empty(await accesos.ListarAsync(TipoAccesoUsuario.Comercio));
+        Assert.Empty(await accesos.ListarAsync(TipoAccesoUsuario.Operador));
+        Assert.Empty(await db.Usuarios.ToListAsync());
+        Assert.Empty(await db.Envios.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Repositorios_RespetanLaCancelacionEnLasConsultasDeEmpresas()
+    {
+        using var servicios = Servicios();
+        using var scope = servicios.CreateScope();
+        var operadores = scope.ServiceProvider.GetRequiredService<IOperadoresRepository>();
+        var comercios = scope.ServiceProvider.GetRequiredService<IComerciosRepository>();
+        using var cancelacion = new CancellationTokenSource();
+        cancelacion.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => operadores.ListarAsync(cancelacion.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => operadores.ObtenerAsync(Guid.CreateVersion7(), cancelacion.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => comercios.ListarAsync(cancelacion.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => comercios.ObtenerAsync(Guid.CreateVersion7(), cancelacion.Token));
     }
 
     [Fact]
@@ -63,11 +116,12 @@ public sealed class EnvioPostgresRoundTripTests : IAsyncLifetime
         await new DatosInicialesSeeder(db, inicial).SeedAsync();
         var cuenta = await Cuenta(db, inicial.UsuarioEmail, TipoAccesoUsuario.Comercio);
         var cuentas = new EfAccesosUsuarioRepository(db);
-        var primero = Assert.Single(await cuentas.ListarOperadoresAsync());
+        var operadores = new EfOperadoresRepository(db);
+        var primero = Assert.Single(await operadores.ListarAsync());
         var segundo = new Operador("Otro operador disponible");
         db.Operadores.Add(segundo);
         await db.SaveChangesAsync();
-        Assert.Equal(2, (await cuentas.ListarOperadoresAsync()).Count);
+        Assert.Equal(2, (await operadores.ListarAsync()).Count);
         Assert.Single(await cuentas.ListarAsync(TipoAccesoUsuario.Comercio));
 
         var uno = await Crear(db, cuenta.AccesoId, primero.OperadorId, "PRIMERO");
@@ -105,7 +159,7 @@ public sealed class EnvioPostgresRoundTripTests : IAsyncLifetime
         await new DatosInicialesSeeder(db, inicial).SeedAsync();
         var comercio = await Cuenta(db, inicial.UsuarioEmail, TipoAccesoUsuario.Comercio);
         var operador = await Cuenta(db, inicial.OperadorUsuarioEmail, TipoAccesoUsuario.Operador);
-        await Assert.ThrowsAsync<OperadorNoDisponibleException>(() => Crear(db, comercio.AccesoId, Guid.CreateVersion7(), "DENEGADO"));
+        await Assert.ThrowsAsync<OperadorNoEncontradoException>(() => Crear(db, comercio.AccesoId, Guid.CreateVersion7(), "DENEGADO"));
         await Assert.ThrowsAsync<AccesoNoPermitidoException>(() => Crear(db, operador.AccesoId, operador.OperadorId!.Value, "DENEGADO"));
         Assert.Empty(await db.Envios.ToListAsync());
         Assert.Empty(await db.Bultos.ToListAsync());
@@ -295,6 +349,20 @@ public sealed class EnvioPostgresRoundTripTests : IAsyncLifetime
     private static Task<int> InsertarEnvioAnterior(NexoRutaDbContext db, Envio envio, Guid vinculoId)
         => db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Envios\" (\"Id\", \"OperadorId\", \"OperadorComercioId\", \"CreadoPorUsuarioId\", \"DestinatarioId\", \"DireccionId\", \"Estado\") VALUES ({envio.Id}, {envio.OperadorId}, {vinculoId}, {envio.CreadoPorUsuarioId}, {envio.DestinatarioId}, {envio.DireccionId}, 'Admitido')");
 
+    private ServiceProvider Servicios()
+    {
+        using var db = new NexoRutaDbContext(options);
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:Postgres"] = db.Database.GetConnectionString(),
+            ["AccesoInicial:UsuarioEmail"] = "dueno@prueba.local",
+            ["AccesoInicial:OperadorUsuarioEmail"] = "operador@prueba.local",
+            ["AccesoInicial:OperadorNombre"] = "Operador de prueba",
+            ["AccesoInicial:ComercioNombre"] = "Comercio de prueba"
+        }).Build();
+        return new ServiceCollection().AddNexoRutaPersistence(configuration).BuildServiceProvider();
+    }
+
     private static AccesoInicial Datos()
     {
         var id = Guid.CreateVersion7().ToString("N");
@@ -305,7 +373,7 @@ public sealed class EnvioPostgresRoundTripTests : IAsyncLifetime
         => Assert.Single(await new EfAccesosUsuarioRepository(db).ListarAsync(tipo), x => x.UsuarioEmail == email);
 
     private static Task<EnvioCreado> Crear(NexoRutaDbContext db, Guid accesoId, Guid operadorId, string codigo)
-        => new CrearEnvioUseCase(new EfEnviosRepository(db), new UsuarioSeleccionado(db, accesoId), new EfAccesosUsuarioRepository(db))
+        => new CrearEnvioUseCase(new EfEnviosRepository(db), new UsuarioSeleccionado(db, accesoId), new EfOperadoresRepository(db))
             .EjecutarAsync(new CrearEnvioCommand(operadorId, "Destinatario de prueba", "Av. Rivera 123", codigo, 1750m, 32m, 21m, 11m));
 
     private static Task<IReadOnlyList<EnvioDetalle>> Listar(NexoRutaDbContext db, Guid accesoId)

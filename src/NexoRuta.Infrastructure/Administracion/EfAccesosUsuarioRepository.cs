@@ -29,16 +29,4 @@ public sealed class EfAccesosUsuarioRepository(NexoRutaDbContext db) : IAccesosU
 
     public Task<ContextoUsuario?> ObtenerAsync(Guid accesoId, CancellationToken cancellationToken = default)
         => Consulta(db.AccesosUsuario.Where(x => x.Id == accesoId)).SingleOrDefaultAsync(cancellationToken);
-
-    public async Task<IReadOnlyList<OperadorDisponible>> ListarOperadoresAsync(
-        CancellationToken cancellationToken = default)
-        => await db.Operadores.OrderBy(x => x.Nombre)
-            .Select(x => new OperadorDisponible(x.Id, x.Nombre))
-            .ToListAsync(cancellationToken);
-
-    public Task<OperadorDisponible?> ObtenerOperadorAsync(
-        Guid operadorId, CancellationToken cancellationToken = default)
-        => db.Operadores.Where(x => x.Id == operadorId)
-            .Select(x => new OperadorDisponible(x.Id, x.Nombre))
-            .SingleOrDefaultAsync(cancellationToken);
 }

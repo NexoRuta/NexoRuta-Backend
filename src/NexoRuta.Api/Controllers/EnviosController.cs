@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NexoRuta.Api.Contracts.Envios;
 using NexoRuta.Application.Administracion;
+using NexoRuta.Application.Administracion.Excepciones;
 using NexoRuta.Application.Envios;
 using NexoRuta.Domain.Administracion;
 
@@ -39,7 +40,7 @@ public sealed class EnviosController(
 
             return Created("/api/envios", created);
         }
-        catch (OperadorNoDisponibleException exception)
+        catch (OperadorNoEncontradoException exception)
         {
             return BadRequest(new { message = exception.Message });
         }

@@ -2,7 +2,7 @@
 
 Backend de la plataforma multioperador de distribución de última milla del Taller .NET 2026. Este repositorio usa .NET 10 y está organizado como base de un **monolito modular**, con un Worker independiente. La entrega de análisis y diseño del 04/10/2026 y el enunciado del laboratorio fundamentan las decisiones resumidas aquí.
 
-> **Estado actual (08/10/2026):** están implementados los recortes del primer monitoreo: [CU-01 — datos iniciales y acceso directo](docs/cu/CU-01-comercios-usuarios.md), [CU-07 — alta individual de envíos](docs/cu/CU-07-alta-envios.md) y [CU-08 — bulto](docs/cu/CU-08-bultos.md), con EF Core/PostgreSQL. Autenticación, CRUD de administración, RLS y mensajería siguen pendientes.
+> **Estado actual (08/10/2026):** están implementados los recortes del primer monitoreo: [CU-01 — datos iniciales y acceso directo](docs/cu/CU-01-comercios-usuarios.md), [CU-07 — alta individual de envíos](docs/cu/CU-07-alta-envios.md) y [CU-08 — bulto](docs/cu/CU-08-bultos.md), con EF Core/PostgreSQL. Autenticación por credenciales, CRUD de administración, RLS y mensajería siguen pendientes.
 
 ## Estructura y estado verificado
 
@@ -43,7 +43,7 @@ dotnet run --project src/NexoRuta.Api/NexoRuta.Api.csproj --launch-profile http
 dotnet run --project src/NexoRuta.Worker/NexoRuta.Worker.csproj
 ```
 
-El perfil `http` de la API usa `http://localhost:5041`; OpenAPI de desarrollo está en `http://localhost:5041/openapi/v1.json`. La API necesita PostgreSQL mediante `ConnectionStrings:Postgres`; al arrancar aplica migraciones e inicializa los datos configurados en `AccesoInicial`. `GET /api/accesos?tipo=Comercio|Operador` alimenta los selectores; `GET /api/usuarios/actual` y `GET/POST /api/envios` requieren una selección válida mediante `X-NexoRuta-Acceso`. Se separan ámbitos de operador/comercio, sin perfiles laborales ni autenticación por credenciales en este recorte. Liveness/readiness están en `/health/live` y `/health/ready`. El Worker no abre un puerto HTTP.
+El perfil `http` de la API usa `http://localhost:5041`; OpenAPI de desarrollo está en `http://localhost:5041/openapi/v1.json`. La API necesita PostgreSQL mediante `ConnectionStrings:Postgres`; al arrancar aplica migraciones e inicializa los datos configurados en `AccesoInicial`. `GET /api/accesos?tipo=Comercio|Operador` alimenta los selectores; `GET /api/operadores`, `GET /api/usuarios/actual` y `GET/POST /api/envios` requieren una selección válida mediante `X-NexoRuta-Acceso`. Se separan ámbitos de operador/comercio, sin perfiles laborales ni autenticación por credenciales en este recorte. Liveness/readiness están en `/health/live` y `/health/ready`. El Worker no abre un puerto HTTP.
 
 El Compose local vive en el repositorio principal y publica la API en `http://localhost:5000` (puerto 8080 del contenedor). La inicialización puede repetirse sin duplicar los registros iniciales. Las pruebas de integración crean una base propia por escenario usando el servidor configurado en `NEXORUTA_TEST_POSTGRES`, y la eliminan al terminar; el rol de pruebas requiere permiso para crear bases. Redis y RabbitMQ aún no participan del flujo de envíos.
 

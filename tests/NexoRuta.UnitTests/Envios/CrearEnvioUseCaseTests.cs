@@ -1,4 +1,5 @@
 using NexoRuta.Application.Administracion;
+using NexoRuta.Application.Administracion.Excepciones;
 using NexoRuta.Application.Envios;
 using NexoRuta.Domain.Envios;
 
@@ -12,7 +13,7 @@ public sealed class CrearEnvioUseCaseTests
         var cuenta = CuentaComercio();
         var operador = new OperadorDisponible(Guid.CreateVersion7(), "Distribución Sur");
         var repository = new FakeEnviosRepository();
-        var useCase = new CrearEnvioUseCase(repository, new UsuarioActual(cuenta), new Cuentas(operador));
+        var useCase = new CrearEnvioUseCase(repository, new UsuarioActual(cuenta), new Operadores(operador));
 
         var result = await useCase.EjecutarAsync(Comando(operador.OperadorId));
 
@@ -34,7 +35,7 @@ public sealed class CrearEnvioUseCaseTests
         var repository = new FakeEnviosRepository();
 
         await Assert.ThrowsAsync<AccesoNoPermitidoException>(() =>
-            new CrearEnvioUseCase(repository, new UsuarioActual(cuenta), new Cuentas(null))
+            new CrearEnvioUseCase(repository, new UsuarioActual(cuenta), new Operadores(null))
                 .EjecutarAsync(Comando(cuenta.OperadorId!.Value)));
 
         Assert.Null(repository.Guardado);
@@ -46,8 +47,8 @@ public sealed class CrearEnvioUseCaseTests
         var cuenta = CuentaComercio();
         var repository = new FakeEnviosRepository();
 
-        await Assert.ThrowsAsync<OperadorNoDisponibleException>(() =>
-            new CrearEnvioUseCase(repository, new UsuarioActual(cuenta), new Cuentas(null))
+        await Assert.ThrowsAsync<OperadorNoEncontradoException>(() =>
+            new CrearEnvioUseCase(repository, new UsuarioActual(cuenta), new Operadores(null))
                 .EjecutarAsync(Comando(Guid.CreateVersion7())));
 
         Assert.Null(repository.Guardado);
@@ -60,7 +61,7 @@ public sealed class CrearEnvioUseCaseTests
         var repository = new FakeEnviosRepository();
 
         await Assert.ThrowsAsync<ArgumentException>(() =>
-            new CrearEnvioUseCase(repository, new UsuarioActual(cuenta), new Cuentas(null))
+            new CrearEnvioUseCase(repository, new UsuarioActual(cuenta), new Operadores(null))
                 .EjecutarAsync(Comando(Guid.Empty)));
 
         Assert.Null(repository.Guardado);
@@ -74,7 +75,7 @@ public sealed class CrearEnvioUseCaseTests
         var repository = new FakeEnviosRepository();
 
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
-            new CrearEnvioUseCase(repository, new UsuarioActual(cuenta), new Cuentas(operador))
+            new CrearEnvioUseCase(repository, new UsuarioActual(cuenta), new Operadores(operador))
                 .EjecutarAsync(Comando(operador.OperadorId) with { PesoGramos = 0m }));
 
         Assert.Null(repository.Guardado);
@@ -85,7 +86,7 @@ public sealed class CrearEnvioUseCaseTests
     {
         var repository = new FakeEnviosRepository();
         await Assert.ThrowsAsync<AccesoActualNoDisponibleException>(() =>
-            new CrearEnvioUseCase(repository, new UsuarioSinCuenta(), new Cuentas(null))
+            new CrearEnvioUseCase(repository, new UsuarioSinCuenta(), new Operadores(null))
                 .EjecutarAsync(Comando(Guid.CreateVersion7())));
         Assert.Null(repository.Guardado);
     }
@@ -124,15 +125,11 @@ public sealed class CrearEnvioUseCaseTests
             => throw new AccesoActualNoDisponibleException();
     }
 
-    private sealed class Cuentas(OperadorDisponible? operador) : IAccesosUsuarioRepository
+    private sealed class Operadores(OperadorDisponible? operador) : IOperadoresRepository
     {
-        public Task<OperadorDisponible?> ObtenerOperadorAsync(Guid operadorId, CancellationToken cancellationToken = default)
+        public Task<OperadorDisponible?> ObtenerAsync(Guid operadorId, CancellationToken cancellationToken = default)
             => Task.FromResult(operador?.OperadorId == operadorId ? operador : null);
-        public Task<ContextoUsuario?> ObtenerAsync(Guid accesoId, CancellationToken cancellationToken = default)
-            => throw new NotSupportedException();
-        public Task<IReadOnlyList<ContextoUsuario>> ListarAsync(NexoRuta.Domain.Administracion.TipoAccesoUsuario tipo, CancellationToken cancellationToken = default)
-            => throw new NotSupportedException();
-        public Task<IReadOnlyList<OperadorDisponible>> ListarOperadoresAsync(CancellationToken cancellationToken = default)
+        public Task<IReadOnlyList<OperadorDisponible>> ListarAsync(CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
     }
 

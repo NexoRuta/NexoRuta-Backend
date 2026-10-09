@@ -14,6 +14,14 @@ La cuenta inicial del comercio tiene `EsPropietario = true` y representa al due�
 
 `Destinatario` contiene los datos de entrega declarados en un envío; su `OperadorId` delimita datos operativos, sin crear una cuenta o membresía para esa persona. Tracking sigue siendo una plantilla: no se implementó todavía el seguimiento mediante enlace público.
 
+## Consultas de cuentas y empresas
+
+`IAccesosUsuarioRepository` consulta cuentas y su pertenencia a una organización. Incluye el nombre del operador o comercio en `ContextoUsuario` mediante una sola consulta; el login selecciona usuarios, no empresas.
+
+`IOperadoresRepository` y `IComerciosRepository` consultan las empresas de forma independiente, incluso si todavía no tienen usuarios ni envíos. Ambos ofrecen `ListarAsync` ordenado por nombre y `ObtenerAsync` por ID, con `CancellationToken`. Sus implementaciones EF Core son `EfOperadoresRepository` y `EfComerciosRepository`, registradas por scope junto al repositorio de accesos. Los operadores devuelven `OperadorDisponible` y los comercios `ComercioResumen`, con ID y nombre.
+
+El selector del alta y `CrearEnvioUseCase` usan `IOperadoresRepository`. El repositorio de comercios está disponible para consultas internas; este cambio no agrega una pantalla ni un endpoint de catálogo o de comercios atendidos por operador.
+
 ## Inicialización e ingreso
 
 La API aplica migraciones y `DatosInicialesSeeder` inicializa un operador, un comercio, la cuenta del dueño y una cuenta del operador. El seed conserva las identidades y los envíos existentes y no duplica datos al repetirse. Su configuración está en `AccesoInicial`: `UsuarioEmail`, `OperadorUsuarioEmail`, `OperadorNombre` y `ComercioNombre`.
@@ -24,11 +32,11 @@ En cada petición de la API, `AccesoSeleccionadoHandler` consulta la cuenta una 
 
 ## Elección del operador y contratos
 
-El dueño selecciona el operador **al crear cada envío**. La API lista todos los operadores registrados y comprueba que el elegido exista antes de persistir. No exige envíos anteriores ni un vínculo previo con el comercio. El comercio de origen y el usuario creador se obtienen desde la cuenta del solicitante; no se eligen desde el formulario.
+El usuario del comercio selecciona el operador **al crear cada envío**. La API lista todos los operadores registrados y comprueba que el elegido exista antes de persistir. No exige envíos anteriores ni un vínculo previo con el comercio. El comercio de origen y el usuario creador se obtienen desde la cuenta del solicitante; no se eligen desde el formulario.
 
 - `GET /api/accesos?tipo=Comercio|Operador`: cuentas disponibles para la entrada, sin selección previa.
 - `GET /api/usuarios/actual`: cuenta seleccionada y organización de pertenencia. Una cuenta de comercio tiene `OperadorId = null`; una cuenta del operador tiene `ComercioId = null`.
-- `GET /api/comercio/operadores`: todos los operadores registrados, disponibles para el comercio de la cuenta. Solo admite cuentas de comercio.
+- `GET /api/operadores`: todos los operadores registrados, disponibles para el comercio de la cuenta. Solo admite cuentas de comercio.
 - Las operaciones envían `X-NexoRuta-Acceso` para identificar la cuenta seleccionada. Selección ausente o inválida: 401. Operación reservada al comercio con cuenta del operador: 403.
 - Un `operadorId` inválido, ausente o inexistente en el alta devuelve 400 y no guarda datos. Un operador registrado es elegible aunque nunca haya trabajado con el comercio.
 - El comercio consulta sus envíos con todos sus operadores; Backoffice consulta los envíos del operador de su cuenta.
