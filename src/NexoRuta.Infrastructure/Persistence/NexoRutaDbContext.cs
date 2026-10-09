@@ -9,7 +9,6 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
     public DbSet<Operador> Operadores => Set<Operador>();
     public DbSet<Comercio> Comercios => Set<Comercio>();
     public DbSet<Usuario> Usuarios => Set<Usuario>();
-    public DbSet<OperadorComercio> OperadoresComercios => Set<OperadorComercio>();
     public DbSet<AccesoUsuario> AccesosUsuario => Set<AccesoUsuario>();
     public DbSet<Destinatario> Destinatarios => Set<Destinatario>();
     public DbSet<Direccion> Direcciones => Set<Direccion>();
@@ -38,16 +37,6 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Email).HasMaxLength(254).IsRequired();
             entity.HasIndex(x => x.Email).IsUnique();
-        });
-
-        modelBuilder.Entity<OperadorComercio>(entity =>
-        {
-            entity.ToTable("OperadoresComercios");
-            entity.HasKey(x => x.Id);
-            entity.HasAlternateKey(x => new { x.OperadorId, x.Id });
-            entity.HasIndex(x => new { x.OperadorId, x.ComercioId }).IsUnique();
-            entity.HasOne<Operador>().WithMany().HasForeignKey(x => x.OperadorId).OnDelete(DeleteBehavior.Restrict);
-            entity.HasOne<Comercio>().WithMany().HasForeignKey(x => x.ComercioId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<AccesoUsuario>(entity =>
@@ -89,10 +78,7 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
             entity.HasAlternateKey(x => new { x.OperadorId, x.Id });
             entity.Property(x => x.Estado).HasConversion<string>().HasMaxLength(32).IsRequired();
             entity.HasOne<Operador>().WithMany().HasForeignKey(x => x.OperadorId).OnDelete(DeleteBehavior.Restrict);
-            entity.HasOne<OperadorComercio>().WithMany()
-                .HasForeignKey(x => new { x.OperadorId, x.OperadorComercioId })
-                .HasPrincipalKey(x => new { x.OperadorId, x.Id })
-                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Comercio>().WithMany().HasForeignKey(x => x.ComercioId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<Usuario>().WithMany().HasForeignKey(x => x.CreadoPorUsuarioId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<Destinatario>().WithMany()
                 .HasForeignKey(x => new { x.OperadorId, x.DestinatarioId })

@@ -27,6 +27,8 @@ public static class DependencyInjection
             demoEnabled ? "Comercio Demo" : ValorRequerido("AccesoInicial:ComercioNombre"),
             ValorRequerido("AccesoInicial:OperadorUsuarioEmail")));
         services.AddScoped<IAccesosUsuarioRepository, EfAccesosUsuarioRepository>();
+        services.AddScoped<IOperadoresRepository, EfOperadoresRepository>();
+        services.AddScoped<IComerciosRepository, EfComerciosRepository>();
         services.AddScoped<IEnviosRepository, EfEnviosRepository>();
         services.AddScoped<DatosInicialesSeeder>();
         services.AddScoped<CrearEnvioUseCase>();

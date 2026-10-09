@@ -29,6 +29,7 @@ public sealed class AccesoSeleccionadoHandler(
             new Claim(AccesoSeleccionado.ClaimTipoAcceso, acceso.Tipo),
             new Claim(AccesoSeleccionado.ClaimAccesoId, acceso.AccesoId.ToString())
         ], Scheme.Name);
+        Context.Items[typeof(ContextoUsuario)] = acceso;
         return AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identity), Scheme.Name));
     }
 

@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NexoRuta.Api.Contracts.Envios;
 using NexoRuta.Application.Administracion;
+using NexoRuta.Application.Administracion.Excepciones;
 using NexoRuta.Application.Envios;
 using NexoRuta.Domain.Administracion;
 
@@ -39,9 +40,9 @@ public sealed class EnviosController(
 
             return Created("/api/envios", created);
         }
-        catch (OperadorNoVinculadoException exception)
+        catch (OperadorNoEncontradoException exception)
         {
-            return Problem(exception.Message, statusCode: StatusCodes.Status403Forbidden);
+            return BadRequest(new { message = exception.Message });
         }
         catch (AccesoNoPermitidoException exception)
         {

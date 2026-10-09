@@ -21,10 +21,3 @@ public interface IUsuarioActual
 {
     Task<ContextoUsuario> ObtenerAsync(CancellationToken cancellationToken = default);
 }
-
-public sealed class AccesoActualNoDisponibleException() : Exception(
-    "El usuario actual no tiene un acceso válido a un operador y comercio.");
-
-public sealed class AccesoNoPermitidoException() : Exception("Solo los usuarios de comercio pueden dar de alta envíos.");
-
-public sealed class OperadorNoVinculadoException() : Exception("El operador seleccionado no trabaja con este comercio.");
