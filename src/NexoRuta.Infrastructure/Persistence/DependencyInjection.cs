@@ -1,9 +1,12 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using NexoRuta.Application.Administracion;
-using NexoRuta.Application.Envios;
+using NexoRuta.Application.Administracion.Repositories;
+using NexoRuta.Application.Envios.Repositories;
+using NexoRuta.Application.Envios.UseCases;
 using NexoRuta.Infrastructure.Administracion;
+using NexoRuta.Infrastructure.Administracion.Repositories;
+using NexoRuta.Infrastructure.Envios.Repositories;
 
 namespace NexoRuta.Infrastructure.Persistence;
 
@@ -17,20 +20,18 @@ public static class DependencyInjection
             ?? throw new InvalidOperationException("Falta ConnectionStrings:Postgres.");
 
         services.AddDbContext<NexoRutaDbContext>(options => options.UseNpgsql(connectionString));
-        var demoFlag = configuration["Demo:Enabled"];
-        var demoEnabled = false;
-        if (demoFlag is not null && !bool.TryParse(demoFlag, out demoEnabled))
-            throw new InvalidOperationException("Demo:Enabled must be true or false.");
         services.AddSingleton(new AccesoInicial(
-            demoEnabled ? "demo@nexoruta.local" : ValorRequerido("AccesoInicial:UsuarioEmail"),
+            ValorRequerido("AccesoInicial:UsuarioEmail"),
             ValorRequerido("AccesoInicial:OperadorNombre"),
-            demoEnabled ? "Comercio Demo" : ValorRequerido("AccesoInicial:ComercioNombre"),
+            ValorRequerido("AccesoInicial:ComercioNombre"),
             ValorRequerido("AccesoInicial:OperadorUsuarioEmail")));
+
         services.AddScoped<IAccesosUsuarioRepository, EfAccesosUsuarioRepository>();
         services.AddScoped<IEnviosRepository, EfEnviosRepository>();
         services.AddScoped<DatosInicialesSeeder>();
         services.AddScoped<CrearEnvioUseCase>();
         services.AddScoped<ListarEnviosUseCase>();
+
         return services;
 
         string ValorRequerido(string clave)

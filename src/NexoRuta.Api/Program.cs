@@ -1,8 +1,8 @@
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.EntityFrameworkCore;
-using NexoRuta.Api;
-using NexoRuta.Api.Seguridad;
-using NexoRuta.Application.Administracion;
+using NexoRuta.Api.Core.Health;
+using NexoRuta.Api.Core.Security;
+using NexoRuta.Application.Administracion.Interfaces;
 using NexoRuta.Domain.Administracion;
 using NexoRuta.Infrastructure.Persistence;
 using OpenTelemetry.Metrics;
@@ -16,11 +16,14 @@ builder.Services.AddOpenApi();
 builder.Services.AddNexoRutaPersistence(builder.Configuration);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IUsuarioActual, UsuarioActualHttp>();
+
 builder.Services.AddAuthentication(AccesoSeleccionado.Esquema)
     .AddScheme<AuthenticationSchemeOptions, AccesoSeleccionadoHandler>(AccesoSeleccionado.Esquema, _ => { });
+
 builder.Services.AddAuthorization(options => options.AddPolicy(nameof(TipoAccesoUsuario.Comercio),
     policy => policy.RequireAuthenticatedUser().RequireClaim(
         AccesoSeleccionado.ClaimTipoAcceso, nameof(TipoAccesoUsuario.Comercio))));
+
 builder.Services.AddHealthChecks().AddCheck<PostgreSqlHealthCheck>("postgres");
 
 if (builder.Configuration.GetValue<bool>("OpenTelemetry:Enabled"))

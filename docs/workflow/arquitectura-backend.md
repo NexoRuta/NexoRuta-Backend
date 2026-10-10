@@ -6,7 +6,7 @@ Fuentes de referencia: `Laboratorio__NET_2026.pdf` (§§ 3–6 y 8), `Entrega_An
 
 ## Estado del repositorio y dirección de dependencias
 
-La solución apunta a **.NET 10** y contiene `NexoRuta.Domain`, `NexoRuta.Application`, `NexoRuta.Infrastructure`, `NexoRuta.Api`, `NexoRuta.Worker` y proyectos de pruebas unitarias, de integración y de arquitectura. La API y el Worker siguen siendo puntos de entrada básicos; la existencia de un proyecto o paquete no implica que la funcionalidad esté terminada.
+La solución apunta a **.NET 10** y contiene `NexoRuta.Domain`, `NexoRuta.Application`, `NexoRuta.Infrastructure`, `NexoRuta.Api`, `NexoRuta.Worker` y proyectos de pruebas unitarias, de integración y de arquitectura. La API implementa los recortes documentados de CU-01, CU-07 y CU-08; Worker sigue siendo una plantilla que registra actividad. La existencia de un proyecto o paquete no implica que la funcionalidad esté terminada.
 
 | Proyecto | Responsabilidad y dependencias permitidas |
 | --- | --- |
@@ -65,7 +65,7 @@ El mecanismo concreto de contexto RLS, sus migraciones y las pruebas todavía de
 
 | Tema | Estado de la decisión |
 | --- | --- |
-| PostgreSQL + EF Core/migraciones + RLS | Adoptado en ADR-002 / exigido por la letra; implementación pendiente. |
+| PostgreSQL + EF Core/migraciones + RLS | EF Core, PostgreSQL y migraciones implementados para el recorte actual. RLS, su contexto y pruebas con rol restringido permanecen pendientes; el filtrado actual no acredita RLS. |
 | Cola de trabajo y Worker independiente | Obligatorio; RabbitMQ es la propuesta del equipo, pendiente de implementación. |
 | Caché distribuida | Obligatoria en dos perfiles de acceso, con invalidación y métricas; Redis está propuesto. |
 | SignalR, Serilog y OpenTelemetry | Exigidos para tiempo real y observabilidad; integración pendiente. |

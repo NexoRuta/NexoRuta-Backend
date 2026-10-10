@@ -2,8 +2,12 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
-using NexoRuta.Api.Seguridad;
-using NexoRuta.Application.Administracion;
+using NexoRuta.Api.Core.Security;
+using NexoRuta.Application.Administracion.Context;
+using NexoRuta.Application.Administracion.Dtos;
+using NexoRuta.Application.Administracion.Exceptions;
+using NexoRuta.Application.Administracion.Interfaces;
+using NexoRuta.Application.Administracion.Repositories;
 using NexoRuta.Domain.Administracion;
 
 namespace NexoRuta.IntegrationTests.Seguridad;
