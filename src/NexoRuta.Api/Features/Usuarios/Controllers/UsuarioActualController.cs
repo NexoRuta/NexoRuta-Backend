@@ -4,7 +4,7 @@ using NexoRuta.Application.Administracion.Context;
 using NexoRuta.Application.Administracion.Exceptions;
 using NexoRuta.Application.Administracion.Interfaces;
 
-namespace NexoRuta.Api.Controllers;
+namespace NexoRuta.Api.Features.Usuarios.Controllers;
 
 [ApiController]
 [Authorize]

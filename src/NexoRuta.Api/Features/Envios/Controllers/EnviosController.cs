@@ -1,14 +1,14 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using NexoRuta.Api.Contracts.Envios;
+using NexoRuta.Api.Features.Envios.Contracts.Requests;
 using NexoRuta.Application.Administracion.Exceptions;
 using NexoRuta.Application.Envios.Commands;
 using NexoRuta.Application.Envios.UseCases;
 using NexoRuta.Domain.Administracion;
-using EnvioCreado = NexoRuta.Api.Contracts.Envios.EnvioCreado;
-using EnvioDetalle = NexoRuta.Api.Contracts.Envios.EnvioDetalle;
+using EnvioCreado = NexoRuta.Api.Features.Envios.Contracts.Responses.EnvioCreado;
+using EnvioDetalle = NexoRuta.Api.Features.Envios.Contracts.Responses.EnvioDetalle;
 
-namespace NexoRuta.Api.Controllers;
+namespace NexoRuta.Api.Features.Envios.Controllers;
 
 [ApiController]
 [Authorize]

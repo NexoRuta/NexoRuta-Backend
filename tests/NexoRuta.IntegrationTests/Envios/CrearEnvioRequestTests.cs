@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.Globalization;
-using NexoRuta.Api.Contracts.Envios;
+using NexoRuta.Api.Features.Envios.Contracts.Requests;
 
 namespace NexoRuta.IntegrationTests.Envios;
 

@@ -1,4 +1,4 @@
-namespace NexoRuta.Api.Seguridad;
+namespace NexoRuta.Api.Core.Security;
 
 public static class AccesoSeleccionado
 {

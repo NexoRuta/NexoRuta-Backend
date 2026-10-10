@@ -5,6 +5,8 @@ using NexoRuta.Application.Administracion.Repositories;
 using NexoRuta.Application.Envios.Repositories;
 using NexoRuta.Application.Envios.UseCases;
 using NexoRuta.Infrastructure.Administracion;
+using NexoRuta.Infrastructure.Administracion.Repositories;
+using NexoRuta.Infrastructure.Envios.Repositories;
 
 namespace NexoRuta.Infrastructure.Persistence;
 

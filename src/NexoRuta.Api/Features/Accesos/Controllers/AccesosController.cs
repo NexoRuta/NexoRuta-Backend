@@ -4,7 +4,7 @@ using NexoRuta.Application.Administracion.Context;
 using NexoRuta.Application.Administracion.Repositories;
 using NexoRuta.Domain.Administracion;
 
-namespace NexoRuta.Api.Controllers;
+namespace NexoRuta.Api.Features.Accesos.Controllers;
 
 [ApiController]
 [AllowAnonymous]

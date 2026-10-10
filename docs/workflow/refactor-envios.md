@@ -11,6 +11,25 @@ bootstrap and runtime dependencies. It is not a file-move-only refactor.
 - Namespaces aligned with folders and consumers updated.
 - Existing types retained without duplicate declarations.
 
+## Pending local Feature-First work: ARQ-01 and ARQ-02
+
+API controllers now belong to `Features/<feature>/Controllers`. Shipment HTTP
+contracts are separated under `Features/Envios/Contracts/Requests` and
+`Features/Envios/Contracts/Responses`; security and health checks live in `Core`.
+Infrastructure repositories live in `Administracion/Repositories` and
+`Envios/Repositories`. Shared persistence, bootstrap and migrations retain their
+existing responsibilities and locations.
+
+These local changes preserve implementation bodies, routing and JSON properties.
+Compared with the pre-ARQ-01 API, only the order of the root OpenAPI `tags` array
+changed. This does not undo the intentional decimal-validation changes already
+included earlier in the branch. No code forces tag ordering and no contract
+snapshot was updated to conceal a difference.
+
+Frontend consumers now use specialized shipment, access, operator and user
+clients, with shared HTTP handling in `Core/Http/ApiHttp`; the shipment component
+is `Components/Features/Envios/Pages/CrearEnvio.razor`.
+
 ## Additional work already present in the branch
 
 | Area | Actual change |
@@ -43,16 +62,16 @@ must not be silently included in the backend PR.
 
 | Boundary | Type / location | Responsibility |
 | --- | --- | --- |
-| Commerce form | frontend `Home.razor`, `CrearEnvioRequest` | Editable input and DataAnnotations; reuse the request rather than add a duplicate form DTO. |
-| HTTP client | frontend `EnviosApiClient` | JSON, access header, errors, cancellation. Catalog uses the existing API route `/api/comercio/operadores`. |
-| API input | API `Contracts/Envios/CrearEnvioRequest` | Validate HTTP input independently of Application and Domain. |
+| Commerce form | frontend `Components/Features/Envios/Pages/CrearEnvio.razor`, `CrearEnvioRequest` | Editable input and DataAnnotations; reuse the request rather than add a duplicate form DTO. |
+| HTTP clients | frontend `EnviosApiClient`, `AccesosApiClient`, `OperadoresApiClient`, `UsuariosApiClient`; shared `ApiHttp` | Responsibilities are separated by feature; shared JSON, errors and cancellation are preserved. Access listing sends no access header; catalog retains `/api/comercio/operadores`. |
+| API input | `src/NexoRuta.Api/Features/Envios/Contracts/Requests/CrearEnvioRequest.cs` | Validate HTTP input independently of Application and Domain. |
 | Command | Application `CrearEnvioCommand` | Intent/input only; named arguments distinguish operator, recipient, address and measurements. |
 | Coordination | Application `CrearEnvioUseCase` | Resolve current commerce and operator, construct entities, save once, return result. |
 | Context | `ContextoUsuario.RequerirComercio()` | Return non-null/nonempty commerce ID and name, or fail before persistence. An operator access still fails with the existing forbidden exception. |
 | Domain | `Envio`, `Bulto`, `Destinatario`, `Direccion`, `AccesoUsuario` | Keep identities and invariants. No cosmetic value objects or copied construction factory. |
 | Persistence | `EfEnviosRepository` | Preserve queries, tenant filters and one atomic `SaveChangesAsync`; named result construction. |
 | Application output | `EnvioCreado`, `EnvioDetalle` | Share `OrigenEnvio` for tenant/commerce/creator provenance and `BultoDetalle` for package data. No transport annotations. |
-| API output | API `Contracts/Envios/EnvioResponses` | Explicitly flatten Application results; own the published `EnvioCreado`, `EnvioDetalle`, `BultoDetalle` schema names. |
+| API output | `src/NexoRuta.Api/Features/Envios/Contracts/Responses/` (`EnvioCreado.cs`, `EnvioDetalle.cs`, `BultoDetalle.cs`) | Explicitly flatten Application results; own the published `EnvioCreado`, `EnvioDetalle`, `BultoDetalle` schema names. |
 | Backoffice | frontend `EnvioResponse`, `BultoResponse`, `IndexModel` | Deserialize independent HTTP contracts and render operator-scoped shipments. |
 
 The former 12-argument creation result duplicated the package fields and mixed

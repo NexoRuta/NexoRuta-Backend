@@ -4,7 +4,7 @@ using NexoRuta.Application.Administracion.Dtos;
 using NexoRuta.Application.Administracion.Repositories;
 using NexoRuta.Domain.Administracion;
 
-namespace NexoRuta.Api.Controllers;
+namespace NexoRuta.Api.Features.Comercios.Controllers;
 
 [ApiController]
 [Authorize(Policy = nameof(TipoAccesoUsuario.Comercio))]

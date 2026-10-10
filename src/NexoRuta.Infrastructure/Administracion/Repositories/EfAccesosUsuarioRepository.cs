@@ -5,7 +5,7 @@ using NexoRuta.Application.Administracion.Repositories;
 using NexoRuta.Domain.Administracion;
 using NexoRuta.Infrastructure.Persistence;
 
-namespace NexoRuta.Infrastructure.Administracion;
+namespace NexoRuta.Infrastructure.Administracion.Repositories;
 
 public sealed class EfAccesosUsuarioRepository(NexoRutaDbContext db) : IAccesosUsuarioRepository
 {

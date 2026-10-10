@@ -10,6 +10,8 @@ using NexoRuta.Application.Envios.UseCases;
 using NexoRuta.Domain.Administracion;
 using NexoRuta.Domain.Envios;
 using NexoRuta.Infrastructure.Administracion;
+using NexoRuta.Infrastructure.Administracion.Repositories;
+using NexoRuta.Infrastructure.Envios.Repositories;
 using NexoRuta.Infrastructure.Persistence;
 using Npgsql;
 

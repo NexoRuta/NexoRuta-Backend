@@ -3,8 +3,9 @@ using NexoRuta.Application.Envios.Dtos;
 using NexoRuta.Application.Envios.Repositories;
 using NexoRuta.Application.Envios.Results;
 using NexoRuta.Domain.Envios;
+using NexoRuta.Infrastructure.Persistence;
 
-namespace NexoRuta.Infrastructure.Persistence;
+namespace NexoRuta.Infrastructure.Envios.Repositories;
 
 public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
 {

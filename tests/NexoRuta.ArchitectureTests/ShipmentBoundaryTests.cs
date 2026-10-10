@@ -1,5 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
-using NexoRuta.Api.Controllers;
+using NexoRuta.Api.Features.Envios.Controllers;
 using NexoRuta.Application.Envios.UseCases;
 using NexoRuta.Domain.Envios;
 
@@ -32,7 +32,7 @@ public sealed class ShipmentBoundaryTests
         {
             var response = type.IsGenericType ? type.GenericTypeArguments[0] : type;
             Assert.Equal(typeof(EnviosController).Assembly, response.Assembly);
-            Assert.Equal("NexoRuta.Api.Contracts.Envios", response.Namespace);
+            Assert.Equal("NexoRuta.Api.Features.Envios.Contracts.Responses", response.Namespace);
         }
     }
 }

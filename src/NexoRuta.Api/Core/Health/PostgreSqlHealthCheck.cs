@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using NexoRuta.Infrastructure.Persistence;
 
-namespace NexoRuta.Api;
+namespace NexoRuta.Api.Core.Health;
 
 public sealed class PostgreSqlHealthCheck(NexoRutaDbContext db) : IHealthCheck
 {

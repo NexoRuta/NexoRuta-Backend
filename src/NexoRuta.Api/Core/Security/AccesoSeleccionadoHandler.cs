@@ -5,7 +5,7 @@ using Microsoft.Extensions.Options;
 using NexoRuta.Application.Administracion.Context;
 using NexoRuta.Application.Administracion.Repositories;
 
-namespace NexoRuta.Api.Seguridad;
+namespace NexoRuta.Api.Core.Security;
 
 // ponytail: selección sin credenciales para el monitoreo; reemplazar este esquema con autenticación real.
 public sealed class AccesoSeleccionadoHandler(

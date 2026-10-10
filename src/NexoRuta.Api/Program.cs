@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.EntityFrameworkCore;
-using NexoRuta.Api;
-using NexoRuta.Api.Seguridad;
+using NexoRuta.Api.Core.Health;
+using NexoRuta.Api.Core.Security;
 using NexoRuta.Application.Administracion.Interfaces;
 using NexoRuta.Domain.Administracion;
 using NexoRuta.Infrastructure.Persistence;

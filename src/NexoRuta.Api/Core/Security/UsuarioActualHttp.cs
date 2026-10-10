@@ -4,7 +4,7 @@ using NexoRuta.Application.Administracion.Context;
 using NexoRuta.Application.Administracion.Exceptions;
 using NexoRuta.Application.Administracion.Interfaces;
 
-namespace NexoRuta.Api.Seguridad;
+namespace NexoRuta.Api.Core.Security;
 
 public sealed class UsuarioActualHttp(
     IHttpContextAccessor httpContext

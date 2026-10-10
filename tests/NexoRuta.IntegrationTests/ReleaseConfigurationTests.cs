@@ -1,11 +1,13 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using NexoRuta.Api.Seguridad;
+using NexoRuta.Api.Core.Security;
 using NexoRuta.Application.Administracion.Interfaces;
 using NexoRuta.Application.Administracion.Repositories;
 using NexoRuta.Application.Envios.Repositories;
 using NexoRuta.Application.Envios.UseCases;
 using NexoRuta.Infrastructure.Administracion;
+using NexoRuta.Infrastructure.Administracion.Repositories;
+using NexoRuta.Infrastructure.Envios.Repositories;
 using NexoRuta.Infrastructure.Persistence;
 
 namespace NexoRuta.IntegrationTests;
