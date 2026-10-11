@@ -1,11 +1,12 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NexoRuta.Application.Seguimiento.UseCases;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace NexoRuta.Api.Features.Seguimiento.Controllers;
-
 [ApiController]
 [AllowAnonymous] // Permite acceder a este endpoint sin autenticación
+[EnableRateLimiting("seguimiento-publico")]
 [Route("api/public/seguimiento")]
 public sealed class SeguimientoPublicoController(
     ConsultarSeguimientoPublicoUseCase consultarSeguimiento
