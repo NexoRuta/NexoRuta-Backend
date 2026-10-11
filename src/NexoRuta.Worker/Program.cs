@@ -21,31 +21,39 @@ builder.Services.AddDbContext<NexoRutaDbContext>(
 
 builder.Services.AddScoped<EfOutboxRepository>();
 
-builder.Services.AddSingleton<RabbitMqSeguimientoPublisher>();
+builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.Warning);
 
-builder.Services.AddHostedService<Worker>();
+// Separate host processes: the RabbitMQ consumer can intentionally stop its host.
+// Kafka must not share that failure/shutdown boundary.
+var transport = builder.Configuration["Messaging:Transport"] ?? "RabbitMq";
+if (transport == "Kafka")
+{
+    builder.Services.AddSingleton<KafkaEnvioCreadoPublisher>();
+    builder.Services.AddHostedService<KafkaOutboxWorker>();
+}
+else if (transport == "RabbitMq")
+{
+    builder.Services.AddSingleton<RabbitMqSeguimientoPublisher>();
 
+    builder.Services.AddHostedService<Worker>();
 
-builder.Logging.AddFilter(
-    "Microsoft.EntityFrameworkCore.Database.Command",
-    LogLevel.Warning);
+    builder.Services.AddScoped<IConsultaEstadoEnvio, EfConsultaEstadoEnvio>();
 
-builder.Services.AddScoped<
-    IConsultaEstadoEnvio,
-    EfConsultaEstadoEnvio>();
+    builder.Services.AddScoped<IEnlacesSeguimientoRepository, EfEnlacesSeguimientoRepository>();
 
-builder.Services.AddScoped<
-    IEnlacesSeguimientoRepository,
-    EfEnlacesSeguimientoRepository>();
+    builder.Services.AddScoped<CrearEnlaceSeguimientoUseCase>();
 
-builder.Services.AddScoped<CrearEnlaceSeguimientoUseCase>();
+    builder.Services.AddSingleton<CifradorTokenSeguimiento>();
 
-builder.Services.AddSingleton<CifradorTokenSeguimiento>();
+    builder.Services.AddScoped<ProcesarGeneracionSeguimiento>();
 
-builder.Services.AddScoped<ProcesarGeneracionSeguimiento>();
-
-// Publicación desde Outbox y consumo de RabbitMQ.
-builder.Services.AddHostedService<GenerarSeguimientoConsumer>();
+    // Publicación desde Outbox y consumo de RabbitMQ.
+    builder.Services.AddHostedService<GenerarSeguimientoConsumer>();
+}
+else
+{
+    throw new InvalidOperationException("Messaging:Transport must be RabbitMq or Kafka.");
+}
 
 var host = builder.Build();
 await host.RunAsync();

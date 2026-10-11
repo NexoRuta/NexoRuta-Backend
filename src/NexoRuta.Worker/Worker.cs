@@ -32,6 +32,7 @@ public sealed class Worker(
                 // 1. Reservar un mensaje pendiente de RabbitMQ.
                 var mensaje = await repositorio.ReservarSiguienteAsync(
                     procesadorId,
+                    OutboxDestino.RabbitMq,
                     stoppingToken);
 
                 if (mensaje is null)

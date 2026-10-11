@@ -7,6 +7,7 @@ public sealed class EfOutboxRepository(NexoRutaDbContext db)
 {
     public async Task<OutboxMessage?> ReservarSiguienteAsync(
         Guid procesadorId,
+        OutboxDestino destino,
         CancellationToken cancellationToken = default)
     {
         if (procesadorId == Guid.Empty)
@@ -14,14 +15,17 @@ public sealed class EfOutboxRepository(NexoRutaDbContext db)
                 "El identificador del procesador es obligatorio.",
                 nameof(procesadorId));
 
+        if (!Enum.IsDefined(destino))
+            throw new ArgumentOutOfRangeException(nameof(destino));
+
         var ahora = DateTimeOffset.UtcNow;
         var reservaHasta = ahora.AddMinutes(2);
 
-        // Buscar candidatos, sin incluir los eventos de Kafka.
+        // Each dispatcher only leases messages for its own transport.
         var candidatos = await db.OutboxMessages
             .AsNoTracking()
             .Where(x =>
-                x.Destino == OutboxDestino.RabbitMq &&
+                x.Destino == destino &&
                 (
                     (
                         (x.Estado == OutboxEstado.Pendiente ||
@@ -44,7 +48,7 @@ public sealed class EfOutboxRepository(NexoRutaDbContext db)
             var actualizados = await db.OutboxMessages
                 .Where(x =>
                     x.Id == id &&
-                    x.Destino == OutboxDestino.RabbitMq &&
+                    x.Destino == destino &&
                     (
                         (
                             (x.Estado == OutboxEstado.Pendiente ||
@@ -68,7 +72,7 @@ public sealed class EfOutboxRepository(NexoRutaDbContext db)
                         (DateTimeOffset?)reservaHasta)
                     .SetProperty(
                         x => x.Intentos,
-                        x => x.Intentos + 1),
+                        x => x.Intentos < int.MaxValue ? x.Intentos + 1 : x.Intentos),
                     cancellationToken);
 
             if (actualizados == 1)
