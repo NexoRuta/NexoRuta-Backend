@@ -63,9 +63,8 @@ public sealed class Worker(
                 catch (Exception ex)
                 {
                     logger.LogWarning(
-                        ex,
-                        "Falló la publicación del mensaje {MensajeId}",
-                        mensaje.Id);
+                        "Falló la publicación del mensaje {MensajeId}. ErrorType: {ErrorType}",
+                        mensaje.Id, ex.GetType().Name);
 
                     // 3. Registrar error y programar reintento.
                     var registrado = await repositorio.MarcarErrorAsync(
@@ -113,8 +112,7 @@ public sealed class Worker(
             catch (Exception ex)
             {
                 logger.LogError(
-                    ex,
-                    "Error en el procesamiento del Outbox.");
+                    "Error en el procesamiento del Outbox. ErrorType: {ErrorType}", ex.GetType().Name);
 
                 try
                 {

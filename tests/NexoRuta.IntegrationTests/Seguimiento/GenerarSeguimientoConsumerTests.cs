@@ -7,12 +7,20 @@ using NexoRuta.Worker.Messaging;
 using RabbitMQ.Client;
 using Testcontainers.RabbitMq;
 using System.Text.Json;
+using NexoRuta.Infrastructure.Seguimiento.Processing;
+using Microsoft.EntityFrameworkCore;
+using Npgsql;
 namespace NexoRuta.IntegrationTests.Seguimiento;
 
 public sealed class GenerarSeguimientoConsumerTests
 {
-    [Fact]
-    public async Task MensajeConJsonInvalido_SeEnviaAFallidos()
+    [Theory]
+    [InlineData("{ invalid JSON", false)]
+    [InlineData("null", false)]
+    [InlineData("{}", false)]
+    [InlineData("{\"envioId\":\"bad-guid\"}", false)]
+    [InlineData("{}", true)]
+    public async Task MensajeConContratoInvalido_SeEnviaAFallidos(string payload, bool idInvalido)
     {
         // ARRANGE: RabbitMQ completamente aislado.
         await using var rabbitMq =
@@ -43,11 +51,10 @@ public sealed class GenerarSeguimientoConsumerTests
 
         await RabbitMqSeguimientoTopology.DeclararAsync(canal);
 
-        var messageId = Guid.NewGuid().ToString("D");
+        var messageId = idInvalido ? "invalid-id" : Guid.NewGuid().ToString("D");
 
         // JSON intencionalmente incorrecto.
-        var contenido = Encoding.UTF8.GetBytes(
-            "{ esto no es JSON válido");
+        var contenido = Encoding.UTF8.GetBytes(payload);
 
         await canal.BasicPublishAsync(
             exchange: string.Empty,
@@ -162,11 +169,19 @@ public sealed class GenerarSeguimientoConsumerTests
     }
 
     [Theory]
-    [InlineData(0, false)]
-    [InlineData(2, true)]
+    [InlineData(0, false, "processing", null)]
+    [InlineData(2, true, "processing", null)]
+    [InlineData(2, false, "timeout", null)]
+    [InlineData(int.MaxValue, false, "timeout", null)]
+    [InlineData(4, false, "processing", 0)]
+    [InlineData(4, true, "processing", 2)]
+    [InlineData(4, false, "timeout", 2)]
+    [InlineData(2, false, "postgres", null)]
     public async Task ErrorDeProcesamiento_RedirigeSegunIntentos(
         int intentosPrevios,
-        bool debeIrAFallidos)
+        bool debeIrAFallidos,
+        string causa,
+        int? fallosPrevios)
     {
         await using var rabbitMq =
             new RabbitMqBuilder("rabbitmq:4-management")
@@ -215,8 +230,16 @@ public sealed class GenerarSeguimientoConsumerTests
                     Uri.UnescapeDataString(credenciales[1])
             });
 
-        // Registramos el consumidor, pero NO el procesador.
-        // Esto provoca un fallo de procesamiento controlado.
+        var transitorio = causa != "processing";
+        // Inject the concrete shape returned by Npgsql's default EF execution strategy.
+        if (transitorio)
+            builder.Services.AddScoped<ProcesarGeneracionSeguimiento>(_ =>
+                throw (causa == "postgres"
+                    ? new InvalidOperationException("EF strategy", new DbUpdateException("EF",
+                        new PostgresException("Serialization failure", "ERROR", "ERROR", "40001")))
+                    : new TimeoutException("Simulated infrastructure timeout.")));
+
+        // Without a processor, DI throws a non-transient processing error.
         builder.Services
             .AddHostedService<GenerarSeguimientoConsumer>();
 
@@ -226,6 +249,14 @@ public sealed class GenerarSeguimientoConsumerTests
 
         try
         {
+            var headers = new Dictionary<string, object?>
+            {
+                ["x-nexoruta-retry-count"] = intentosPrevios,
+                ["x-test-preserved"] = "unchanged"
+            };
+            if (fallosPrevios.HasValue)
+                headers["x-nexoruta-processing-failure-count"] = fallosPrevios.Value;
+
             await canal.BasicPublishAsync(
                 exchange: string.Empty,
                 routingKey:
@@ -236,11 +267,9 @@ public sealed class GenerarSeguimientoConsumerTests
                     MessageId = messageId,
                     Type = "GenerarSeguimiento",
                     ContentType = "application/json",
+                    CorrelationId = messageId,
                     Persistent = true,
-                    Headers = new Dictionary<string, object?>
-                    {
-                        ["x-nexoruta-retry-count"] = intentosPrevios
-                    }
+                    Headers = headers
                 },
                 body: contenido);
 
@@ -282,11 +311,21 @@ public sealed class GenerarSeguimientoConsumerTests
 
             var reintentosEsperados = debeIrAFallidos
                 ? intentosPrevios
-                : intentosPrevios + 1;
+                : intentosPrevios == int.MaxValue ? int.MaxValue : intentosPrevios + 1;
 
             Assert.Equal(
                 reintentosEsperados,
                 Convert.ToInt32(valorReintentos));
+
+            Assert.Equal(transitorio ? "transient" : "processing", Encoding.UTF8.GetString(
+                Assert.IsType<byte[]>(recibido.BasicProperties.Headers["x-nexoruta-error-kind"])));
+            var presupuestoPrevio = fallosPrevios ?? Math.Min(intentosPrevios, 3);
+            Assert.Equal(transitorio ? presupuestoPrevio : Math.Min(presupuestoPrevio, 2) + 1,
+                Convert.ToInt32(recibido.BasicProperties.Headers["x-nexoruta-processing-failure-count"]));
+            Assert.Equal(messageId, recibido.BasicProperties.CorrelationId);
+            Assert.True(recibido.BasicProperties.Persistent);
+            Assert.Equal("unchanged", Encoding.UTF8.GetString(
+                Assert.IsType<byte[]>(recibido.BasicProperties.Headers["x-test-preserved"])));
 
             // Confirmar la copia de reintento en esta prueba
             // para que no vuelva a la cola principal por TTL.
@@ -313,6 +352,75 @@ public sealed class GenerarSeguimientoConsumerTests
 
         Assert.Equal(0u, principal.MessageCount);
         Assert.Equal(0u, noEsperada.MessageCount);
+    }
+
+    [Fact]
+    public async Task RepublicacionSinDestinoConfirmado_NoHaceAckDelOriginal()
+    {
+        await using var rabbitMq = new RabbitMqBuilder("rabbitmq:4-management").Build();
+        await rabbitMq.StartAsync();
+        var uri = new Uri(rabbitMq.GetConnectionString());
+        var credenciales = uri.UserInfo.Split(':', 2);
+        await using var conexion = await new ConnectionFactory { Uri = uri }.CreateConnectionAsync();
+        await using var canal = await conexion.CreateChannelAsync(new CreateChannelOptions(
+            publisherConfirmationsEnabled: true, publisherConfirmationTrackingEnabled: true));
+
+        var builder = Host.CreateApplicationBuilder();
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["RabbitMq:Host"] = uri.Host,
+            ["RabbitMq:Port"] = uri.Port.ToString(),
+            ["RabbitMq:Username"] = Uri.UnescapeDataString(credenciales[0]),
+            ["RabbitMq:Password"] = Uri.UnescapeDataString(credenciales[1])
+        });
+        builder.Services.AddHostedService<GenerarSeguimientoConsumer>();
+        using var host = builder.Build();
+        var detenido = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var registro = host.Services.GetRequiredService<IHostApplicationLifetime>()
+            .ApplicationStopping.Register(() => detenido.TrySetResult());
+        var contenido = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            envioId = Guid.NewGuid(), operadorId = Guid.NewGuid()
+        });
+        var messageId = Guid.NewGuid().ToString("D");
+
+        await host.StartAsync();
+        try
+        {
+            // Wait for the real consumer to declare topology and register itself.
+            for (var i = 0; i < 200; i++)
+            {
+                await RabbitMqSeguimientoTopology.DeclararAsync(canal);
+                if ((await canal.QueueDeclarePassiveAsync(RabbitMqSeguimientoTopology.ColaPrincipal)).ConsumerCount == 1)
+                    break;
+                await Task.Delay(100);
+            }
+            Assert.Equal(1u, (await canal.QueueDeclarePassiveAsync(
+                RabbitMqSeguimientoTopology.ColaPrincipal)).ConsumerCount);
+
+            // Remove ONLY the retry queue in this owned, temporary broker.
+            await canal.QueueDeleteAsync(RabbitMqSeguimientoTopology.ColaReintento);
+            await canal.BasicPublishAsync(string.Empty, RabbitMqSeguimientoTopology.ColaPrincipal, true,
+                new BasicProperties { MessageId = messageId, Type = "GenerarSeguimiento", Persistent = true },
+                contenido);
+            await detenido.Task.WaitAsync(TimeSpan.FromSeconds(20));
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+
+        // Channel close must release the original, rather than silently lose it.
+        var original = await canal.BasicGetAsync(RabbitMqSeguimientoTopology.ColaPrincipal, false);
+        Assert.NotNull(original);
+        Assert.True(original.Redelivered);
+        Assert.Equal(messageId, original.BasicProperties.MessageId);
+        Assert.Equal(contenido, original.Body.ToArray());
+        Assert.False(original.BasicProperties.Headers?.ContainsKey("x-nexoruta-retry-count") ?? false);
+        Assert.False(original.BasicProperties.Headers?.ContainsKey("x-nexoruta-error-kind") ?? false);
+        Assert.Equal(0u, (await canal.QueueDeclarePassiveAsync(
+            RabbitMqSeguimientoTopology.ColaFallidos)).MessageCount);
+        await canal.BasicAckAsync(original.DeliveryTag, false);
     }
 
 }

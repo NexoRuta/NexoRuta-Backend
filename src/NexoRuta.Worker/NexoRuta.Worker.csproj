@@ -13,6 +13,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="NexoRuta.UnitTests" />
     <ProjectReference Include="..\NexoRuta.Application\NexoRuta.Application.csproj" />
     <ProjectReference Include="..\NexoRuta.Infrastructure\NexoRuta.Infrastructure.csproj" />
   </ItemGroup>

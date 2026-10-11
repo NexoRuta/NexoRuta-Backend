@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using NexoRuta.Application.Seguimiento.Interfaces;
 using NexoRuta.Application.Seguimiento.UseCases;
 using NexoRuta.Infrastructure.Persistence;
@@ -26,8 +27,10 @@ public sealed class GenerarSeguimientoConsumerExitoTests(
     PostgresFixture postgres
 ) : IClassFixture<PostgresFixture>
 {
-    [Fact]
-    public async Task MensajeValido_GeneraSeguimientoYConfirmaEntrega()
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task MensajeValido_GeneraSeguimientoYConfirmaCadaEntrega(int entregas)
     {
         // ARRANGE: PostgreSQL y RabbitMQ aislados.
         var database = await postgres.CreateDatabaseAsync();
@@ -143,6 +146,8 @@ public sealed class GenerarSeguimientoConsumerExitoTests(
             RandomNumberGenerator.GetBytes(32));
 
         var builder = Host.CreateApplicationBuilder();
+        var acknowledgements = new AckLogger(entregas);
+        builder.Services.AddSingleton<ILogger<GenerarSeguimientoConsumer>>(acknowledgements);
 
         builder.Configuration.AddInMemoryCollection(
             new Dictionary<string, string?>
@@ -186,7 +191,9 @@ public sealed class GenerarSeguimientoConsumerExitoTests(
         try
         {
             // ACT: publicar el mensaje original del Outbox.
-            await canal.BasicPublishAsync(
+            for (var i = 0; i < entregas; i++)
+            {
+                await canal.BasicPublishAsync(
                 exchange: string.Empty,
                 routingKey:
                     RabbitMqSeguimientoTopology.ColaPrincipal,
@@ -199,6 +206,7 @@ public sealed class GenerarSeguimientoConsumerExitoTests(
                     Persistent = true
                 },
                 body: contenido);
+            }
 
             // Esperar hasta 20 segundos el COMMIT PostgreSQL.
             var procesado = false;
@@ -227,8 +235,8 @@ public sealed class GenerarSeguimientoConsumerExitoTests(
                 "El consumidor no registró el mensaje " +
                 "en PostgreSQL dentro de 20 segundos.");
 
-            // Dar oportunidad al envío del ACK tras el COMMIT.
-            await Task.Delay(300);
+            // Wait for ACK writes, not an arbitrary delay after the first COMMIT.
+            await acknowledgements.Completed.Task.WaitAsync(TimeSpan.FromSeconds(20));
         }
         finally
         {
@@ -252,6 +260,11 @@ public sealed class GenerarSeguimientoConsumerExitoTests(
                 .ToListAsync());
 
         Assert.Equal(enlace.TokenHash, entrega.TokenHash);
+        Assert.NotEmpty(entrega.TokenCifrado);
+        var cifrador = new CifradorTokenSeguimiento(builder.Configuration);
+        Assert.Equal(enlace.TokenHash,
+            NexoRuta.Application.Seguimiento.Services.GeneradorTokenSeguimiento.CalcularHash(
+                cifrador.Descifrar(entrega)));
 
         Assert.Equal(
             1,
@@ -269,5 +282,23 @@ public sealed class GenerarSeguimientoConsumerExitoTests(
 
         Assert.Equal(0u, principal.MessageCount);
         Assert.Equal(0u, fallidos.MessageCount);
+        var reintento = await canal.QueueDeclarePassiveAsync(RabbitMqSeguimientoTopology.ColaReintento);
+        Assert.Equal(0u, reintento.MessageCount);
+        Assert.Equal(entregas, acknowledgements.Count);
+    }
+
+    private sealed class AckLogger(int expected) : ILogger<GenerarSeguimientoConsumer>
+    {
+        private int count;
+        public int Count => Volatile.Read(ref count);
+        public TaskCompletionSource Completed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state,
+            Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (eventId.Id == 1001 && Interlocked.Increment(ref count) == expected)
+                Completed.TrySetResult();
+        }
     }
 }

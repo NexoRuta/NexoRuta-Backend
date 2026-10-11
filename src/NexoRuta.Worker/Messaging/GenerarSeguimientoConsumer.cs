@@ -1,9 +1,12 @@
 
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
 using NexoRuta.Infrastructure.Seguimiento.Processing;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
+using RabbitMQ.Client.Exceptions;
 
 namespace NexoRuta.Worker.Messaging;
 
@@ -15,6 +18,7 @@ public sealed class GenerarSeguimientoConsumer(
 ) : BackgroundService
 {
     private const string HeaderIntentos = "x-nexoruta-retry-count";
+    private const string HeaderFallosProcesamiento = "x-nexoruta-processing-failure-count";
     private const int MaximoIntentos = 3;
 
     private static readonly JsonSerializerOptions JsonOptions =
@@ -58,6 +62,24 @@ public sealed class GenerarSeguimientoConsumer(
         await using var connection =
             await factory.CreateConnectionAsync(stoppingToken);
 
+        connection.ConnectionShutdownAsync += (_, cierre) =>
+        {
+            logger.LogWarning("Conexión RabbitMQ cerrada. Initiator: {Initiator}, Code: {Code}",
+                cierre.Initiator, cierre.ReplyCode);
+            return Task.CompletedTask;
+        };
+        connection.RecoverySucceededAsync += (_, _) =>
+        {
+            logger.LogInformation("Conexión RabbitMQ recuperada; consumidor y topología restaurados.");
+            return Task.CompletedTask;
+        };
+        connection.ConnectionRecoveryErrorAsync += (_, error) =>
+        {
+            logger.LogError("Recuperación RabbitMQ fallida. ErrorType: {ErrorType}",
+                error.Exception.GetType().Name);
+            return Task.CompletedTask;
+        };
+
         // Canal para consumir y confirmar mensajes.
         await using var canalConsumo =
             await connection.CreateChannelAsync(
@@ -89,13 +111,19 @@ public sealed class GenerarSeguimientoConsumer(
         consumer.ReceivedAsync += async (_, entrega) =>
         {
             var intentosPrevios = 0;
+            var fallosPrevios = 0;
+            var contratoValidado = false;
+            Guid? idLog = Guid.TryParse(entrega.BasicProperties.MessageId, out var id)
+                && id != Guid.Empty ? id : null;
 
             try
             {
                 try
                 {
-                    intentosPrevios = LeerIntentos(
-                        entrega.BasicProperties);
+                    intentosPrevios = LeerContador(entrega.BasicProperties, HeaderIntentos);
+                    // Legacy messages only counted non-transient processing retries.
+                    fallosPrevios = LeerContador(entrega.BasicProperties,
+                        HeaderFallosProcesamiento, Math.Min(intentosPrevios, MaximoIntentos));
 
                     if (!Guid.TryParse(
                             entrega.BasicProperties.MessageId,
@@ -126,6 +154,8 @@ public sealed class GenerarSeguimientoConsumer(
                             "Payload de seguimiento inválido.");
                     }
 
+                    contratoValidado = true;
+
                     await using var scope =
                         scopeFactory.CreateAsyncScope();
 
@@ -152,26 +182,13 @@ public sealed class GenerarSeguimientoConsumer(
                 }
                 catch (Exception errorProcesamiento)
                 {
-                    var errorPermanente =
-                        errorProcesamiento is InvalidDataException
-                            or JsonException;
-
-                    var intentoActual = Math.Min(
-                        intentosPrevios + 1,
-                        MaximoIntentos);
-
-                    var enviarAFallidos =
-                        errorPermanente ||
-                        intentoActual >= MaximoIntentos;
+                    var tipoError = ClasificarError(errorProcesamiento, contratoValidado);
+                    var plan = PlanificarFallo(tipoError, intentosPrevios, fallosPrevios);
+                    var enviarAFallidos = plan.Fallidos;
 
                     var destino = enviarAFallidos
                         ? RabbitMqSeguimientoTopology.ColaFallidos
                         : RabbitMqSeguimientoTopology.ColaReintento;
-
-                    // Solo incrementar cuando realmente se programa un reintento.
-                    var reintentosAcumulados = enviarAFallidos
-                        ? intentosPrevios
-                        : intentoActual;
 
                     // Conservar identidad y contenido del mensaje.
                     var propiedades = new BasicProperties
@@ -191,15 +208,22 @@ public sealed class GenerarSeguimientoConsumer(
 
                         Persistent = true,
 
-                        Headers = new Dictionary<string, object?>
-                        {
-                            [HeaderIntentos] = reintentosAcumulados,
-                            ["x-nexoruta-error-kind"] =
-                                errorPermanente
-                                    ? "invalid"
-                                    : "processing"
-                        }
+                        Headers = entrega.BasicProperties.Headers is { } headers
+                            ? new Dictionary<string, object?>(headers)
+                            : new Dictionary<string, object?>()
                     };
+
+                    propiedades.Headers[HeaderIntentos] = plan.Reintentos;
+                    propiedades.Headers[HeaderFallosProcesamiento] = plan.FallosProcesamiento;
+                    propiedades.Headers["x-nexoruta-error-kind"] = tipoError;
+
+                    logger.LogWarning(
+                        "Trasladando {MessageId} a {Destino}. ErrorKind: {ErrorKind}, " +
+                        "ErrorType: {ErrorType}, SqlState: {SqlState}, RetryCount: {RetryCount}, " +
+                        "ProcessingFailureCount: {ProcessingFailureCount}, Redelivered: {Redelivered}",
+                        idLog, destino, tipoError, errorProcesamiento.GetType().Name,
+                        SqlState(errorProcesamiento), plan.Reintentos,
+                        plan.FallosProcesamiento, entrega.Redelivered);
 
                     // Espera el publisher confirm del broker.
                     // Si falla, NO se llega al ACK original.
@@ -211,14 +235,8 @@ public sealed class GenerarSeguimientoConsumer(
                         body: entrega.Body,
                         cancellationToken: stoppingToken);
 
-                    logger.LogWarning(
-                        errorProcesamiento,
-                        "Mensaje {MessageId} enviado a {Destino}. " +
-                        "Intento {Intento}/{Maximo}.",
-                        entrega.BasicProperties.MessageId,
-                        destino,
-                        intentoActual,
-                        MaximoIntentos);
+                    logger.LogInformation("Destino confirmado para {MessageId}: {Destino}",
+                        idLog, destino);
                 }
 
                 // Se ejecuta únicamente si:
@@ -228,20 +246,26 @@ public sealed class GenerarSeguimientoConsumer(
                     deliveryTag: entrega.DeliveryTag,
                     multiple: false,
                     cancellationToken: stoppingToken);
+
+                logger.LogInformation(new EventId(1001, "SeguimientoDeliveryAcknowledged"),
+                    "ACK enviado para {MessageId}. DeliveryTag: {DeliveryTag}, Redelivered: {Redelivered}",
+                    idLog, entrega.DeliveryTag, entrega.Redelivered);
             }
             catch (OperationCanceledException)
                 when (stoppingToken.IsCancellationRequested)
             {
                 // El mensaje queda sin confirmar.
+                logger.LogInformation("Cierre sin ACK para {MessageId}; entrega recuperable.", idLog);
             }
             catch (Exception errorInfraestructura)
             {
                 logger.LogCritical(
-                    errorInfraestructura,
                     "No se pudo confirmar ni trasladar el mensaje " +
                     "{MessageId}. Se detiene el Worker para evitar " +
-                    "pérdida de control sobre la entrega.",
-                    entrega.BasicProperties.MessageId);
+                    "pérdida de control sobre la entrega. ErrorType: {ErrorType}, " +
+                    "Returned: {Returned}, DeliveryTag: {DeliveryTag}",
+                    idLog, errorInfraestructura.GetType().Name,
+                    errorInfraestructura is PublishException { IsReturn: true }, entrega.DeliveryTag);
 
                 // Cerrar la conexión liberará cualquier entrega
                 // que permanezca sin ACK.
@@ -272,15 +296,54 @@ public sealed class GenerarSeguimientoConsumer(
         }
     }
 
-    private static int LeerIntentos(
-        IReadOnlyBasicProperties propiedades)
+    internal static string ClasificarError(Exception error, bool contratoValidado)
+    {
+        if (!contratoValidado && error is InvalidDataException or JsonException)
+            return "invalid";
+
+        return EsTransitorio(error) ? "transient" : "processing";
+    }
+
+    private static bool EsTransitorio(Exception error) => error switch
+    {
+        NpgsqlException postgres => postgres.IsTransient,
+        TimeoutException => true,
+        DbUpdateException { InnerException: { } causa } => EsTransitorio(causa),
+        // Npgsql's default EF strategy wraps concrete transient causes in this CLR exception.
+        InvalidOperationException { InnerException: { } causa } => EsTransitorio(causa),
+        _ => false
+    };
+
+    private static string? SqlState(Exception error) => error switch
+    {
+        PostgresException postgres => postgres.SqlState,
+        DbUpdateException { InnerException: { } causa } => SqlState(causa),
+        InvalidOperationException { InnerException: { } causa } => SqlState(causa),
+        _ => null
+    };
+
+    internal static (bool Fallidos, int Reintentos, int FallosProcesamiento) PlanificarFallo(
+        string tipoError, int reintentos, int fallosProcesamiento)
+    {
+        var fallos = tipoError == "processing"
+            ? Math.Min(fallosProcesamiento, MaximoIntentos - 1) + 1
+            : fallosProcesamiento;
+        var fallidos = tipoError == "invalid" ||
+            (tipoError == "processing" && fallos >= MaximoIntentos);
+        return (fallidos,
+            fallidos || reintentos == int.MaxValue ? reintentos : reintentos + 1,
+            fallos);
+    }
+
+    private static int LeerContador(
+        IReadOnlyBasicProperties propiedades, string nombre, int predeterminado = 0)
     {
         if (propiedades.Headers is null ||
             !propiedades.Headers.TryGetValue(
-                HeaderIntentos,
+                nombre,
                 out var valor))
         {
-            return 0;
+            return predeterminado;
         }
 
         return valor switch
