@@ -10,12 +10,14 @@ using NexoRuta.Infrastructure.Persistence;
 
 namespace NexoRuta.IntegrationTests.Fixtures;
 
-public sealed class IntegrationApiFactory(IntegrationDatabase database) : WebApplicationFactory<Program>
+public sealed class IntegrationApiFactory(IntegrationDatabase database, string environment = "Testing",
+    IDictionary<string, string?>? settings = null) : WebApplicationFactory<Program>
 {
     protected override IHost CreateHost(IHostBuilder builder)
     {
         // Minimal hosting reads configuration before ConfigureAppConfiguration runs.
         builder.ConfigureHostConfiguration(configuration =>
+        {
             configuration.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["ConnectionStrings:Postgres"] = database.ConnectionString,
@@ -25,13 +27,15 @@ public sealed class IntegrationApiFactory(IntegrationDatabase database) : WebApp
                 ["AccesoInicial:OperadorNombre"] = "Integration operator",
                 ["AccesoInicial:ComercioNombre"] = "Integration commerce",
                 ["Tracking:PublicBaseUrl"] = "https://tracking.example.test",
-            }));
+            });
+            if (settings is not null) configuration.AddInMemoryCollection(settings);
+        });
         return base.CreateHost(builder);
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.UseEnvironment("Testing");
+        builder.UseEnvironment(environment);
         builder.ConfigureTestServices(services =>
         {
             // Replace the registration as well: startup migrations/seeding must use our database.

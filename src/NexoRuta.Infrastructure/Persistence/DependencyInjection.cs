@@ -49,6 +49,7 @@ public static class DependencyInjection
         services.AddScoped<CrearEnlaceSeguimientoUseCase>();
 
         services.AddScoped<ConsultarSeguimientoPublicoUseCase>();
+        services.AddScoped<RecuperarEnlaceSeguimiento>();
 
 
         // Fin M05

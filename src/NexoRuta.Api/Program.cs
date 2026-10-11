@@ -28,6 +28,11 @@ builder.Services.AddAuthorization(options => options.AddPolicy(nameof(TipoAcceso
 
 builder.Services.AddHealthChecks().AddCheck<PostgreSqlHealthCheck>("postgres");
 
+// ponytail: identity selection has no credentials; expose token recovery only
+// in Development until the existing identity mechanism is replaced with real authentication.
+builder.Services.AddAuthorization(options => options.AddPolicy("seguimiento-demo",
+    policy => policy.RequireAuthenticatedUser().RequireAssertion(_ => builder.Environment.IsDevelopment())));
+
 if (builder.Configuration.GetValue<bool>("OpenTelemetry:Enabled"))
 {
     builder.Services.AddOpenTelemetry()
