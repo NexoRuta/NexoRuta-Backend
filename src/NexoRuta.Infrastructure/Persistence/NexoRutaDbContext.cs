@@ -1,6 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using NexoRuta.Domain.Administracion;
 using NexoRuta.Domain.Envios;
+using NexoRuta.Domain.Seguimiento;
+using NexoRuta.Infrastructure.Seguimiento.Persistence;
+using NexoRuta.Infrastructure.Outbox;
 
 namespace NexoRuta.Infrastructure.Persistence;
 
@@ -14,7 +17,12 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
     public DbSet<Direccion> Direcciones => Set<Direccion>();
     public DbSet<Envio> Envios => Set<Envio>();
     public DbSet<Bulto> Bultos => Set<Bulto>();
+    public DbSet<EnlaceSeguimiento> EnlacesSeguimiento => Set<EnlaceSeguimiento>();
 
+    public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+    public DbSet<ProcessedMessage> ProcessedMessages => Set<ProcessedMessage>();
+
+    public DbSet<EntregaSeguimiento> EntregasSeguimiento => Set<EntregaSeguimiento>();
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Operador>(entity =>
@@ -104,5 +112,116 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
                 .HasPrincipalKey(x => new { x.OperadorId, x.Id })
                 .OnDelete(DeleteBehavior.Cascade);
         });
+
+        modelBuilder.Entity<OutboxMessage>(entity =>
+        {
+            entity.ToTable("OutboxMessages");
+
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.ProcesadorId);
+
+            entity.Property(x => x.ReservaHastaUtc);
+
+            entity.Property(x => x.Tipo)
+                .HasMaxLength(100)
+                .IsRequired();
+
+            entity.Property(x => x.Destino)
+                .HasConversion<string>()
+                .HasMaxLength(32)
+                .IsRequired();
+
+            entity.Property(x => x.Estado)
+                .HasConversion<string>()
+                .HasMaxLength(32)
+                .IsRequired();
+
+            entity.Property(x => x.Payload)
+                .HasColumnType("jsonb")
+                .IsRequired();
+
+            entity.Property(x => x.UltimoError)
+                .HasMaxLength(2000);
+
+            entity.HasIndex(x => new
+            {
+                x.Estado,
+                x.ProximoIntentoEnUtc
+            });
+
+            entity.HasOne<Envio>()
+                .WithMany()
+                .HasForeignKey(x => new
+                {
+                    x.OperadorId,
+                    x.EnvioId
+                })
+                .HasPrincipalKey(x => new
+                {
+                    x.OperadorId,
+                    x.Id
+                })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ProcessedMessage>(entity =>
+        {
+            entity.ToTable("ProcessedMessages");
+
+            entity.HasKey(x => new
+            {
+                x.MessageId,
+                x.Consumer
+            });
+
+            entity.Property(x => x.Consumer)
+                .HasMaxLength(100)
+                .IsRequired();
+
+            entity.Property(x => x.ProcessedAtUtc)
+                .IsRequired();
+        });
+
+        modelBuilder.Entity<EntregaSeguimiento>(entity =>
+        {
+            entity.ToTable("EntregasSeguimiento");
+
+            entity.HasKey(x => x.Id);
+
+            entity.Property(x => x.TokenHash)
+                .HasMaxLength(64)
+                .IsRequired();
+
+            entity.HasIndex(x => x.TokenHash)
+                .IsUnique();
+
+            entity.Property(x => x.TokenCifrado)
+                .HasColumnType("bytea")
+                .IsRequired();
+
+            entity.Property(x => x.Nonce)
+                .HasColumnType("bytea")
+                .IsRequired();
+
+            entity.Property(x => x.Tag)
+                .HasColumnType("bytea")
+                .IsRequired();
+
+            entity.HasOne<NexoRuta.Domain.Envios.Envio>()
+                .WithMany()
+                .HasForeignKey(x => new
+                {
+                    x.OperadorId,
+                    x.EnvioId
+                })
+                .HasPrincipalKey(x => new
+                {
+                    x.OperadorId,
+                    x.Id
+                })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.ApplyConfiguration(new EnlaceSeguimientoConfiguration());
     }
 }

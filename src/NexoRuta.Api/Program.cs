@@ -8,6 +8,8 @@ using NexoRuta.Infrastructure.Persistence;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
+using Microsoft.AspNetCore.RateLimiting;
+using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -26,6 +28,11 @@ builder.Services.AddAuthorization(options => options.AddPolicy(nameof(TipoAcceso
 
 builder.Services.AddHealthChecks().AddCheck<PostgreSqlHealthCheck>("postgres");
 
+// ponytail: identity selection has no credentials; expose token recovery only
+// in Development until the existing identity mechanism is replaced with real authentication.
+builder.Services.AddAuthorization(options => options.AddPolicy("seguimiento-demo",
+    policy => policy.RequireAuthenticatedUser().RequireAssertion(_ => builder.Environment.IsDevelopment())));
+
 if (builder.Configuration.GetValue<bool>("OpenTelemetry:Enabled"))
 {
     builder.Services.AddOpenTelemetry()
@@ -41,6 +48,28 @@ if (builder.Configuration.GetValue<bool>("OpenTelemetry:Enabled"))
             .AddOtlpExporter());
 }
 
+
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode =
+        StatusCodes.Status429TooManyRequests;
+
+    options.AddPolicy("seguimiento-publico", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey:
+                context.Connection.RemoteIpAddress?.ToString()
+                ?? "sin-ip",
+
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 20,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
+});
+
+
 var app = builder.Build();
 
 {
@@ -53,6 +82,8 @@ var app = builder.Build();
 if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 
+app.UseRouting();
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();

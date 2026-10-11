@@ -1,3 +1,4 @@
+
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NexoRuta.Api.Features.Envios.Contracts.Requests;
@@ -30,15 +31,17 @@ public sealed class EnviosController(
     {
         try
         {
-            var created = await crearEnvio.EjecutarAsync(new CrearEnvioCommand(
-                OperadorId: request.OperadorId!.Value,
-                DestinatarioNombre: request.DestinatarioNombre,
-                Direccion: request.Direccion,
-                CodigoBulto: request.CodigoBulto,
-                PesoGramos: request.PesoGramos,
-                LargoCentimetros: request.LargoCentimetros,
-                AnchoCentimetros: request.AnchoCentimetros,
-                AltoCentimetros: request.AltoCentimetros), cancellationToken);
+            var created = await crearEnvio.EjecutarAsync(
+                new CrearEnvioCommand(
+                    OperadorId: request.OperadorId!.Value,
+                    DestinatarioNombre: request.DestinatarioNombre,
+                    Direccion: request.Direccion,
+                    CodigoBulto: request.CodigoBulto,
+                    PesoGramos: request.PesoGramos,
+                    LargoCentimetros: request.LargoCentimetros,
+                    AnchoCentimetros: request.AnchoCentimetros,
+                    AltoCentimetros: request.AltoCentimetros),
+                cancellationToken);
 
             return Created("/api/envios", EnvioCreado.Desde(created));
         }
@@ -48,11 +51,15 @@ public sealed class EnviosController(
         }
         catch (AccesoNoPermitidoException exception)
         {
-            return Problem(exception.Message, statusCode: StatusCodes.Status403Forbidden);
+            return Problem(
+                exception.Message,
+                statusCode: StatusCodes.Status403Forbidden);
         }
         catch (AccesoActualNoDisponibleException exception)
         {
-            return Problem(exception.Message, statusCode: StatusCodes.Status503ServiceUnavailable);
+            return Problem(
+                exception.Message,
+                statusCode: StatusCodes.Status503ServiceUnavailable);
         }
         catch (ArgumentException exception)
         {
@@ -64,16 +71,20 @@ public sealed class EnviosController(
     [ProducesResponseType<IReadOnlyList<EnvioDetalle>>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
-    public async Task<IActionResult> GetShipments(CancellationToken cancellationToken)
+    public async Task<IActionResult> GetShipments(
+        CancellationToken cancellationToken)
     {
         try
         {
             var envios = await listarEnvios.EjecutarAsync(cancellationToken);
+
             return Ok(envios.Select(EnvioDetalle.Desde).ToArray());
         }
         catch (AccesoActualNoDisponibleException exception)
         {
-            return Problem(exception.Message, statusCode: StatusCodes.Status503ServiceUnavailable);
+            return Problem(
+                exception.Message,
+                statusCode: StatusCodes.Status503ServiceUnavailable);
         }
     }
 }

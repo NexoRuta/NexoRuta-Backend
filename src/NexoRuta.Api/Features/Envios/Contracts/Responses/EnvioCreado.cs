@@ -1,4 +1,4 @@
-namespace NexoRuta.Api.Features.Envios.Contracts.Responses;
+﻿namespace NexoRuta.Api.Features.Envios.Contracts.Responses;
 
 // Keep the published schema names and flat JSON independent of Application results.
 public sealed record EnvioCreado(
@@ -15,6 +15,7 @@ public sealed record EnvioCreado(
     decimal AnchoCentimetros,
     decimal AltoCentimetros)
 {
+
     public static EnvioCreado Desde(Application.Envios.Results.EnvioCreado envio) => new(
         Id: envio.Id,
         OperadorId: envio.Origen.OperadorId,

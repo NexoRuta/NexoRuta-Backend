@@ -225,6 +225,163 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                     b.ToTable("Envios", (string)null);
                 });
 
+            modelBuilder.Entity("NexoRuta.Domain.Seguimiento.EnlaceSeguimiento", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreadoEnUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("EnvioId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("ExpiraEnUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("OperadorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("RevocadoEnUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("OperadorId", "EnvioId");
+
+                    b.ToTable("EnlacesSeguimiento", (string)null);
+                });
+
+            modelBuilder.Entity("NexoRuta.Infrastructure.Outbox.OutboxMessage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreadoEnUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Destino")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<Guid>("EnvioId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Estado")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<int>("Intentos")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("OperadorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<Guid?>("ProcesadorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("ProximoIntentoEnUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("PublicadoEnUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("ReservaHastaUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Tipo")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("UltimoError")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Estado", "ProximoIntentoEnUtc");
+
+                    b.HasIndex("OperadorId", "EnvioId");
+
+                    b.ToTable("OutboxMessages", (string)null);
+                });
+
+            modelBuilder.Entity("NexoRuta.Infrastructure.Outbox.ProcessedMessage", b =>
+                {
+                    b.Property<Guid>("MessageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Consumer")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTimeOffset>("ProcessedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("MessageId", "Consumer");
+
+                    b.ToTable("ProcessedMessages", (string)null);
+                });
+
+            modelBuilder.Entity("NexoRuta.Infrastructure.Seguimiento.Persistence.EntregaSeguimiento", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreadoEnUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("EnvioId")
+                        .HasColumnType("uuid");
+
+                    b.Property<byte[]>("Nonce")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<Guid>("OperadorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<byte[]>("Tag")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<byte[]>("TokenCifrado")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("OperadorId", "EnvioId");
+
+                    b.ToTable("EntregasSeguimiento", (string)null);
+                });
+
             modelBuilder.Entity("NexoRuta.Domain.Administracion.AccesoUsuario", b =>
                 {
                     b.HasOne("NexoRuta.Domain.Administracion.Comercio", null)
@@ -302,6 +459,36 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                     b.HasOne("NexoRuta.Domain.Envios.Direccion", null)
                         .WithMany()
                         .HasForeignKey("OperadorId", "DireccionId")
+                        .HasPrincipalKey("OperadorId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NexoRuta.Domain.Seguimiento.EnlaceSeguimiento", b =>
+                {
+                    b.HasOne("NexoRuta.Domain.Envios.Envio", null)
+                        .WithMany()
+                        .HasForeignKey("OperadorId", "EnvioId")
+                        .HasPrincipalKey("OperadorId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NexoRuta.Infrastructure.Outbox.OutboxMessage", b =>
+                {
+                    b.HasOne("NexoRuta.Domain.Envios.Envio", null)
+                        .WithMany()
+                        .HasForeignKey("OperadorId", "EnvioId")
+                        .HasPrincipalKey("OperadorId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NexoRuta.Infrastructure.Seguimiento.Persistence.EntregaSeguimiento", b =>
+                {
+                    b.HasOne("NexoRuta.Domain.Envios.Envio", null)
+                        .WithMany()
+                        .HasForeignKey("OperadorId", "EnvioId")
                         .HasPrincipalKey("OperadorId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
