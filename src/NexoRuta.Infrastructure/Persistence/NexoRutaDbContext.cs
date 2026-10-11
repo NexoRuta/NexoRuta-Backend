@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using NexoRuta.Domain.Administracion;
 using NexoRuta.Domain.Envios;
+using NexoRuta.Domain.Seguimiento;
+using NexoRuta.Infrastructure.Seguimiento.Persistence;
 
 namespace NexoRuta.Infrastructure.Persistence;
 
@@ -14,7 +16,8 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
     public DbSet<Direccion> Direcciones => Set<Direccion>();
     public DbSet<Envio> Envios => Set<Envio>();
     public DbSet<Bulto> Bultos => Set<Bulto>();
-
+    public DbSet<EnlaceSeguimiento> EnlacesSeguimiento
+        => Set<EnlaceSeguimiento>();
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Operador>(entity =>
@@ -104,5 +107,6 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
                 .HasPrincipalKey(x => new { x.OperadorId, x.Id })
                 .OnDelete(DeleteBehavior.Cascade);
         });
+        modelBuilder.ApplyConfiguration(new EnlaceSeguimientoConfiguration());
     }
 }

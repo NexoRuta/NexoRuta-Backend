@@ -225,6 +225,42 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                     b.ToTable("Envios", (string)null);
                 });
 
+            modelBuilder.Entity("NexoRuta.Domain.Seguimiento.EnlaceSeguimiento", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreadoEnUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("EnvioId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("ExpiraEnUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("OperadorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("RevocadoEnUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("OperadorId", "EnvioId");
+
+                    b.ToTable("EnlacesSeguimiento", (string)null);
+                });
+
             modelBuilder.Entity("NexoRuta.Domain.Administracion.AccesoUsuario", b =>
                 {
                     b.HasOne("NexoRuta.Domain.Administracion.Comercio", null)
@@ -302,6 +338,16 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                     b.HasOne("NexoRuta.Domain.Envios.Direccion", null)
                         .WithMany()
                         .HasForeignKey("OperadorId", "DireccionId")
+                        .HasPrincipalKey("OperadorId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NexoRuta.Domain.Seguimiento.EnlaceSeguimiento", b =>
+                {
+                    b.HasOne("NexoRuta.Domain.Envios.Envio", null)
+                        .WithMany()
+                        .HasForeignKey("OperadorId", "EnvioId")
                         .HasPrincipalKey("OperadorId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();

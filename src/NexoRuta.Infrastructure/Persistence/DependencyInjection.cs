@@ -7,6 +7,10 @@ using NexoRuta.Application.Envios.UseCases;
 using NexoRuta.Infrastructure.Administracion;
 using NexoRuta.Infrastructure.Administracion.Repositories;
 using NexoRuta.Infrastructure.Envios.Repositories;
+using NexoRuta.Application.Seguimiento.Interfaces;
+using NexoRuta.Infrastructure.Seguimiento.Consultas;
+using NexoRuta.Application.Seguimiento.UseCases;
+using NexoRuta.Infrastructure.Seguimiento.Repositories;
 
 namespace NexoRuta.Infrastructure.Persistence;
 
@@ -28,9 +32,26 @@ public static class DependencyInjection
 
         services.AddScoped<IAccesosUsuarioRepository, EfAccesosUsuarioRepository>();
         services.AddScoped<IEnviosRepository, EfEnviosRepository>();
+        services.AddScoped<IConsultaEstadoEnvio, EfConsultaEstadoEnvio>();
         services.AddScoped<DatosInicialesSeeder>();
         services.AddScoped<CrearEnvioUseCase>();
         services.AddScoped<ListarEnviosUseCase>();
+
+        // M05 - Seguimiento
+        services.AddScoped<
+            IConsultaEstadoEnvio,
+            EfConsultaEstadoEnvio>();
+
+        services.AddScoped<
+            IEnlacesSeguimientoRepository,
+            EfEnlacesSeguimientoRepository>();
+
+        services.AddScoped<CrearEnlaceSeguimientoUseCase>();
+
+        services.AddScoped<ConsultarSeguimientoPublicoUseCase>();
+
+        // Fin M05
+
 
         return services;
 
