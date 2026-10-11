@@ -23,7 +23,8 @@ public sealed class IntegrationApiFactory(IntegrationDatabase database) : WebApp
                 ["AccesoInicial:UsuarioEmail"] = $"owner-{Guid.NewGuid():N}@example.test",
                 ["AccesoInicial:OperadorUsuarioEmail"] = $"operator-{Guid.NewGuid():N}@example.test",
                 ["AccesoInicial:OperadorNombre"] = "Integration operator",
-                ["AccesoInicial:ComercioNombre"] = "Integration commerce"
+                ["AccesoInicial:ComercioNombre"] = "Integration commerce",
+                ["Tracking:PublicBaseUrl"] = "https://tracking.example.test",
             }));
         return base.CreateHost(builder);
     }

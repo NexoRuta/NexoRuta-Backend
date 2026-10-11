@@ -4,6 +4,8 @@ using NexoRuta.Application.Envios.Repositories;
 using NexoRuta.Application.Envios.Results;
 using NexoRuta.Domain.Envios;
 using NexoRuta.Infrastructure.Persistence;
+using System.Text.Json;
+using NexoRuta.Infrastructure.Outbox;
 
 namespace NexoRuta.Infrastructure.Envios.Repositories;
 
@@ -16,7 +18,41 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
         Bulto bulto,
         CancellationToken cancellationToken = default)
     {
-        db.AddRange(destinatario, direccion, envio, bulto);
+        // Trabajo asíncrono: generar el seguimiento.
+        var trabajoSeguimiento = new OutboxMessage(
+            operadorId: envio.OperadorId,
+            envioId: envio.Id,
+            tipo: "GenerarSeguimiento",
+            destino: OutboxDestino.RabbitMq,
+            payload: JsonSerializer.Serialize(new
+            {
+                envioId = envio.Id,
+                operadorId = envio.OperadorId
+            }));
+
+        // Evento de negocio: informar que se creó un envío.
+        var eventoEnvioCreado = new OutboxMessage(
+            operadorId: envio.OperadorId,
+            envioId: envio.Id,
+            tipo: "EnvioCreado",
+            destino: OutboxDestino.Kafka,
+            payload: JsonSerializer.Serialize(new
+            {
+                envioId = envio.Id,
+                operadorId = envio.OperadorId,
+                comercioId = envio.ComercioId,
+                estado = envio.Estado.ToString()
+            }));
+
+        // EF Core guarda todo en la misma operación.
+        db.AddRange(
+            destinatario,
+            direccion,
+            envio,
+            bulto,
+            trabajoSeguimiento,
+            eventoEnvioCreado);
+
         await db.SaveChangesAsync(cancellationToken);
     }
 
@@ -55,9 +91,13 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
         var ids = shipments.Select(x => x.Id).ToArray();
         var packages = await db.Bultos
             .Where(x => ids.Contains(x.EnvioId))
-            .Select(x => new { x.EnvioId, Detail = new BultoDetalle(
+            .Select(x => new
+            {
+                x.EnvioId,
+                Detail = new BultoDetalle(
                 Codigo: x.Codigo, PesoGramos: x.PesoGramos, LargoCentimetros: x.LargoCentimetros,
-                AnchoCentimetros: x.AnchoCentimetros, AltoCentimetros: x.AltoCentimetros) })
+                AnchoCentimetros: x.AnchoCentimetros, AltoCentimetros: x.AltoCentimetros)
+            })
             .ToListAsync(cancellationToken);
         var packagesByShipment = packages.ToLookup(x => x.EnvioId, x => x.Detail);
 

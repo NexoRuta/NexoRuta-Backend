@@ -50,6 +50,7 @@ public static class DependencyInjection
 
         services.AddScoped<ConsultarSeguimientoPublicoUseCase>();
 
+
         // Fin M05
 
 
