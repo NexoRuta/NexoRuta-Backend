@@ -8,8 +8,10 @@ namespace NexoRuta.Api.Features.Comercios.Controllers;
 
 [ApiController]
 [Authorize(Policy = nameof(TipoAccesoUsuario.Comercio))]
+[Route("api/operadores")]
+// Keep the existing Commerce and M05 clients compatible with the global catalog.
 [Route("api/comercio/operadores")]
-public sealed class OperadoresDelComercioController(IAccesosUsuarioRepository cuentas) : ControllerBase
+public sealed class OperadoresDisponiblesController(IOperadoresRepository operadores) : ControllerBase
 {
     [HttpGet]
     [ProducesResponseType<IReadOnlyList<OperadorDisponible>>(StatusCodes.Status200OK)]
@@ -17,6 +19,6 @@ public sealed class OperadoresDelComercioController(IAccesosUsuarioRepository cu
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> Listar(CancellationToken cancellationToken)
     {
-        return Ok(await cuentas.ListarOperadoresAsync(cancellationToken));
+        return Ok(await operadores.ListarAsync(cancellationToken));
     }
 }

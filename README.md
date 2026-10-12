@@ -2,7 +2,7 @@
 
 Backend de la plataforma multioperador de distribución de última milla del Taller .NET 2026. Este repositorio usa .NET 10 y está organizado como base de un **monolito modular**, con un Worker independiente. La entrega de análisis y diseño del 04/10/2026 y el enunciado del laboratorio fundamentan las decisiones resumidas aquí.
 
-> **Estado del recorte funcional (08/10/2026):** están implementados los recortes del primer monitoreo: [CU-01 — datos iniciales y acceso directo](docs/cu/CU-01-comercios-usuarios.md), [CU-07 — alta individual de envíos](docs/cu/CU-07-alta-envios.md) y [CU-08 — bulto](docs/cu/CU-08-bultos.md), con EF Core/PostgreSQL. Autenticación, CRUD de administración, RLS y mensajería siguen pendientes.
+> **Estado actual:** están implementados los recortes del primer monitoreo: [CU-01 — datos iniciales y acceso directo](docs/cu/CU-01-comercios-usuarios.md), [CU-07 — alta individual de envíos](docs/cu/CU-07-alta-envios.md) y [CU-08 — bulto](docs/cu/CU-08-bultos.md), con EF Core/PostgreSQL. M05 incorpora seguimiento público, recuperación de enlaces y Outbox transaccional con procesos separados para RabbitMQ y Kafka. Autenticación por credenciales, CRUD de administración y RLS siguen pendientes.
 
 ## Estructura y estado verificado
 
@@ -10,7 +10,7 @@ Backend de la plataforma multioperador de distribución de última milla del Tal
 NexoRuta.sln
 src/
   NexoRuta.Api/             # API ASP.NET Core y OpenAPI de desarrollo
-  NexoRuta.Worker/          # BackgroundService de plantilla
+  NexoRuta.Worker/          # Outbox RabbitMQ/Kafka y generación de seguimiento
   NexoRuta.Domain/          # Modelos iniciales de administración y envíos
   NexoRuta.Application/     # Casos de uso de envíos y contrato de usuario actual
   NexoRuta.Infrastructure/  # EF Core, migraciones, inicialización y acceso directo
@@ -45,11 +45,11 @@ dotnet run --project src/NexoRuta.Api/NexoRuta.Api.csproj --launch-profile http
 dotnet run --project src/NexoRuta.Worker/NexoRuta.Worker.csproj
 ```
 
-El perfil `http` de la API usa `http://localhost:5041`; OpenAPI de desarrollo está en `http://localhost:5041/openapi/v1.json`. La API necesita PostgreSQL mediante `ConnectionStrings:Postgres`; al arrancar aplica migraciones e inicializa los datos configurados en `AccesoInicial`. `GET /api/accesos?tipo=Comercio|Operador` alimenta los selectores; `GET /api/usuarios/actual` y `GET/POST /api/envios` requieren una selección válida mediante `X-NexoRuta-Acceso`. Se separan ámbitos de operador/comercio, sin perfiles laborales ni autenticación por credenciales en este recorte. Liveness/readiness están en `/health/live` y `/health/ready`. El Worker no abre un puerto HTTP.
+El perfil `http` de la API usa `http://localhost:5041`; OpenAPI de desarrollo está en `http://localhost:5041/openapi/v1.json`. La API necesita PostgreSQL mediante `ConnectionStrings:Postgres`; aplica migraciones solo con `DatabaseInitialization:ApplyMigrations` e inicializa los datos de `AccesoInicial` solo con `DatabaseInitialization:SeedData`, ambos desactivados por defecto. `GET /api/accesos?tipo=Comercio|Operador` alimenta los selectores; `GET /api/operadores` (también disponible en `/api/comercio/operadores`), `GET /api/usuarios/actual` y `GET/POST /api/envios` requieren una selección válida mediante `X-NexoRuta-Acceso`. Se separan ámbitos de operador/comercio, sin perfiles laborales ni autenticación por credenciales en este recorte. Liveness/readiness están en `/health/live` y `/health/ready`. El Worker no abre un puerto HTTP.
 
 El arranque tiene un único bootstrap, sin modo Demo. Las cuatro propiedades de AccesoInicial son obligatorias y no pueden estar vacías: UsuarioEmail, OperadorUsuarioEmail, OperadorNombre y ComercioNombre; los valores se recortan y los dos emails deben identificar cuentas distintas. Para sobrescribirlas por entorno, usá AccesoInicial__UsuarioEmail, AccesoInicial__OperadorUsuarioEmail, AccesoInicial__OperadorNombre y AccesoInicial__ComercioNombre. Demo:Enabled / Demo__Enabled ya no se interpretan: retiralas de configuraciones externas. El seeder no crea envíos ficticios ni renombra datos históricos por sus nombres. Si cambiás las identidades configuradas, puede crear cuentas y organizaciones adicionales; no fusiona ni elimina las anteriores. El nombre histórico nexoruta-demo del despliegue no selecciona un modo de ejecución.
 
-El Compose local vive en el repositorio principal y publica la API en `http://localhost:5000` (puerto 8080 del contenedor). La inicialización puede repetirse sin duplicar los registros iniciales. Redis y RabbitMQ aún no participan del flujo de envíos.
+El Compose local vive en el repositorio principal y publica la API en `http://localhost:5000` (puerto 8080 del contenedor). La inicialización puede repetirse sin duplicar los registros iniciales. RabbitMQ procesa la generación del seguimiento; Kafka publica `EnvioCreado.v1` mediante su Worker independiente. Redis no participa del alta transaccional.
 
 ## Pruebas PostgreSQL: destino aislado obligatorio
 

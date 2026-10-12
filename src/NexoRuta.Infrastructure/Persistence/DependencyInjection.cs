@@ -31,8 +31,9 @@ public static class DependencyInjection
             ValorRequerido("AccesoInicial:OperadorUsuarioEmail")));
 
         services.AddScoped<IAccesosUsuarioRepository, EfAccesosUsuarioRepository>();
+        services.AddScoped<IOperadoresRepository, EfOperadoresRepository>();
+        services.AddScoped<IComerciosRepository, EfComerciosRepository>();
         services.AddScoped<IEnviosRepository, EfEnviosRepository>();
-        services.AddScoped<IConsultaEstadoEnvio, EfConsultaEstadoEnvio>();
         services.AddScoped<DatosInicialesSeeder>();
         services.AddScoped<CrearEnvioUseCase>();
         services.AddScoped<ListarEnviosUseCase>();

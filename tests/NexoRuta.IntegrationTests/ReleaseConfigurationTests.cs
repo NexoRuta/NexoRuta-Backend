@@ -59,10 +59,13 @@ public sealed class ReleaseConfigurationTests
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddHttpContextAccessor();
-        services.AddNexoRutaPersistence(Configuration(values));
+        var configuration = Configuration(values);
+        services.AddSingleton<IConfiguration>(configuration);
+        services.AddNexoRutaPersistence(configuration);
         services.AddScoped<IUsuarioActual, UsuarioActualHttp>();
         Assert.Equal(ServiceLifetime.Singleton, services.Single(x => x.ServiceType == typeof(AccesoInicial)).Lifetime);
-        Type[] scoped = [typeof(IUsuarioActual), typeof(IAccesosUsuarioRepository), typeof(IEnviosRepository),
+        Type[] scoped = [typeof(IUsuarioActual), typeof(IAccesosUsuarioRepository),
+            typeof(IOperadoresRepository), typeof(IComerciosRepository), typeof(IEnviosRepository),
             typeof(CrearEnvioUseCase), typeof(ListarEnviosUseCase), typeof(DatosInicialesSeeder)];
         foreach (var type in scoped)
             Assert.Equal(ServiceLifetime.Scoped, services.Single(x => x.ServiceType == type).Lifetime);
@@ -72,6 +75,8 @@ public sealed class ReleaseConfigurationTests
         Assert.Equal(new AccesoInicial("custom@example.test", "Custom Operator", "Custom Commerce", "operator@example.test"), access);
         Assert.IsType<UsuarioActualHttp>(scope.ServiceProvider.GetRequiredService<IUsuarioActual>());
         Assert.IsType<EfAccesosUsuarioRepository>(scope.ServiceProvider.GetRequiredService<IAccesosUsuarioRepository>());
+        Assert.IsType<EfOperadoresRepository>(scope.ServiceProvider.GetRequiredService<IOperadoresRepository>());
+        Assert.IsType<EfComerciosRepository>(scope.ServiceProvider.GetRequiredService<IComerciosRepository>());
         Assert.IsType<EfEnviosRepository>(scope.ServiceProvider.GetRequiredService<IEnviosRepository>());
         foreach (var type in scoped)
             Assert.Same(scope.ServiceProvider.GetRequiredService(type), scope.ServiceProvider.GetRequiredService(type));
