@@ -23,6 +23,11 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
     public DbSet<ProcessedMessage> ProcessedMessages => Set<ProcessedMessage>();
 
     public DbSet<EntregaSeguimiento> EntregasSeguimiento => Set<EntregaSeguimiento>();
+
+    public DbSet<Rol> Roles => Set<Rol>();
+    public DbSet<Permiso> Permisos => Set<Permiso>();
+    public DbSet<RolPermiso> RolesPermisos => Set<RolPermiso>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Operador>(entity =>
@@ -47,18 +52,41 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
             entity.HasIndex(x => x.Email).IsUnique();
         });
 
+
         modelBuilder.Entity<AccesoUsuario>(entity =>
         {
             entity.ToTable("AccesosUsuario", table =>
             {
-                table.HasCheckConstraint("CK_AccesosUsuario_Pertenencia", "(\"OperadorId\" IS NULL) <> (\"ComercioId\" IS NULL)");
-                table.HasCheckConstraint("CK_AccesosUsuario_Propietario", "NOT \"EsPropietario\" OR \"ComercioId\" IS NOT NULL");
+                table.HasCheckConstraint(
+                    "CK_AccesosUsuario_Pertenencia",
+                    "(\"OperadorId\" IS NULL) <> (\"ComercioId\" IS NULL)");
             });
+
             entity.HasKey(x => x.Id);
-            entity.HasIndex(x => x.UsuarioId).IsUnique();
-            entity.HasOne<Usuario>().WithMany().HasForeignKey(x => x.UsuarioId).OnDelete(DeleteBehavior.Restrict);
-            entity.HasOne<Operador>().WithMany().HasForeignKey(x => x.OperadorId).OnDelete(DeleteBehavior.Restrict);
-            entity.HasOne<Comercio>().WithMany().HasForeignKey(x => x.ComercioId).OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(x => x.UsuarioId)
+                .IsUnique();
+
+            entity.HasOne<Usuario>()
+                .WithMany()
+                .HasForeignKey(x => x.UsuarioId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<Operador>()
+                .WithMany()
+                .HasForeignKey(x => x.OperadorId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<Comercio>()
+                .WithMany()
+                .HasForeignKey(x => x.ComercioId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<Rol>()
+                .WithMany()
+                .HasForeignKey(x => x.RolId)
+                .IsRequired()
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<Destinatario>(entity =>
@@ -219,6 +247,72 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
                     x.OperadorId,
                     x.Id
                 })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+
+        modelBuilder.Entity<Rol>(entity =>
+        {
+            entity.ToTable("Roles");
+
+            entity.HasKey(x => x.Id);
+
+            entity.Property(x => x.Codigo)
+                .HasMaxLength(80)
+                .IsRequired();
+
+            entity.HasIndex(x => x.Codigo)
+                .IsUnique();
+
+            entity.Property(x => x.Nombre)
+                .HasMaxLength(160)
+                .IsRequired();
+
+            entity.Property(x => x.TipoOrganizacion)
+                .HasConversion<string>()
+                .HasMaxLength(20)
+                .IsRequired();
+        });
+
+
+
+        modelBuilder.Entity<Permiso>(entity =>
+        {
+            entity.ToTable("Permisos");
+
+            entity.HasKey(x => x.Id);
+
+            entity.Property(x => x.Codigo)
+                .HasMaxLength(80)
+                .IsRequired();
+
+            entity.HasIndex(x => x.Codigo)
+                .IsUnique();
+
+            entity.Property(x => x.Nombre)
+                .HasMaxLength(160)
+                .IsRequired();
+        });
+
+
+        modelBuilder.Entity<RolPermiso>(entity =>
+        {
+            entity.ToTable("RolesPermisos");
+
+            entity.HasKey(x => new
+            {
+                x.RolId,
+                x.PermisoId
+            });
+
+            entity.HasOne<Rol>()
+                .WithMany()
+                .HasForeignKey(x => x.RolId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<Permiso>()
+                .WithMany()
+                .HasForeignKey(x => x.PermisoId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

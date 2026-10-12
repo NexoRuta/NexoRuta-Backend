@@ -9,18 +9,32 @@ namespace NexoRuta.Infrastructure.Administracion.Repositories;
 
 public sealed class EfAccesosUsuarioRepository(NexoRutaDbContext db) : IAccesosUsuarioRepository
 {
-    private IQueryable<ContextoUsuario> Consulta(IQueryable<AccesoUsuario> accesos) =>
+
+    private IQueryable<ContextoUsuario> Consulta(
+        IQueryable<AccesoUsuario> accesos) =>
         from acceso in accesos
-        join usuario in db.Usuarios on acceso.UsuarioId equals usuario.Id
-        join operador in db.Operadores on acceso.OperadorId equals (Guid?)operador.Id into operadores
+        join usuario in db.Usuarios
+            on acceso.UsuarioId equals usuario.Id
+        join rol in db.Roles
+            on acceso.RolId equals rol.Id
+        join operador in db.Operadores
+            on acceso.OperadorId equals (Guid?)operador.Id into operadores
         from operador in operadores.DefaultIfEmpty()
-        join comercio in db.Comercios on acceso.ComercioId equals (Guid?)comercio.Id into comercios
+        join comercio in db.Comercios
+            on acceso.ComercioId equals (Guid?)comercio.Id into comercios
         from comercio in comercios.DefaultIfEmpty()
         orderby usuario.Email, operador.Nombre, comercio.Nombre
         select new ContextoUsuario(
-            acceso.Id, usuario.Id, acceso.OperadorId, acceso.ComercioId,
-            usuario.Email, operador == null ? null : operador.Nombre,
-            comercio == null ? null : comercio.Nombre, acceso.EsPropietario);
+            acceso.Id,
+            usuario.Id,
+            acceso.OperadorId,
+            acceso.ComercioId,
+            usuario.Email,
+            operador == null ? null : operador.Nombre,
+            comercio == null ? null : comercio.Nombre,
+            rol.Id,
+            rol.Codigo);
+
 
     public async Task<IReadOnlyList<ContextoUsuario>> ListarAsync(
         TipoAccesoUsuario tipo, CancellationToken cancellationToken = default)

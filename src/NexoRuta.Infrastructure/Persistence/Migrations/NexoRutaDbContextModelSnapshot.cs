@@ -31,10 +31,10 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                     b.Property<Guid?>("ComercioId")
                         .HasColumnType("uuid");
 
-                    b.Property<bool>("EsPropietario")
-                        .HasColumnType("boolean");
-
                     b.Property<Guid?>("OperadorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RolId")
                         .HasColumnType("uuid");
 
                     b.Property<Guid>("UsuarioId")
@@ -46,14 +46,14 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("OperadorId");
 
+                    b.HasIndex("RolId");
+
                     b.HasIndex("UsuarioId")
                         .IsUnique();
 
                     b.ToTable("AccesosUsuario", null, t =>
                         {
                             t.HasCheckConstraint("CK_AccesosUsuario_Pertenencia", "(\"OperadorId\" IS NULL) <> (\"ComercioId\" IS NULL)");
-
-                            t.HasCheckConstraint("CK_AccesosUsuario_Propietario", "NOT \"EsPropietario\" OR \"ComercioId\" IS NOT NULL");
                         });
                 });
 
@@ -87,6 +87,74 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("Operadores", (string)null);
+                });
+
+            modelBuilder.Entity("NexoRuta.Domain.Administracion.Permiso", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Codigo")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<string>("Nombre")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Codigo")
+                        .IsUnique();
+
+                    b.ToTable("Permisos", (string)null);
+                });
+
+            modelBuilder.Entity("NexoRuta.Domain.Administracion.Rol", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Codigo")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<string>("Nombre")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<string>("TipoOrganizacion")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Codigo")
+                        .IsUnique();
+
+                    b.ToTable("Roles", (string)null);
+                });
+
+            modelBuilder.Entity("NexoRuta.Domain.Administracion.RolPermiso", b =>
+                {
+                    b.Property<Guid>("RolId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PermisoId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("RolId", "PermisoId");
+
+                    b.HasIndex("PermisoId");
+
+                    b.ToTable("RolesPermisos", (string)null);
                 });
 
             modelBuilder.Entity("NexoRuta.Domain.Administracion.Usuario", b =>
@@ -394,9 +462,30 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                         .HasForeignKey("OperadorId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("NexoRuta.Domain.Administracion.Rol", null)
+                        .WithMany()
+                        .HasForeignKey("RolId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("NexoRuta.Domain.Administracion.Usuario", null)
                         .WithMany()
                         .HasForeignKey("UsuarioId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NexoRuta.Domain.Administracion.RolPermiso", b =>
+                {
+                    b.HasOne("NexoRuta.Domain.Administracion.Permiso", null)
+                        .WithMany()
+                        .HasForeignKey("PermisoId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("NexoRuta.Domain.Administracion.Rol", null)
+                        .WithMany()
+                        .HasForeignKey("RolId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

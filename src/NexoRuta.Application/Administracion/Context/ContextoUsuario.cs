@@ -1,3 +1,4 @@
+
 using NexoRuta.Application.Administracion.Exceptions;
 using NexoRuta.Domain.Administracion;
 
@@ -11,7 +12,8 @@ public sealed record ContextoUsuario(
     string UsuarioEmail,
     string? OperadorNombre,
     string? ComercioNombre,
-    bool EsPropietario)
+    Guid RolId,
+    string RolCodigo)
 {
     public string Tipo => ComercioId.HasValue
         ? nameof(TipoAccesoUsuario.Comercio)
@@ -19,9 +21,14 @@ public sealed record ContextoUsuario(
 
     public (Guid Id, string Nombre) RequerirComercio()
     {
-        var id = ComercioId ?? throw new AccesoNoPermitidoException();
-        if (id == Guid.Empty || string.IsNullOrWhiteSpace(ComercioNombre))
+        var id = ComercioId
+            ?? throw new AccesoNoPermitidoException();
+
+        if (id == Guid.Empty ||
+            string.IsNullOrWhiteSpace(ComercioNombre))
+        {
             throw new AccesoActualNoDisponibleException();
+        }
 
         return (id, ComercioNombre);
     }
