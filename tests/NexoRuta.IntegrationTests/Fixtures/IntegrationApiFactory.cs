@@ -22,6 +22,8 @@ public sealed class IntegrationApiFactory(IntegrationDatabase database, string e
             {
                 ["ConnectionStrings:Postgres"] = database.ConnectionString,
                 ["OpenTelemetry:Enabled"] = "false",
+                ["DatabaseInitialization:ApplyMigrations"] = "false",
+                ["DatabaseInitialization:SeedData"] = "true",
                 ["AccesoInicial:UsuarioEmail"] = $"owner-{Guid.NewGuid():N}@example.test",
                 ["AccesoInicial:OperadorUsuarioEmail"] = $"operator-{Guid.NewGuid():N}@example.test",
                 ["AccesoInicial:OperadorNombre"] = "Integration operator",

@@ -74,9 +74,10 @@ var app = builder.Build();
 
 {
     await using var scope = app.Services.CreateAsyncScope();
-    var db = scope.ServiceProvider.GetRequiredService<NexoRutaDbContext>();
-    await db.Database.MigrateAsync();
-    await scope.ServiceProvider.GetRequiredService<DatosInicialesSeeder>().SeedAsync();
+    if (app.Configuration.GetValue<bool>("DatabaseInitialization:ApplyMigrations"))
+        await scope.ServiceProvider.GetRequiredService<NexoRutaDbContext>().Database.MigrateAsync();
+    if (app.Configuration.GetValue<bool>("DatabaseInitialization:SeedData"))
+        await scope.ServiceProvider.GetRequiredService<DatosInicialesSeeder>().SeedAsync();
 }
 
 if (app.Environment.IsDevelopment())

@@ -9,7 +9,7 @@ using NexoRuta.Domain.Envios;
 
 namespace NexoRuta.Application.Envios.UseCases;
 
-public sealed class CrearEnvioUseCase(IEnviosRepository repository, IUsuarioActual usuarioActual, IAccesosUsuarioRepository cuentas)
+public sealed class CrearEnvioUseCase(IEnviosRepository repository, IUsuarioActual usuarioActual, IOperadoresRepository operadores)
 {
     public async Task<EnvioCreado> EjecutarAsync(
         CrearEnvioCommand command,
@@ -19,8 +19,8 @@ public sealed class CrearEnvioUseCase(IEnviosRepository repository, IUsuarioActu
         var comercio = contexto.RequerirComercio();
         if (command.OperadorId == Guid.Empty)
             throw new ArgumentException("Seleccioná un operador para el envío.", nameof(command.OperadorId));
-        var operador = await cuentas.ObtenerOperadorAsync(command.OperadorId, cancellationToken)
-            ?? throw new OperadorNoDisponibleException();
+        var operador = await operadores.ObtenerAsync(command.OperadorId, cancellationToken)
+            ?? throw new OperadorNoEncontradoException();
 
         var destinatario = new Destinatario(operador.OperadorId, command.DestinatarioNombre);
         var direccion = new Direccion(operador.OperadorId, command.Direccion);

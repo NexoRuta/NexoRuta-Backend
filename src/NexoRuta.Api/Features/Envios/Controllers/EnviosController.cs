@@ -45,7 +45,7 @@ public sealed class EnviosController(
 
             return Created("/api/envios", EnvioCreado.Desde(created));
         }
-        catch (OperadorNoDisponibleException exception)
+        catch (OperadorNoEncontradoException exception)
         {
             return BadRequest(new { message = exception.Message });
         }
