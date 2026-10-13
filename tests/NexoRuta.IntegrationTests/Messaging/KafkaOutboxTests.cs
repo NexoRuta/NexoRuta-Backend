@@ -212,7 +212,7 @@ public sealed class KafkaOutboxTests(PostgresFixture postgres, KafkaFixture kafk
 
     private static async Task<OutboxMessage> CreateEventAsync(IntegrationDatabase database)
     {
-        using var factory = database.CreateApiFactory();
+        using var factory = new IntegrationApiFactory(database, "Development");
         using var client = factory.CreateHttpClient();
         await using var db = database.CreateDbContext();
         var operadorId = await db.Operadores.Select(x => x.Id).SingleAsync();

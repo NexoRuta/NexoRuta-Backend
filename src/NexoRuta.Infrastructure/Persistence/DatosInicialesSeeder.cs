@@ -1,252 +1,87 @@
-
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using NexoRuta.Domain.Administracion;
 using NexoRuta.Infrastructure.Administracion;
 
 namespace NexoRuta.Infrastructure.Persistence;
 
-public sealed class DatosInicialesSeeder(
-    NexoRutaDbContext db,
-    AccesoInicial accesoInicial)
+public sealed class DatosInicialesSeeder(NexoRutaDbContext db, AccesoInicial initial,
+    IConfiguration configuration, IPasswordHasher<string> passwordHasher)
 {
-    public async Task SeedAsync(
-        CancellationToken cancellationToken = default)
+    public async Task SeedAsync(CancellationToken cancellationToken = default)
     {
-        if (string.Equals(
-            accesoInicial.UsuarioEmail,
-            accesoInicial.OperadorUsuarioEmail,
-            StringComparison.OrdinalIgnoreCase))
+        if (initial.OperadorId is null || initial.ComercioId is null || initial.OperadorId == Guid.Empty || initial.ComercioId == Guid.Empty)
+            throw new InvalidOperationException("Bootstrap requires persistent organization IDs.");
+        if (string.Equals(initial.UsuarioEmail, initial.OperadorUsuarioEmail, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Bootstrap accounts must be distinct.");
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        if (!await db.Operadores.AnyAsync(x => x.Id == initial.OperadorId, cancellationToken))
+            db.Add(new Operador(initial.OperadorNombre, initial.OperadorId));
+        if (!await db.Comercios.AnyAsync(x => x.Id == initial.ComercioId, cancellationToken))
+            db.Add(new Comercio(initial.ComercioNombre, initial.ComercioId));
+        await db.SaveChangesAsync(cancellationToken);
+
+        var operatorEntity = await db.Operadores.SingleAsync(x => x.Id == initial.OperadorId, cancellationToken);
+        var commerceEntity = await db.Comercios.SingleAsync(x => x.Id == initial.ComercioId, cancellationToken);
+        var operatorCompleted = db.Entry(operatorEntity).Property<bool>("BootstrapCompletado").CurrentValue;
+        var commerceCompleted = db.Entry(commerceEntity).Property<bool>("BootstrapCompletado").CurrentValue;
+        // Stable endpoint permission codes are technical contracts, not a role/grant catalog.
+        foreach (var code in new[] { "usuarios.gestionar", "configuracion.gestionar", "envios.crear", "envios.consultar", "envios.gestionar" })
+            if (!await db.Permisos.AnyAsync(x => x.Codigo == code, cancellationToken)) db.Add(new Permiso(code, code));
+        foreach (var definition in configuration.GetSection("Bootstrap:Roles").Get<RolInicial[]>() ?? [])
         {
-            throw new InvalidOperationException(
-                "Las cuentas iniciales deben ser distintas.");
+            var role = new Rol(definition.Codigo, definition.Nombre, definition.OperadorId, definition.ComercioId);
+            if (role.OperadorId != initial.OperadorId && role.ComercioId != initial.ComercioId)
+                throw new InvalidOperationException("Bootstrap roles must belong to the configured organizations.");
+            if (role.OperadorId.HasValue ? operatorCompleted : commerceCompleted) continue;
+            if (await db.Roles.AnyAsync(x => x.Codigo == role.Codigo && x.OrganizacionId == role.OrganizacionId
+                && x.TipoOrganizacion == role.TipoOrganizacion, cancellationToken)) continue;
+            db.Add(role);
+            foreach (var code in definition.Permisos.Distinct(StringComparer.Ordinal))
+            {
+                var permission = db.Permisos.Local.SingleOrDefault(x => x.Codigo == code)
+                    ?? await db.Permisos.SingleOrDefaultAsync(x => x.Codigo == code, cancellationToken);
+                if (permission is null)
+                {
+                    permission = new Permiso(code, code);
+                    db.Add(permission);
+                }
+                db.Add(new RolPermiso(role.Id, permission.Id));
+            }
         }
-
-        await using var transaction =
-            await db.Database.BeginTransactionAsync(cancellationToken);
-
-        // Catálogo de permisos
-        var usuariosGestionar = await ObtenerPermisoAsync(
-            "usuarios.gestionar", "Gestionar usuarios", cancellationToken);
-
-        var configuracionGestionar = await ObtenerPermisoAsync(
-            "configuracion.gestionar", "Gestionar configuración",
-            cancellationToken);
-
-        var enviosCrear = await ObtenerPermisoAsync(
-            "envios.crear", "Crear envíos", cancellationToken);
-
-        var enviosConsultar = await ObtenerPermisoAsync(
-            "envios.consultar", "Consultar envíos", cancellationToken);
-
-        var enviosGestionar = await ObtenerPermisoAsync(
-            "envios.gestionar", "Gestionar envíos", cancellationToken);
-
-        // Catálogo de roles
-        var administradorOperador = await ObtenerRolAsync(
-            "administrador_operador",
-            "Administrador de operador",
-            TipoAccesoUsuario.Operador,
-            cancellationToken);
-
-        var usuarioOperador = await ObtenerRolAsync(
-            "usuario_operador",
-            "Usuario de operador",
-            TipoAccesoUsuario.Operador,
-            cancellationToken);
-
-        var propietarioComercio = await ObtenerRolAsync(
-            "propietario_comercio",
-            "Propietario de comercio",
-            TipoAccesoUsuario.Comercio,
-            cancellationToken);
-
-        var usuarioComercio = await ObtenerRolAsync(
-            "usuario_comercio",
-            "Usuario de comercio",
-            TipoAccesoUsuario.Comercio,
-            cancellationToken);
-
-        // Permisos de cada rol
-        await AsociarPermisosAsync(
-            administradorOperador,
-            cancellationToken,
-            usuariosGestionar,
-            configuracionGestionar,
-            enviosConsultar,
-            enviosGestionar);
-
-        await AsociarPermisosAsync(
-            usuarioOperador,
-            cancellationToken,
-            enviosConsultar,
-            enviosGestionar);
-
-        await AsociarPermisosAsync(
-            propietarioComercio,
-            cancellationToken,
-            usuariosGestionar,
-            enviosCrear,
-            enviosConsultar);
-
-        await AsociarPermisosAsync(
-            usuarioComercio,
-            cancellationToken,
-            enviosCrear,
-            enviosConsultar);
-
-        // Organizaciones
-        var operador = await db.Operadores.SingleOrDefaultAsync(
-            x => x.Nombre == accesoInicial.OperadorNombre,
-            cancellationToken);
-
-        if (operador is null)
-        {
-            operador = new Operador(accesoInicial.OperadorNombre);
-            db.Operadores.Add(operador);
-        }
-
-        var comercio = await db.Comercios.SingleOrDefaultAsync(
-            x => x.Nombre == accesoInicial.ComercioNombre,
-            cancellationToken);
-
-        if (comercio is null)
-        {
-            comercio = new Comercio(accesoInicial.ComercioNombre);
-            db.Comercios.Add(comercio);
-        }
-
-        // Usuarios
-        var cuentaOperador = await ObtenerUsuarioAsync(
-            accesoInicial.OperadorUsuarioEmail,
-            cancellationToken);
-
-        var cuentaComercio = await ObtenerUsuarioAsync(
-            accesoInicial.UsuarioEmail,
-            cancellationToken);
-
-        // Accesos con rol obligatorio
-        await AsegurarAccesoAsync(
-            cuentaOperador,
-            operador.Id,
-            null,
-            administradorOperador,
-            cancellationToken);
-
-        await AsegurarAccesoAsync(
-            cuentaComercio,
-            null,
-            comercio.Id,
-            propietarioComercio,
-            cancellationToken);
-
+        await db.SaveChangesAsync(cancellationToken);
+        await EnsureAccount(initial.OperadorUsuarioEmail, initial.OperadorId, null, initial.OperadorRolCodigo,
+            "AccesoInicial:OperadorUsuarioPassword", cancellationToken);
+        await EnsureAccount(initial.UsuarioEmail, null, initial.ComercioId, initial.ComercioRolCodigo,
+            "AccesoInicial:UsuarioPassword", cancellationToken);
+        db.Entry(operatorEntity).Property<bool>("BootstrapCompletado").CurrentValue = true;
+        db.Entry(commerceEntity).Property<bool>("BootstrapCompletado").CurrentValue = true;
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
 
-    private async Task<Rol> ObtenerRolAsync(
-        string codigo,
-        string nombre,
-        TipoAccesoUsuario tipo,
-        CancellationToken ct)
+    private async Task EnsureAccount(string email, Guid? operatorId, Guid? commerceId, string? code,
+        string passwordSetting, CancellationToken ct)
     {
-        var rol = await db.Roles.SingleOrDefaultAsync(
-            x => x.Codigo == codigo, ct);
-
-        if (rol is not null)
+        var normalized = email.Trim().ToLowerInvariant();
+        var user = await db.Usuarios.SingleOrDefaultAsync(x => x.Email.ToLower() == normalized, ct);
+        var isNew = user is null;
+        if (isNew)
         {
-            if (rol.TipoOrganizacion != tipo)
-                throw new InvalidOperationException(
-                    $"El rol {codigo} tiene un tipo incompatible.");
-
-            return rol;
+            var password = configuration[passwordSetting];
+            if (string.IsNullOrWhiteSpace(password) || password.Length < 12)
+                throw new InvalidOperationException($"A bootstrap password of at least 12 characters is required: {passwordSetting}.");
+            user = new Usuario(normalized, passwordHasher.HashPassword(normalized, password));
+            db.Add(user);
         }
-
-        rol = new Rol(codigo, nombre, tipo);
-        db.Roles.Add(rol);
-        return rol;
-    }
-
-    private async Task<Permiso> ObtenerPermisoAsync(
-        string codigo,
-        string nombre,
-        CancellationToken ct)
-    {
-        var permiso = await db.Permisos.SingleOrDefaultAsync(
-            x => x.Codigo == codigo, ct);
-
-        if (permiso is not null)
-            return permiso;
-
-        permiso = new Permiso(codigo, nombre);
-        db.Permisos.Add(permiso);
-        return permiso;
-    }
-
-    private async Task AsociarPermisosAsync(
-        Rol rol,
-        CancellationToken ct,
-        params Permiso[] permisos)
-    {
-        foreach (var permiso in permisos)
-        {
-            var existe = await db.RolesPermisos.AnyAsync(
-                x => x.RolId == rol.Id &&
-                     x.PermisoId == permiso.Id,
-                ct);
-
-            if (!existe)
-            {
-                db.RolesPermisos.Add(
-                    new RolPermiso(rol.Id, permiso.Id));
-            }
-        }
-    }
-
-    private async Task<Usuario> ObtenerUsuarioAsync(
-        string email,
-        CancellationToken ct)
-    {
-        var usuario = await db.Usuarios.SingleOrDefaultAsync(
-            x => x.Email == email, ct);
-
-        if (usuario is not null)
-            return usuario;
-
-        usuario = new Usuario(email);
-        db.Usuarios.Add(usuario);
-        return usuario;
-    }
-
-    private async Task AsegurarAccesoAsync(
-        Usuario usuario,
-        Guid? operadorId,
-        Guid? comercioId,
-        Rol rol,
-        CancellationToken ct)
-    {
-        var acceso = await db.AccesosUsuario.SingleOrDefaultAsync(
-            x => x.UsuarioId == usuario.Id,
-            ct);
-
-        if (acceso is not null)
-        {
-            if (acceso.OperadorId != operadorId ||
-                acceso.ComercioId != comercioId ||
-                acceso.RolId != rol.Id)
-            {
-                throw new InvalidOperationException(
-                    "La cuenta inicial tiene una organización " +
-                    "o un rol incompatible.");
-            }
-
-            return;
-        }
-
-        db.AccesosUsuario.Add(
-            new AccesoUsuario(
-                usuario.Id,
-                operadorId,
-                comercioId,
-                rol));
+        if (await db.AccesosUsuario.AnyAsync(x => x.UsuarioId == user!.Id, ct)) return;
+        // ponytail: bootstrap grants are create-only; repair of an existing user requires explicit administrative assignment.
+        var role = isNew && !string.IsNullOrWhiteSpace(code)
+            ? await db.Roles.SingleOrDefaultAsync(x => x.Codigo == code && x.OperadorId == operatorId && x.ComercioId == commerceId, ct)
+            : null;
+        if (isNew && !string.IsNullOrWhiteSpace(code) && role is null)
+            throw new InvalidOperationException("The configured initial role does not belong to this organization.");
+        db.Add(new AccesoUsuario(user!.Id, operatorId, commerceId, role));
     }
 }

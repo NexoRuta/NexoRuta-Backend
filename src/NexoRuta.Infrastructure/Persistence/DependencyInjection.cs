@@ -11,7 +11,10 @@ using NexoRuta.Application.Seguimiento.Interfaces;
 using NexoRuta.Infrastructure.Seguimiento.Consultas;
 using NexoRuta.Application.Seguimiento.UseCases;
 using NexoRuta.Infrastructure.Seguimiento.Repositories;
-
+using Microsoft.AspNetCore.Identity;
+using NexoRuta.Application.Administracion.Interfaces;
+using NexoRuta.Application.Administracion.UseCases;
+using NexoRuta.Infrastructure.Administracion.Autenticacion;
 namespace NexoRuta.Infrastructure.Persistence;
 
 public static class DependencyInjection
@@ -24,11 +27,20 @@ public static class DependencyInjection
             ?? throw new InvalidOperationException("Falta ConnectionStrings:Postgres.");
 
         services.AddDbContext<NexoRutaDbContext>(options => options.UseNpgsql(connectionString));
-        services.AddSingleton(new AccesoInicial(
-            ValorRequerido("AccesoInicial:UsuarioEmail"),
-            ValorRequerido("AccesoInicial:OperadorNombre"),
-            ValorRequerido("AccesoInicial:ComercioNombre"),
-            ValorRequerido("AccesoInicial:OperadorUsuarioEmail")));
+        services.AddSingleton(_ =>
+        {
+            if (!configuration.GetValue<bool>("DatabaseInitialization:SeedData"))
+                return new AccesoInicial("", "", "", "");
+            return new AccesoInicial(Value("UsuarioEmail"), Value("OperadorNombre"), Value("ComercioNombre"), Value("OperadorUsuarioEmail"))
+            {
+                OperadorId = OrganizationId("OperadorId"),
+                ComercioId = OrganizationId("ComercioId"),
+                OperadorRolCodigo = configuration["AccesoInicial:OperadorRolCodigo"],
+                ComercioRolCodigo = configuration["AccesoInicial:ComercioRolCodigo"]
+            };
+        });
+        services.AddScoped<IRolesRepository, EfRolesRepository>();
+        services.AddScoped<GestionarRolesUseCase>();
 
         services.AddScoped<IAccesosUsuarioRepository, EfAccesosUsuarioRepository>();
         services.AddScoped<IOperadoresRepository, EfOperadoresRepository>();
@@ -37,6 +49,18 @@ public static class DependencyInjection
         services.AddScoped<DatosInicialesSeeder>();
         services.AddScoped<CrearEnvioUseCase>();
         services.AddScoped<ListarEnviosUseCase>();
+        services.AddScoped<IPermisosUsuarioRepository,EfPermisosUsuarioRepository>();
+        services.AddSingleton<IPasswordHasher<string>, PasswordHasher<string>>();
+
+        services.AddScoped<
+            IUsuariosLoginRepository,
+            EfUsuariosLoginRepository>();
+
+        services.AddScoped<
+            IVerificadorPassword,
+            VerificadorPassword>();
+
+        services.AddScoped<IniciarSesionUseCase>();
 
         // M05 - Seguimiento
         services.AddScoped<
@@ -58,9 +82,12 @@ public static class DependencyInjection
 
         return services;
 
-        string ValorRequerido(string clave)
-            => !string.IsNullOrWhiteSpace(configuration[clave])
-                ? configuration[clave]!.Trim()
-                : throw new InvalidOperationException($"Falta {clave} para el acceso inicial.");
+        string Value(string key) => !string.IsNullOrWhiteSpace(configuration[$"AccesoInicial:{key}"])
+            ? configuration[$"AccesoInicial:{key}"]!.Trim()
+            : throw new InvalidOperationException($"Falta AccesoInicial:{key} para el acceso inicial.");
+
+        Guid OrganizationId(string key)
+            => Guid.TryParse(configuration[$"AccesoInicial:{key}"], out var id) && id != Guid.Empty
+                ? id : throw new InvalidOperationException($"AccesoInicial:{key} must be a nonempty organization UUID when bootstrap is enabled.");
     }
 }

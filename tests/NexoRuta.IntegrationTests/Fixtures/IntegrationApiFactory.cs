@@ -30,6 +30,7 @@ public sealed class IntegrationApiFactory(IntegrationDatabase database, string e
                 ["AccesoInicial:ComercioNombre"] = "Integration commerce",
                 ["Tracking:PublicBaseUrl"] = "https://tracking.example.test",
             });
+            configuration.AddInMemoryCollection(AuthenticationTestData.BootstrapSettings(new NexoRuta.Infrastructure.Administracion.AccesoInicial("", "", "", "")));
             if (settings is not null) configuration.AddInMemoryCollection(settings);
         });
         return base.CreateHost(builder);

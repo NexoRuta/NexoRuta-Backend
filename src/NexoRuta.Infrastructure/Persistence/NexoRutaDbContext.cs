@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
 using NexoRuta.Domain.Administracion;
 using NexoRuta.Domain.Envios;
 using NexoRuta.Domain.Seguimiento;
@@ -33,6 +34,7 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
         modelBuilder.Entity<Operador>(entity =>
         {
             entity.ToTable("Operadores");
+            entity.Property<bool>("BootstrapCompletado").HasDefaultValue(false);
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Nombre).HasMaxLength(160).IsRequired();
         });
@@ -40,6 +42,7 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
         modelBuilder.Entity<Comercio>(entity =>
         {
             entity.ToTable("Comercios");
+            entity.Property<bool>("BootstrapCompletado").HasDefaultValue(false);
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Nombre).HasMaxLength(160).IsRequired();
         });
@@ -48,6 +51,8 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
         {
             entity.ToTable("Usuarios");
             entity.HasKey(x => x.Id);
+            entity.Property(x => x.PasswordHash)
+                .HasMaxLength(1024);
             entity.Property(x => x.Email).HasMaxLength(254).IsRequired();
             entity.HasIndex(x => x.Email).IsUnique();
         });
@@ -63,6 +68,9 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
             });
 
             entity.HasKey(x => x.Id);
+            entity.Property(x => x.TipoOrganizacion).HasConversion<string>().HasMaxLength(20).HasComputedColumnSql("CASE WHEN \"OperadorId\" IS NOT NULL THEN 'Operador' ELSE 'Comercio' END", stored: true).ValueGeneratedOnAdd().Metadata.SetBeforeSaveBehavior(PropertySaveBehavior.Ignore);
+            entity.Property<bool?>("EsPropietario"); // Historical rollback only; never authorization.
+            entity.Property(x => x.OrganizacionId).HasComputedColumnSql("COALESCE(\"OperadorId\", \"ComercioId\")", stored: true).ValueGeneratedOnAdd().Metadata.SetBeforeSaveBehavior(PropertySaveBehavior.Ignore);
 
             entity.HasIndex(x => x.UsuarioId)
                 .IsUnique();
@@ -84,8 +92,8 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
 
             entity.HasOne<Rol>()
                 .WithMany()
-                .HasForeignKey(x => x.RolId)
-                .IsRequired()
+                .HasForeignKey("RolId", "TipoOrganizacion", "OrganizacionId")
+                .HasPrincipalKey(x => new { x.Id, x.TipoOrganizacion, x.OrganizacionId })
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -253,7 +261,12 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
 
         modelBuilder.Entity<Rol>(entity =>
         {
-            entity.ToTable("Roles");
+            entity.ToTable("Roles", table => table.HasCheckConstraint("CK_Roles_Pertenencia",
+                "((\"OperadorId\" IS NOT NULL AND \"ComercioId\" IS NULL AND \"TipoOrganizacion\" = 'Operador') OR (\"ComercioId\" IS NOT NULL AND \"OperadorId\" IS NULL AND \"TipoOrganizacion\" = 'Comercio'))"));
+            entity.Property(x => x.OrganizacionId).HasComputedColumnSql("COALESCE(\"OperadorId\", \"ComercioId\")", stored: true).ValueGeneratedOnAdd().Metadata.SetBeforeSaveBehavior(PropertySaveBehavior.Ignore);
+            entity.HasAlternateKey(x => new { x.Id, x.TipoOrganizacion, x.OrganizacionId });
+            entity.HasOne<Operador>().WithMany().HasForeignKey(x => x.OperadorId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Comercio>().WithMany().HasForeignKey(x => x.ComercioId).OnDelete(DeleteBehavior.Restrict);
 
             entity.HasKey(x => x.Id);
 
@@ -261,7 +274,7 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
                 .HasMaxLength(80)
                 .IsRequired();
 
-            entity.HasIndex(x => x.Codigo)
+            entity.HasIndex(x => new { x.TipoOrganizacion, x.OrganizacionId, x.Codigo })
                 .IsUnique();
 
             entity.Property(x => x.Nombre)

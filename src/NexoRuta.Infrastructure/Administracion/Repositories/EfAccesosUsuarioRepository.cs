@@ -23,6 +23,8 @@ public sealed class EfAccesosUsuarioRepository(NexoRutaDbContext db) : IAccesosU
         join comercio in db.Comercios
             on acceso.ComercioId equals (Guid?)comercio.Id into comercios
         from comercio in comercios.DefaultIfEmpty()
+        where usuario.PasswordHash != null && usuario.PasswordHash != ""
+            && acceso.OrganizacionId == rol.OrganizacionId
         orderby usuario.Email, operador.Nombre, comercio.Nombre
         select new ContextoUsuario(
             acceso.Id,

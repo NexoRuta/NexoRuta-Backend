@@ -18,7 +18,7 @@ public sealed class CreacionAutomaticaSeguimientoTests(
         // ARRANGE: PostgreSQL aislado mediante Testcontainers.
         var database = await postgres.CreateDatabaseAsync();
 
-        using var factory = database.CreateApiFactory();
+        using var factory = new IntegrationApiFactory(database, "Development");
         using var client = factory.CreateHttpClient();
 
         Guid operadorId;
@@ -132,7 +132,7 @@ public sealed class CreacionAutomaticaSeguimientoTests(
         // ARRANGE: PostgreSQL exclusivo de esta prueba.
         var database = await postgres.CreateDatabaseAsync();
 
-        using var factory = database.CreateApiFactory();
+        using var factory = new IntegrationApiFactory(database, "Development");
         using var client = factory.CreateHttpClient();
 
         Guid operadorId;

@@ -1,3 +1,4 @@
+using NexoRuta.IntegrationTests.Fixtures;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
@@ -40,9 +41,14 @@ public sealed class DatabaseInitializationTests
                     // ponytail: a closed loopback port proves startup does not require a database.
                     ["ConnectionStrings:Postgres"] = "Host=127.0.0.1;Port=1;Database=unused;Username=unused;Password=unused;Timeout=1;Pooling=false",
                     ["OpenTelemetry:Enabled"] = "false",
+                    ["AccesoInicial:UsuarioEmail"] = "owner@example.test",
+                    ["AccesoInicial:OperadorUsuarioEmail"] = "operator@example.test",
+                    ["AccesoInicial:OperadorNombre"] = "Operator",
+                    ["AccesoInicial:ComercioNombre"] = "Commerce",
                 };
                 if (migrations is not null) settings["DatabaseInitialization:ApplyMigrations"] = migrations;
                 if (seed is not null) settings["DatabaseInitialization:SeedData"] = seed;
+                configuration.AddInMemoryCollection(AuthenticationTestData.BootstrapSettings(new NexoRuta.Infrastructure.Administracion.AccesoInicial("", "", "", "")));
                 configuration.AddInMemoryCollection(settings);
             });
             return base.CreateHost(builder);

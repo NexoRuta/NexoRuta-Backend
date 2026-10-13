@@ -18,7 +18,7 @@ public sealed class OperadoresDisponiblesHttpTests(PostgresFixture postgres) : I
     {
         var database = await postgres.CreateDatabaseAsync();
         await using var db = database.CreateDbContext();
-        await new DatosInicialesSeeder(db,
+        await AuthenticationTestData.Seeder(db,
             new AccesoInicial("owner@example.test", "Alpha operator", "Test commerce", "operator@example.test"))
             .SeedAsync();
         db.Operadores.Add(new Operador("Beta operator without users"));
@@ -26,7 +26,7 @@ public sealed class OperadoresDisponiblesHttpTests(PostgresFixture postgres) : I
         var comercio = await db.AccesosUsuario.Where(x => x.ComercioId != null).SingleAsync();
         var operador = await db.AccesosUsuario.Where(x => x.OperadorId != null).SingleAsync();
 
-        using var api = new IntegrationApiFactory(database, settings: new Dictionary<string, string?>
+        using var api = new IntegrationApiFactory(database, "Development", settings: new Dictionary<string, string?>
         {
             ["DatabaseInitialization:SeedData"] = "false"
         });

@@ -19,6 +19,7 @@ public sealed class EnviosController(
     ListarEnviosUseCase listarEnvios) : ControllerBase
 {
     [HttpPost("envios")]
+    [Authorize(Policy = "envios.crear")]
     [Authorize(Policy = nameof(TipoAccesoUsuario.Comercio))]
     [ProducesResponseType<EnvioCreado>(StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -68,6 +69,7 @@ public sealed class EnviosController(
     }
 
     [HttpGet("envios")]
+    [Authorize(Policy = "envios.consultar")]
     [ProducesResponseType<IReadOnlyList<EnvioDetalle>>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]

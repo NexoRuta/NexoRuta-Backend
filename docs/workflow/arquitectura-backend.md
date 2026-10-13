@@ -42,6 +42,25 @@ Cada CU tiene **un módulo principal**, aunque pueda consumir contratos de otro.
 - Evitar clases vacías para todo el DBML: es un modelo conceptual preliminar. Implementar entidades y relaciones cuando un CU las necesite, conservando los invariantes ya conocidos.
 - En el primer corte se acordó `Guid`/UUIDv7 generado al construir las entidades; `Destinatario` y `Direccion` son entidades separadas; `Bulto` expresa peso en gramos y dimensiones en centímetros. La conversión visual de unidades pertenece a la presentación. Registrar cualquier cambio transversal antes de alterar estos contratos.
 
+### Organización de Application
+
+Mantener la organización por módulo (`Administracion`, `Envios`, `Seguimiento`) y usar solo las carpetas que tengan contenido:
+
+| Carpeta | Responsabilidad |
+| --- | --- |
+| `Commands` | Entradas de casos de uso. |
+| `Dtos` | Objetos de transferencia internos de Application. |
+| `Repositories` | Contratos de acceso a persistencia. |
+| `Interfaces` | Abstracciones de servicios que no sean repositorios. |
+| `Results` | Resultados de ejecución de casos de uso. |
+| `UseCases` | Implementación de casos de uso. |
+| `Context` | Información contextual utilizada por Application. |
+| `Exceptions` | Excepciones específicas; no usar también `Excepciones`. |
+
+Cada archivo `.cs` contiene un tipo público principal y lleva su nombre. El namespace refleja módulo y carpeta, por ejemplo `NexoRuta.Application.Administracion.Dtos`. Separar DTOs y resultados de las interfaces o casos de uso que los consumen; no crear archivos vacíos como anticipo de funcionalidades.
+
+En CU-01, `UsuarioLogin` pertenece a `Dtos`, `IUsuariosLoginRepository` a `Repositories` e `IVerificadorPassword` a `Interfaces`. `IniciarSesionUseCase` está implementado en `UseCases`, `SesionIniciada` en `Results`, junto con `AuthController` y JWT; la organización estructural permanece vigente.
+
 ## Multitenancy y seguridad de datos
 
 ADR-002 adopta **PostgreSQL con base y tablas compartidas y Row-Level Security (RLS)**. El operador logístico es el tenant. Un comercio puede enviar con cualquier operador registrado, sin un vínculo comercial previo. Cada envío conserva `OperadorId` y `ComercioId`; las cuentas pertenecen a un operador o a un comercio y las lecturas se filtran por esa organización. `Usuario` y `Comercio` pueden ser identidades globales; los datos operativos deben conservar el contexto del operador y, cuando aplique, del comercio.
@@ -76,3 +95,9 @@ El mecanismo concreto de contexto RLS, sus migraciones y las pruebas todavía de
 | Proveedor de identidad, modo de Blazor, conflicto offline, invalidación de caché, estrategia concreta de outbox, herramienta IaC y tablero técnico | Pendientes de decisión documentada antes de su implementación. |
 
 Las pruebas unitarias de dominio, de integración de un flujo crítico, de arquitectura y de aislamiento deben ejecutarse en CI. El alcance y criterio verificable de cada CU se documentan siguiendo [Implementar un CU](implementar-cu.md) y su [plantilla](../cu/_plantilla.md).
+
+## CU-01: roles e inicialización vigentes
+
+Los roles pertenecen a un UUID concreto de operador o comercio; el catálogo global contiene permisos, no cuatro roles obligatorios. Application delimita administración por la organización autenticada y PostgreSQL impide asignaciones cruzadas mediante CHECK/FK compuesta. Los roles del comercio son independientes del operador de cada envío. JWT y compatibilidad Development consultan la identidad vigente; los permisos efectivos se leen de PostgreSQL en cada autorización.
+
+Esquema, bootstrap y administración posterior son responsabilidades separadas. Las dos banderas de inicialización están desactivadas por defecto. El bootstrap usa IDs persistidos y una lista configurable de roles/grants de creación única, con marcador por organización; no restaura decisiones administrativas ni eleva usuarios existentes. Datos históricos incompletos quedan bloqueados sin credenciales/privilegios artificiales. Se corrigen las migraciones recientes y se agrega una normalización compatible, sin reinicializar bases. Véase [CU-01](../cu/CU-01-comercios-usuarios.md) para contratos, conversión y límites de rollback.

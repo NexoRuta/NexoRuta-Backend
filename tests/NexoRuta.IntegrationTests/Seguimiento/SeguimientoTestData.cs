@@ -1,3 +1,4 @@
+using NexoRuta.IntegrationTests.Fixtures;
 using Microsoft.EntityFrameworkCore;
 using NexoRuta.Application.Seguimiento.Services;
 using NexoRuta.Application.Seguimiento.UseCases;
@@ -16,7 +17,8 @@ internal static class SeguimientoTestData
     {
         var operador = new Operador("Integration operator");
         var comercio = new Comercio("Integration commerce");
-        var usuario = new Usuario($"user-{Guid.NewGuid():N}@example.test");
+        var email = $"user-{Guid.NewGuid():N}@example.test";
+        var usuario = new Usuario(email, AuthenticationTestData.Hash(email));
         var destinatario = new Destinatario(operador.Id, "Integration recipient");
         var direccion = new Direccion(operador.Id, "Integration address");
         var envio = new Envio(operador.Id, comercio.Id, usuario.Id, destinatario.Id, direccion.Id);

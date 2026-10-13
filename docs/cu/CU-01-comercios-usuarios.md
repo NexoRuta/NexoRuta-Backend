@@ -1,52 +1,41 @@
-# CU-01 — Comercios y usuarios: primer monitoreo
+# CU-01 — usuarios, roles propios y autorización
 
-- **Estado:** implementado para el recorte del 08/10/2026.
-- **Módulo:** M01 — Administración y configuración.
-- **Fuente:** `Monitoreo_2026-10-08_CU.xlsx`, CU-01; `Laboratorio__NET_2026.pdf`, §§3.3, 4 y 5.1; selección de cuenta solicitada por el equipo.
+## Modelo vigente
 
-## Actores y pertenencia de las cuentas
+Cada `Rol` pertenece exactamente a un operador o comercio **concreto** mediante UUID. Su código es único dentro de esa organización y tipo; no existe un catálogo obligatorio de roles. `Permiso` es un catálogo global de funcionalidades. `RolesPermisos` y las asignaciones de usuarios son decisiones administrativas persistentes.
 
-`Operador` es el tenant; `Comercio` es su cliente; `Usuario` es la persona que accede. La letra dice en §3.3, página 2, que un mismo comercio puede operar con más de un operador logístico. El comercio puede enviar con cualquier operador registrado. No existe una entidad ni tabla `OperadorComercio`: cada envío guarda directamente `OperadorId` y `ComercioId`.
+Application verifica permisos del actor y delimita consultas/escrituras a su organización. PostgreSQL refuerza la pertenencia mediante CHECK, FK a organizaciones y FK compuesta de acceso/rol por ID, tipo de organización e identidad generada. Ni asignaciones por SQL directo ni UUID coincidentes de operador/comercio permiten cruzar ámbitos. El comercio conserva roles propios independientes de los operadores con los que trabaja; el operador sigue siendo el tenant operativo de envíos.
 
-`AccesoUsuario` asigna una cuenta a una organización: tiene `OperadorId` o `ComercioId`, nunca ambos. La base exige una sola pertenencia por usuario. La cuenta del operador entra únicamente a Backoffice y la cuenta del comercio únicamente al portal. No se crea otra cuenta ni otro acceso cuando se agrega un operador que atiende al comercio.
+## Inicialización controlada
 
-La cuenta inicial del comercio tiene `EsPropietario = true` y representa al dueño de prueba. La cuenta del operador no puede tener esa marca. Los tipos Operador/Comercio identifican la organización de la cuenta; los perfiles laborales y sus permisos siguen fuera de este recorte.
+- Migración de esquema y bootstrap se habilitan por separado (`DatabaseInitialization:ApplyMigrations` / `SeedData`), por defecto `false`.
+- `AccesoInicial` requiere IDs persistentes de organizaciones; los nombres son editables, no identidad.
+- `Bootstrap:Roles` configura una lista arbitraria de códigos/nombres/propietario/permisos. Los roles y grants iniciales se crean una sola vez por organización, con un marcador persistido; eliminaciones y modificaciones posteriores no se restauran.
+- Las contraseñas de usuarios nuevos provienen de secretos configurados y se hashean con Identity. Los hashes existentes no se modifican.
+- El bootstrap nunca eleva usuarios existentes ni accesos reparados. Un acceso sin rol o usuario sin hash queda bloqueado hasta configuración administrativa explícita.
 
-`Destinatario` contiene los datos de entrega declarados en un envío; su `OperadorId` delimita datos operativos, sin crear una cuenta o membresía para esa persona. Tracking sigue siendo una plantilla: no se implementó todavía el seguimiento mediante enlace público.
+## Migraciones y datos anteriores
 
-## Consultas de cuentas y empresas
+Se conservan los IDs y el historial de migraciones. `AddRolesPermisos` y `AddUsuarioPasswordHash` permiten información histórica incompleta en vez de fabricar privilegios o credenciales. `NormalizeCu01Initialization` también acepta bases que ya aplicaron las versiones anteriores: convierte roles compartidos según los accesos reales, conserva el ID original para una organización y copia los permisos efectivos a nuevas identidades para las otras.
 
-`IAccesosUsuarioRepository` consulta cuentas y su pertenencia a una organización. Incluye el nombre del operador o comercio en `ContextoUsuario` mediante una sola consulta; el login selecciona usuarios, no empresas.
+Las definiciones compartidas sin pertenencia inequívoca se conservan en tablas de legado no expuestas por Application; no son editables ni asignables. La marca `EsPropietario` se conserva solo como compatibilidad de rollback, nunca autoriza. Si una versión anterior eliminó esa columna, no es posible recuperar su valor: se conserva como desconocido (`null`). Usuarios, accesos, envíos y bultos conservan sus identidades. Roles/hash históricos ausentes bloquean login, JWT y acceso demo.
 
-`IOperadoresRepository` y `IComerciosRepository` consultan las empresas de forma independiente, incluso si todavía no tienen usuarios ni envíos. Ambos ofrecen `ListarAsync` ordenado por nombre y `ObtenerAsync` por ID, con `CancellationToken`. Sus implementaciones EF Core son `EfOperadoresRepository` y `EfComerciosRepository`, registradas por scope junto al repositorio de accesos. Los operadores devuelven `OperadorDisponible` y los comercios `ComercioResumen`, con ID y nombre.
+El rollback no inventa datos requeridos ni fusiona permisos: si varios roles de organizaciones diferentes tienen el mismo código, se rechaza sin cambiar el esquema. Se requiere una decisión administrativa explícita para consolidarlos. Revertir más allá de la creación de las tablas de autenticación elimina esas columnas/tablas por definición; para volver a autenticar se requiere configurar roles/credenciales, no un seeder que eleve cuentas automáticamente.
 
-El selector del alta y `CrearEnvioUseCase` usan `IOperadoresRepository`. El repositorio de comercios está disponible para consultas internas; este cambio no agrega una pantalla ni un endpoint de catálogo o de comercios atendidos por operador.
+## HTTP y autorización
 
-## Inicialización e ingreso
+`POST /api/auth/login` conserva su contrato JWT. La API valida firma/expiración e identidad/acceso actual contra PostgreSQL. Los permisos efectivos también se consultan allá, de modo que retirar un grant o cambiar un rol afecta inmediatamente tokens ya emitidos. Compatibilidad `X-NexoRuta-Acceso`: exclusivamente Development.
 
-La API aplica migraciones y `DatosInicialesSeeder` inicializa un operador, un comercio, la cuenta del dueño y una cuenta del operador. El seed conserva las identidades y los envíos existentes y no duplica datos al repetirse. Su configuración está en `AccesoInicial`: `UsuarioEmail`, `OperadorUsuarioEmail`, `OperadorNombre` y `ComercioNombre`. Los cuatro valores son explícitos y obligatorios; no existe una bandera de modo Demo. REF-05 retiró la transformación histórica que reconocía nombres Demo y renombraba esos registros. No borra usuarios, operadores, comercios ni envíos existentes. El seeder reutiliza las identidades configuradas y sus cuentas existentes; cambiar la configuración puede crear registros adicionales, no fusionar los anteriores.
+| Operación | Política |
+| --- | --- |
+| `GET/POST /api/roles`, `PUT/DELETE /api/roles/{id}` | `configuracion.gestionar` |
+| `GET /api/roles/permisos`, `PUT /api/roles/{id}/permisos` | `configuracion.gestionar` |
+| `PUT /api/roles/accesos/{accesoId}` (`RolId: null` retira asignación) | `usuarios.gestionar` |
 
-Los valores locales de configuración son `usuario@nexoruta.local` (dueño del comercio) y `operador@nexoruta.local` (usuario interno del operador); no son identidades obligatorias ni alternativas hardcodeadas del bootstrap. Las listas de `/ingresar` se leen de PostgreSQL; la entrada al portal muestra el usuario y comercio, sin seleccionar un operador. El servidor comprueba el tipo de cuenta antes de emitir la cookie. Cada aplicación usa cookies de sesión y antiforgery independientes y ofrece `POST /salir` para cambiar de cuenta.
+Las operaciones siempre se limitan a la organización de la cuenta autenticada; no aceptan un propietario desde el request. Login y políticas de envíos permanecen vigentes. Tracking público no requiere credenciales y conserva sus respuestas.
 
-En cada petición de la API, `AccesoSeleccionadoHandler` consulta la cuenta una vez y conserva su `ContextoUsuario` en `HttpContext.Items`. `UsuarioActualHttp` reutiliza ese resultado y comprueba que corresponda al ID de acceso del principal, sin volver a consultar PostgreSQL. El resultado se limita a la petición actual; cada petición nueva vuelve a validar la cuenta. Ambos respetan la cancelación de la petición.
+## Verificación
 
-## Elección del operador y contratos
+Pruebas unitarias, de arquitectura y PostgreSQL temporal propio: bootstrap con 0/1/5 roles, nombres editados, hashes/asignaciones preservados, revocación, SQL de pertenencia inválida, conversión de esquema compartido ya aplicado, preservación de usuarios/accesos/envíos/bultos y rollback seguro. No se usa ni reinicializa la base de desarrollo `nexoruta`.
 
-El usuario del comercio selecciona el operador **al crear cada envío**. La API lista todos los operadores registrados y comprueba que el elegido exista antes de persistir. No exige envíos anteriores ni un vínculo previo con el comercio. El comercio de origen y el usuario creador se obtienen desde la cuenta del solicitante; no se eligen desde el formulario.
-
-- `GET /api/accesos?tipo=Comercio|Operador`: cuentas disponibles para la entrada, sin selección previa.
-- `GET /api/usuarios/actual`: cuenta seleccionada y organización de pertenencia. Una cuenta de comercio tiene `OperadorId = null`; una cuenta del operador tiene `ComercioId = null`.
-- `GET /api/operadores`: todos los operadores registrados, disponibles para el comercio de la cuenta. Solo admite cuentas de comercio.
-- Las operaciones envían `X-NexoRuta-Acceso` para identificar la cuenta seleccionada. Selección ausente o inválida: 401. Operación reservada al comercio con cuenta del operador: 403.
-- Un `operadorId` inválido, ausente o inexistente en el alta devuelve 400 y no guarda datos. Un operador registrado es elegible aunque nunca haya trabajado con el comercio.
-- El comercio consulta sus envíos con todos sus operadores; Backoffice consulta los envíos del operador de su cuenta.
-
-La interacción cliente–operador queda registrada en los envíos. El listado de comercios con los que ha trabajado un operador todavía no se implementa; no se agregan pantallas ni endpoints para esa consulta.
-
-## Límites y verificación
-
-La selección es sin credenciales para este monitoreo. `AccesoSeleccionadoHandler` no prueba identidad y debe sustituirse al incorporar autenticación real. No se implementaron CRUD, perfiles laborales, RLS ni otros CU. Los filtros y claves foráneas se verifican sin afirmar aislamiento mediante RLS.
-
-La migración convierte los accesos anteriores en pertenencias a la organización, conserva sus IDs cuando había una sola cuenta y agrupa vínculos del mismo usuario/comercio. Ante organizaciones incompatibles para la misma cuenta, falla sin modificar los datos. La migración posterior `ShipmentCommerce` convierte el ID del vínculo de cada envío en el `ComercioId` correspondiente antes de eliminar `OperadoresComercios`, conservando usuarios, cuentas, envíos, destinatarios, direcciones y bultos. Al revertirla reconstruye los vínculos necesarios para los envíos existentes con nuevos IDs; no recupera vínculos anteriores sin envíos. Las migraciones históricas se mantienen para actualizar bases existentes. Ese cambio histórico de respuestas de `operadorComercioId` a `comercioId` requirió coordinar backend y cliente web; precede a REF-01 a REF-05. Estas refactorizaciones no agregan ni modifican esas migraciones.
-
-Pruebas: seed repetido y reparación, cuentas separadas, dueño inicial, mismo comercio/cuenta con dos operadores, elección por envío, rechazo de operador inexistente y cuenta de operador, lectura por comercio/operador y conservación de datos anteriores. Cada escenario PostgreSQL crea una base temporal `nexoruta_test_<UUIDv7>` y ejecuta `EnsureDeletedAsync()` al terminar. `NEXORUTA_TEST_POSTGRES` debe apuntar a una instancia exclusiva de pruebas; el fallback actual no garantiza aislamiento. Consultar las [protecciones y el baseline de tests](../../README.md#pruebas-postgresql-destino-aislado-obligatorio). Las pruebas del cliente verifican las respuestas, selección obligatoria y contrato JSON con OpenAPI. La CI remota de estos cambios no se ejecutó.
+Las organizaciones ya existentes al aplicar la normalización se marcan como inicializadas: su configuración posterior debe administrarse explícitamente, sin volver a ejecutar plantillas iniciales sobre decisiones históricas.

@@ -102,11 +102,15 @@ public sealed class RecuperarEnlaceSeguimientoTests(PostgresFixture postgres) : 
         {
             var op = new Operador("Other operator");
             var commerce = new Comercio("Other commerce");
-            var operatorUser = new Usuario($"other-op-{Guid.NewGuid():N}@example.test");
-            var commerceUser = new Usuario($"other-commerce-{Guid.NewGuid():N}@example.test");
-            var opAccess = new AccesoUsuario(operatorUser.Id, op.Id, null);
-            var commerceAccess = new AccesoUsuario(commerceUser.Id, null, commerce.Id);
-            db.AddRange(op, commerce, operatorUser, commerceUser, opAccess, commerceAccess);
+            var operatorEmail = $"other-op-{Guid.NewGuid():N}@example.test";
+            var operatorUser = new Usuario(operatorEmail, AuthenticationTestData.Hash(operatorEmail));
+            var commerceEmail = $"other-commerce-{Guid.NewGuid():N}@example.test";
+            var commerceUser = new Usuario(commerceEmail, AuthenticationTestData.Hash(commerceEmail));
+            var opRole = new Rol("other_operator", "Other operator", op.Id, null);
+            var commerceRole = new Rol("other_commerce", "Other commerce", null, commerce.Id);
+            var opAccess = new AccesoUsuario(operatorUser.Id, op.Id, null, opRole);
+            var commerceAccess = new AccesoUsuario(commerceUser.Id, null, commerce.Id, commerceRole);
+            db.AddRange(op, commerce, operatorUser, commerceUser, opRole, commerceRole, opAccess, commerceAccess);
             await db.SaveChangesAsync();
             otherOperator = opAccess.Id; otherCommerce = commerceAccess.Id;
         }
@@ -126,7 +130,7 @@ public sealed class RecuperarEnlaceSeguimientoTests(PostgresFixture postgres) : 
         using var production = new IntegrationApiFactory(database, "Production", Settings());
         using var productionClient = production.CreateHttpClient();
         using var forbidden = Request(envio.Id, owner);
-        Assert.Equal(HttpStatusCode.Forbidden, (await productionClient.SendAsync(forbidden)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await productionClient.SendAsync(forbidden)).StatusCode);
     }
 
     [Theory]

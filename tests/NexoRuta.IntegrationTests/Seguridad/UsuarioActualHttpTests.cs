@@ -102,7 +102,7 @@ public sealed class UsuarioActualHttpTests
 
     private static ContextoUsuario Cuenta() => new(
         Guid.CreateVersion7(), Guid.CreateVersion7(), null, Guid.CreateVersion7(),
-        "dueno@comercio.local", null, "Comercio de prueba", true);
+        "dueno@comercio.local", null, "Comercio de prueba", Guid.CreateVersion7(), "propietario_comercio");
 
     private static ServiceProvider Servicios(Cuentas cuentas)
     {

@@ -7,7 +7,10 @@ public sealed class AccesoUsuario
     public Guid UsuarioId { get; private set; }
     public Guid? OperadorId { get; private set; }
     public Guid? ComercioId { get; private set; }
-    public Guid RolId { get; private set; }
+    public Guid? RolId { get; private set; }
+
+    public TipoAccesoUsuario TipoOrganizacion { get; private set; }
+    public Guid OrganizacionId { get; private set; }
 
     private AccesoUsuario() { } // EF Core
 
@@ -15,7 +18,7 @@ public sealed class AccesoUsuario
         Guid usuarioId,
         Guid? operadorId,
         Guid? comercioId,
-        Rol rol)
+        Rol? rol = null)
     {
         if (usuarioId == Guid.Empty)
             throw new ArgumentException(
@@ -33,8 +36,12 @@ public sealed class AccesoUsuario
         OperadorId = operadorId;
         ComercioId = comercioId;
 
-        AsignarRol(rol);
+        OrganizacionId = (operadorId ?? comercioId)!.Value;
+        TipoOrganizacion = operadorId.HasValue ? TipoAccesoUsuario.Operador : TipoAccesoUsuario.Comercio;
+        if (rol is not null) AsignarRol(rol);
     }
+
+    public void RetirarRol() => RolId = null;
 
     public void AsignarRol(Rol rol)
     {
@@ -44,7 +51,7 @@ public sealed class AccesoUsuario
             ? TipoAccesoUsuario.Operador
             : TipoAccesoUsuario.Comercio;
 
-        if (rol.TipoOrganizacion != tipoOrganizacion)
+        if (rol.TipoOrganizacion != tipoOrganizacion || rol.OperadorId != OperadorId || rol.ComercioId != ComercioId)
             throw new InvalidOperationException(
                 "El rol no corresponde al tipo de organización.");
 

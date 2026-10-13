@@ -138,11 +138,11 @@ public sealed class CrearEnvioUseCaseTests
 
     private static ContextoUsuario CuentaComercio()
         => new(Guid.CreateVersion7(), Guid.CreateVersion7(), null, Guid.CreateVersion7(),
-            "dueno@comercio.local", null, "Comercio Centro", true);
+            "dueno@comercio.local", null, "Comercio Centro", Guid.CreateVersion7(), "propietario_comercio");
 
     private static ContextoUsuario CuentaOperador()
         => new(Guid.CreateVersion7(), Guid.CreateVersion7(), Guid.CreateVersion7(), null,
-            "operador@empresa.local", "Distribución Sur", null, false);
+            "operador@empresa.local", "Distribución Sur", null, Guid.CreateVersion7(), "administrador_operador");
 
     private static CrearEnvioCommand Comando(Guid operadorId)
         => new(OperadorId: operadorId, DestinatarioNombre: "Ana", Direccion: "18 de Julio 123",

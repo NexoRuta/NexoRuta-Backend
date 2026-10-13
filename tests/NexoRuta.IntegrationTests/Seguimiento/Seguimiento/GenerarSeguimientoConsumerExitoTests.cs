@@ -42,7 +42,7 @@ public sealed class GenerarSeguimientoConsumerExitoTests(
         await rabbitMq.StartAsync();
 
         // Inicializar la API para disponer de los datos demo.
-        using var api = database.CreateApiFactory();
+        using var api = new IntegrationApiFactory(database, "Development");
         using var client = api.CreateHttpClient();
 
         Guid operadorId;

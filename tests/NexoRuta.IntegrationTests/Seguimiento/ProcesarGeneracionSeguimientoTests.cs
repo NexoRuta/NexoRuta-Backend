@@ -25,7 +25,7 @@ public sealed class ProcesarGeneracionSeguimientoTests(
         // ARRANGE: base PostgreSQL exclusiva de esta prueba.
         var database = await postgres.CreateDatabaseAsync();
 
-        using var factory = database.CreateApiFactory();
+        using var factory = new IntegrationApiFactory(database, "Development");
         using var client = factory.CreateHttpClient();
 
         Guid operadorId;
@@ -254,7 +254,7 @@ public sealed class ProcesarGeneracionSeguimientoTests(
         // ARRANGE: PostgreSQL exclusivo de esta prueba.
         var database = await postgres.CreateDatabaseAsync();
 
-        using var factory = database.CreateApiFactory();
+        using var factory = new IntegrationApiFactory(database, "Development");
         using var client = factory.CreateHttpClient();
 
         Guid operadorId;
@@ -401,7 +401,7 @@ public sealed class ProcesarGeneracionSeguimientoTests(
     {
         var database = await postgres.CreateDatabaseAsync();
 
-        using var factory = database.CreateApiFactory();
+        using var factory = new IntegrationApiFactory(database, "Development");
         using var client = factory.CreateHttpClient();
 
         Guid operadorId;
@@ -536,7 +536,7 @@ public sealed class ProcesarGeneracionSeguimientoTests(
     {
         var database = await postgres.CreateDatabaseAsync();
 
-        using var factory = database.CreateApiFactory();
+        using var factory = new IntegrationApiFactory(database, "Development");
         using var client = factory.CreateHttpClient();
 
         Guid operadorId;

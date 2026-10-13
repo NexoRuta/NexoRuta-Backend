@@ -10,7 +10,11 @@ using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Microsoft.AspNetCore.RateLimiting;
 using System.Threading.RateLimiting;
-
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+using NexoRuta.Application.Administracion.Context;
+using NexoRuta.Application.Administracion.Repositories;
+using Microsoft.AspNetCore.Authorization;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
@@ -19,19 +23,110 @@ builder.Services.AddNexoRutaPersistence(builder.Configuration);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IUsuarioActual, UsuarioActualHttp>();
 
-builder.Services.AddAuthentication(AccesoSeleccionado.Esquema)
-    .AddScheme<AuthenticationSchemeOptions, AccesoSeleccionadoHandler>(AccesoSeleccionado.Esquema, _ => { });
 
-builder.Services.AddAuthorization(options => options.AddPolicy(nameof(TipoAccesoUsuario.Comercio),
-    policy => policy.RequireAuthenticatedUser().RequireClaim(
-        AccesoSeleccionado.ClaimTipoAcceso, nameof(TipoAccesoUsuario.Comercio))));
+var jwt = new JwtConfiguracion(builder.Configuration);
+
+builder.Services.AddSingleton(jwt);
+builder.Services.AddSingleton<JwtTokenService>();
+builder.Services.AddScoped<JwtValidacionEventos>();
+builder.Services.AddScoped<IAuthorizationHandler,PermisoAuthorizationHandler>();
+builder.Services
+    .AddAuthentication(options =>
+    {
+        options.DefaultAuthenticateScheme = "NexoRuta";
+        options.DefaultChallengeScheme = "NexoRuta";
+        options.DefaultForbidScheme = "NexoRuta";
+    })
+    .AddPolicyScheme("NexoRuta", "Autenticación NexoRuta", options =>
+    {
+        options.ForwardDefaultSelector = context =>
+        {
+            var authorization =
+                context.Request.Headers.Authorization.ToString();
+
+            if (authorization.StartsWith(
+                "Bearer ",
+                StringComparison.OrdinalIgnoreCase))
+            {
+                return JwtBearerDefaults.AuthenticationScheme;
+            }
+
+            // Compatibilidad temporal con el acceso demo.
+            // Exclusivamente durante Development.
+            return builder.Environment.IsDevelopment()
+                ? AccesoSeleccionado.Esquema
+                : JwtBearerDefaults.AuthenticationScheme;
+        };
+    })
+    .AddScheme<AuthenticationSchemeOptions, AccesoSeleccionadoHandler>(
+        AccesoSeleccionado.Esquema,
+        _ => { })
+    .AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, options =>
+    {
+        options.MapInboundClaims = false;
+
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidIssuer = jwt.Issuer,
+
+            ValidateAudience = true,
+            ValidAudience = jwt.Audience,
+
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = jwt.SigningKey,
+
+            RequireSignedTokens = true,
+            ValidAlgorithms = [SecurityAlgorithms.HmacSha256],
+
+            RequireExpirationTime = true,
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.FromSeconds(30)
+        };
+
+        options.EventsType = typeof(JwtValidacionEventos);
+    });
+
 
 builder.Services.AddHealthChecks().AddCheck<PostgreSqlHealthCheck>("postgres");
 
-// ponytail: identity selection has no credentials; expose token recovery only
-// in Development until the existing identity mechanism is replaced with real authentication.
-builder.Services.AddAuthorization(options => options.AddPolicy("seguimiento-demo",
-    policy => policy.RequireAuthenticatedUser().RequireAssertion(_ => builder.Environment.IsDevelopment())));
+
+
+builder.Services.AddAuthorization(options =>
+{
+    // Política existente para cuentas de comercio.
+    options.AddPolicy(nameof(TipoAccesoUsuario.Comercio), policy =>
+        policy.RequireAuthenticatedUser()
+            .RequireClaim(
+                AccesoSeleccionado.ClaimTipoAcceso,
+                nameof(TipoAccesoUsuario.Comercio)));
+
+    // Política demo existente.
+    options.AddPolicy("seguimiento-demo", policy =>
+        policy.RequireAuthenticatedUser()
+            .RequireAssertion(
+                _ => builder.Environment.IsDevelopment()));
+
+    // Políticas RBAC.
+    string[] codigos =
+    [
+        "usuarios.gestionar",
+        "configuracion.gestionar",
+        "envios.crear",
+        "envios.consultar",
+        "envios.gestionar"
+    ];
+
+    foreach (var codigo in codigos)
+    {
+        options.AddPolicy(codigo, policy =>
+            policy.RequireAuthenticatedUser()
+                .AddRequirements(
+                    new PermisoRequirement(codigo)));
+    }
+});
+
+
 
 if (builder.Configuration.GetValue<bool>("OpenTelemetry:Enabled"))
 {
@@ -67,7 +162,23 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit = 0,
                 AutoReplenishment = true
             }));
+
+
+    options.AddPolicy("auth-login", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey:
+                context.Connection.RemoteIpAddress?.ToString()
+                ?? "sin-ip",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 5,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
+
 });
+
 
 
 var app = builder.Build();

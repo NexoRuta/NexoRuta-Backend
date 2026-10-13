@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -11,19 +11,11 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropCheckConstraint(
-                name: "CK_AccesosUsuario_Propietario",
-                table: "AccesosUsuario");
-
-            migrationBuilder.DropColumn(
-                name: "EsPropietario",
-                table: "AccesosUsuario");
-
             migrationBuilder.AddColumn<Guid>(
                 name: "RolId",
                 table: "AccesosUsuario",
                 type: "uuid",
-                nullable: false);
+                nullable: true);
 
             migrationBuilder.CreateTable(
                 name: "Permisos",
@@ -98,6 +90,8 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                 table: "RolesPermisos",
                 column: "PermisoId");
 
+
+
             migrationBuilder.AddForeignKey(
                 name: "FK_AccesosUsuario_Roles_RolId",
                 table: "AccesosUsuario",
@@ -131,17 +125,6 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                 name: "RolId",
                 table: "AccesosUsuario");
 
-            migrationBuilder.AddColumn<bool>(
-                name: "EsPropietario",
-                table: "AccesosUsuario",
-                type: "boolean",
-                nullable: false,
-                defaultValue: false);
-
-            migrationBuilder.AddCheckConstraint(
-                name: "CK_AccesosUsuario_Propietario",
-                table: "AccesosUsuario",
-                sql: "NOT \"EsPropietario\" OR \"ComercioId\" IS NOT NULL");
         }
     }
 }
