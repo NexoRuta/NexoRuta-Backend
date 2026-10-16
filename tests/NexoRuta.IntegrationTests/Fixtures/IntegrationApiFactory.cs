@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -11,7 +12,7 @@ using NexoRuta.Infrastructure.Persistence;
 namespace NexoRuta.IntegrationTests.Fixtures;
 
 public sealed class IntegrationApiFactory(IntegrationDatabase database, string environment = "Testing",
-    IDictionary<string, string?>? settings = null) : WebApplicationFactory<Program>
+    IDictionary<string, string?>? settings = null, IInterceptor[]? interceptors = null) : WebApplicationFactory<Program>
 {
     protected override IHost CreateHost(IHostBuilder builder)
     {
@@ -44,7 +45,7 @@ public sealed class IntegrationApiFactory(IntegrationDatabase database, string e
             // Replace the registration as well: startup migrations/seeding must use our database.
             services.RemoveAll<NexoRutaDbContext>();
             services.RemoveAll<DbContextOptions<NexoRutaDbContext>>();
-            services.AddScoped(_ => database.CreateDbContext());
+            services.AddScoped(_ => database.CreateDbContext(interceptors ?? []));
         });
     }
 

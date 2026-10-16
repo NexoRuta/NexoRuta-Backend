@@ -40,27 +40,32 @@ public static class DependencyInjection
             };
         });
         services.AddScoped<IRolesRepository, EfRolesRepository>();
-        services.AddScoped<GestionarRolesUseCase>();
-
         services.AddScoped<IAccesosUsuarioRepository, EfAccesosUsuarioRepository>();
         services.AddScoped<IOperadoresRepository, EfOperadoresRepository>();
         services.AddScoped<IComerciosRepository, EfComerciosRepository>();
         services.AddScoped<IEnviosRepository, EfEnviosRepository>();
-        services.AddScoped<DatosInicialesSeeder>();
-        services.AddScoped<CrearEnvioUseCase>();
+        services.AddScoped<IUsuariosOrganizacionRepository, EfUsuariosOrganizacionRepository>();
+        services.AddScoped<IPermisosUsuarioRepository, EfPermisosUsuarioRepository>();
+        services.AddScoped<IUsuariosLoginRepository, EfUsuariosLoginRepository>();
+        services.AddScoped<IVerificadorPassword, VerificadorPassword>();
+
+
+        services.AddScoped<GestionarRolesUseCase>();
+        services.AddScoped<ListarUsuariosUseCase>();
         services.AddScoped<ListarEnviosUseCase>();
-        services.AddScoped<IPermisosUsuarioRepository,EfPermisosUsuarioRepository>();
-        services.AddSingleton<IPasswordHasher<string>, PasswordHasher<string>>();
-
-        services.AddScoped<
-            IUsuariosLoginRepository,
-            EfUsuariosLoginRepository>();
-
-        services.AddScoped<
-            IVerificadorPassword,
-            VerificadorPassword>();
-
+        services.AddScoped<CrearEnvioUseCase>();
+        services.AddScoped<CrearUsuarioUseCase>();
         services.AddScoped<IniciarSesionUseCase>();
+        services.AddScoped<CambiarEstadoUsuarioUseCase>();
+        services.AddScoped<ObtenerPermisosActualesUseCase>();
+
+
+
+
+        services.AddSingleton<IPasswordHasher<string>, PasswordHasher<string>>();
+        services.AddSingleton<IGeneradorPasswordHash, GeneradorPasswordHash>();
+
+        services.AddScoped<DatosInicialesSeeder>();
 
         // M05 - Seguimiento
         services.AddScoped<

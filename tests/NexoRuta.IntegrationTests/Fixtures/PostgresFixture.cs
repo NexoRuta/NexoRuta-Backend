@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using NexoRuta.Infrastructure.Persistence;
 using Npgsql;
 using Testcontainers.PostgreSql;
@@ -89,7 +90,17 @@ public sealed class IntegrationDatabase
 
     internal string ConnectionString { get; }
 
-    public NexoRutaDbContext CreateDbContext() => new(options);
+    public NexoRutaDbContext CreateDbContext(params IInterceptor[] interceptors)
+    {
+        if (interceptors.Length == 0)
+            return new(options);
 
-    public IntegrationApiFactory CreateApiFactory() => new(this);
+        var optionsWithInterceptors = new DbContextOptionsBuilder<NexoRutaDbContext>(options)
+            .AddInterceptors(interceptors)
+            .Options;
+        return new(optionsWithInterceptors);
+    }
+
+    public IntegrationApiFactory CreateApiFactory(params IInterceptor[] interceptors) =>
+        new(this, interceptors: interceptors);
 }

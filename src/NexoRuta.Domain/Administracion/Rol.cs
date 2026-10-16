@@ -9,6 +9,7 @@ public sealed class Rol
     public Guid? OperadorId { get; private set; }
     public Guid? ComercioId { get; private set; }
     public Guid OrganizacionId { get; private set; }
+    public bool EsProtegidoSistema { get; private set; }
 
     private Rol() { } // EF Core
 
@@ -29,8 +30,17 @@ public sealed class Rol
 
     public void Renombrar(string nombre)
     {
+        if (EsProtegidoSistema)
+            throw new InvalidOperationException("A system-protected role cannot be renamed.");
         if (string.IsNullOrWhiteSpace(nombre) || nombre.Trim().Length > 160)
             throw new ArgumentException("A role name of at most 160 characters is required.", nameof(nombre));
         Nombre = nombre.Trim();
+    }
+
+    public void ProtegerComoRolSistema()
+    {
+        if (TipoOrganizacion != TipoAccesoUsuario.Operador)
+            throw new InvalidOperationException("Only operator roles can be system-protected.");
+        EsProtegidoSistema = true;
     }
 }

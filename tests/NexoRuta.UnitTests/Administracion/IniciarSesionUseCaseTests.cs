@@ -12,7 +12,7 @@ public sealed class IniciarSesionUseCaseTests
     [InlineData(false)]
     public async Task LoginChecksPasswordAndReturnsOnlyCurrentIdentity(bool valid)
     {
-        var user = new UsuarioLogin(Guid.NewGuid(), Guid.NewGuid(), "user@example.test", "stored-hash");
+        var user = new UsuarioLogin(Guid.NewGuid(), Guid.NewGuid(), "user@example.test", "stored-hash", 7);
         var repository = new Users(user);
         var verifier = new PasswordVerifier(valid);
         var result = await new IniciarSesionUseCase(repository, verifier)
@@ -26,6 +26,7 @@ public sealed class IniciarSesionUseCaseTests
             Assert.Equal(user.UsuarioId, result.UsuarioId);
             Assert.Equal(user.AccesoId, result.AccesoId);
             Assert.Equal(user.Email, result.Email);
+            Assert.Equal(user.VersionSesion, result.VersionSesion);
         }
         else Assert.Null(result);
     }

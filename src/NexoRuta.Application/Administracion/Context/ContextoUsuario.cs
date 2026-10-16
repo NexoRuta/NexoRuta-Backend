@@ -13,8 +13,14 @@ public sealed record ContextoUsuario(
     string? OperadorNombre,
     string? ComercioNombre,
     Guid RolId,
-    string RolCodigo)
+    string RolCodigo,
+    [property: System.Text.Json.Serialization.JsonIgnore]
+    long VersionSesion = 0)
 {
+    public TipoAccesoUsuario TipoAcceso => ComercioId.HasValue
+        ? TipoAccesoUsuario.Comercio
+        : TipoAccesoUsuario.Operador;
+
     public string Tipo => ComercioId.HasValue
         ? nameof(TipoAccesoUsuario.Comercio)
         : nameof(TipoAccesoUsuario.Operador);

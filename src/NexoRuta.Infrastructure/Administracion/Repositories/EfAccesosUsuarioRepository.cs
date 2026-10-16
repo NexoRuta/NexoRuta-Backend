@@ -35,7 +35,8 @@ public sealed class EfAccesosUsuarioRepository(NexoRutaDbContext db) : IAccesosU
             operador == null ? null : operador.Nombre,
             comercio == null ? null : comercio.Nombre,
             rol.Id,
-            rol.Codigo);
+            rol.Codigo,
+            acceso.VersionSesion);
 
 
     public async Task<IReadOnlyList<ContextoUsuario>> ListarAsync(

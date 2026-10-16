@@ -38,6 +38,7 @@ public sealed class IniciarSesionUseCase(
         return new SesionIniciada(
             usuario.UsuarioId,
             usuario.AccesoId,
-            usuario.Email);
+            usuario.Email,
+            usuario.VersionSesion);
     }
 }

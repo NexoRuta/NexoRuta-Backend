@@ -14,6 +14,10 @@ public sealed class AccesoUsuario
 
     private AccesoUsuario() { } // EF Core
 
+    public bool Activo { get; private set; } = true;
+
+    public long VersionSesion { get; private set; }
+
     public AccesoUsuario(
         Guid usuarioId,
         Guid? operadorId,
@@ -57,4 +61,15 @@ public sealed class AccesoUsuario
 
         RolId = rol.Id;
     }
+
+
+    public void CambiarEstado(bool activo)
+    {
+        if (Activo == activo)
+            return;
+
+        Activo = activo;
+        VersionSesion = checked(VersionSesion + 1);
+    }
+
 }

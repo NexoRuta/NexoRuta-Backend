@@ -11,6 +11,17 @@ namespace NexoRuta.UnitTests.Administracion;
 public sealed class GestionarRolesUseCaseTests
 {
     [Fact]
+    public async Task RolesAsignables_RequiresDynamicUserManagementPermission()
+    {
+        var permissions = new Permissions(true);
+        var useCase = new GestionarRolesUseCase(new Actor(), permissions, new Roles());
+
+        await useCase.ListarAsignablesAsync();
+
+        Assert.Equal(new[] { "usuarios.gestionar", "configuracion.gestionar" }, permissions.Requests);
+    }
+
+    [Fact]
     public async Task CreateUsesActorOrganizationRatherThanRequestOwnership()
     {
         var actor = new Actor();
@@ -19,7 +30,7 @@ public sealed class GestionarRolesUseCaseTests
         await new GestionarRolesUseCase(actor, permissions, repository).CrearAsync("custom", "Custom");
         Assert.Equal(actor.Context.ComercioId, repository.Created!.ComercioId);
         Assert.Null(repository.Created.OperadorId);
-        Assert.Equal("configuracion.gestionar", permissions.Requested);
+        Assert.Equal(new[] { "configuracion.gestionar" }, permissions.Requests);
     }
 
     [Fact]
@@ -32,12 +43,25 @@ public sealed class GestionarRolesUseCaseTests
     }
 
     [Fact]
+    public async Task PermissionCatalogIsRequestedForTheAuthenticatedOrganization()
+    {
+        var actor = new Actor();
+        var repository = new Roles();
+        var permissions = new Permissions(true);
+
+        await new GestionarRolesUseCase(actor, permissions, repository).PermisosAsync();
+
+        Assert.Same(actor.Context, repository.PermissionCatalogActor);
+        Assert.Equal(new[] { "configuracion.gestionar" }, permissions.Requests);
+    }
+
+    [Fact]
     public async Task AssignmentRequiresUserManagementAndScopedRepositoryAcceptance()
     {
         var permissions = new Permissions(true);
         var useCase = new GestionarRolesUseCase(new Actor(), permissions, new Roles());
         await Assert.ThrowsAsync<AccesoNoPermitidoException>(() => useCase.AsignarAsync(Guid.NewGuid(), Guid.NewGuid()));
-        Assert.Equal("usuarios.gestionar", permissions.Requested);
+        Assert.Equal(new[] { "usuarios.gestionar", "configuracion.gestionar" }, permissions.Requests);
     }
 
     private sealed class Actor : IUsuarioActual
@@ -48,20 +72,24 @@ public sealed class GestionarRolesUseCaseTests
     }
     private sealed class Permissions(bool allowed) : IPermisosUsuarioRepository
     {
-        public string? Requested { get; private set; }
+        public List<string> Requests { get; } = [];
         public Task<bool> TienePermisoAsync(Guid usuarioId, Guid accesoId, string codigoPermiso, CancellationToken cancellationToken = default)
-        { Requested = codigoPermiso; return Task.FromResult(allowed); }
+        { Requests.Add(codigoPermiso); return Task.FromResult(allowed); }
+        public Task<IReadOnlyList<string>> ListarCodigosAsync(Guid usuarioId, Guid accesoId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<string>>([]);
     }
     private sealed class Roles : IRolesRepository
     {
         public Rol? Created { get; private set; }
+        public ContextoUsuario? PermissionCatalogActor { get; private set; }
         public Task CrearAsync(Rol role, CancellationToken ct) { Created = role; return Task.CompletedTask; }
-        public Task<bool> AsignarAsync(ContextoUsuario actor, Guid accesoId, Guid? rolId, CancellationToken ct) => Task.FromResult(false);
+        public Task<bool> AsignarAsync(ContextoUsuario actor, Guid accesoId, Guid? rolId, bool puedeAsignarRolProtegido, CancellationToken ct) => Task.FromResult(false);
+        public Task<bool> RenombrarAsync(ContextoUsuario actor, Guid id, string nombre, CancellationToken ct) => Task.FromResult(false);
         public Task<Rol?> ObtenerAsync(ContextoUsuario actor, Guid id, CancellationToken ct) => Task.FromResult<Rol?>(null);
-        public Task GuardarAsync(CancellationToken ct) => Task.CompletedTask;
         public Task<bool> EliminarAsync(ContextoUsuario actor, Guid id, CancellationToken ct) => Task.FromResult(false);
         public Task<bool> ActualizarPermisosAsync(ContextoUsuario actor, Guid id, IReadOnlyList<string> codigos, CancellationToken ct) => Task.FromResult(false);
         public Task<IReadOnlyList<RolResumen>> ListarAsync(ContextoUsuario actor, CancellationToken ct) => Task.FromResult<IReadOnlyList<RolResumen>>([]);
-        public Task<IReadOnlyList<PermisoResumen>> PermisosAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<PermisoResumen>>([]);
+        public Task<IReadOnlyList<PermisoResumen>> PermisosAsync(ContextoUsuario actor, CancellationToken ct)
+        { PermissionCatalogActor = actor; return Task.FromResult<IReadOnlyList<PermisoResumen>>([]); }
     }
 }

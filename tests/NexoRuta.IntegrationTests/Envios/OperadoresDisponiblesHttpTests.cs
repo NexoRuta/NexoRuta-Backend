@@ -1,5 +1,7 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using NexoRuta.Application.Administracion.Dtos;
 using NexoRuta.Domain.Administracion;
@@ -34,18 +36,34 @@ public sealed class OperadoresDisponiblesHttpTests(PostgresFixture postgres) : I
         using var anonymous = await client.GetAsync(route);
         Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
 
+        var operatorEmail = (await db.Usuarios.SingleAsync(x => x.Id == operador.UsuarioId)).Email;
+        var commerceEmail = (await db.Usuarios.SingleAsync(x => x.Id == comercio.UsuarioId)).Email;
+        var operatorToken = await LoginAsync(client, operatorEmail);
+        var commerceToken = await LoginAsync(client, commerceEmail);
+
         using var operatorRequest = new HttpRequestMessage(HttpMethod.Get, route);
-        operatorRequest.Headers.Add("X-NexoRuta-Acceso", operador.Id.ToString());
+        operatorRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", operatorToken);
         using var forbidden = await client.SendAsync(operatorRequest);
         Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
 
         using var commerceRequest = new HttpRequestMessage(HttpMethod.Get, route);
-        commerceRequest.Headers.Add("X-NexoRuta-Acceso", comercio.Id.ToString());
+        commerceRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", commerceToken);
         using var available = await client.SendAsync(commerceRequest);
         Assert.Equal(HttpStatusCode.OK, available.StatusCode);
         var catalog = await available.Content.ReadFromJsonAsync<OperadorDisponible[]>();
         Assert.NotNull(catalog);
         Assert.Equal(new[] { "Alpha operator", "Beta operator without users" }, catalog.Select(x => x.Nombre));
         Assert.All(catalog, item => Assert.NotEqual(Guid.Empty, item.OperadorId));
+    }
+
+    private static async Task<string> LoginAsync(HttpClient client, string email)
+    {
+        using var response = await client.PostAsJsonAsync("/api/auth/login", new
+        {
+            Email = email,
+            Password = AuthenticationTestData.Password
+        });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("accessToken").GetString()!;
     }
 }

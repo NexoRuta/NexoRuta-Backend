@@ -93,7 +93,7 @@ public sealed class JwtRbacHttpTests(PostgresFixture postgres) : IClassFixture<P
     [InlineData("no-access")]
     [InlineData("issuer")]
     [InlineData("audience")]
-    public async Task InvalidJwtCannotAuthenticateEvenWithValidDemoHeader(string scenario)
+    public async Task InvalidJwtCannotAuthenticateEvenWithLegacyAccessHeader(string scenario)
     {
         var database = await postgres.CreateDatabaseAsync();
         using var factory = new IntegrationApiFactory(database, "Development");
@@ -115,7 +115,7 @@ public sealed class JwtRbacHttpTests(PostgresFixture postgres) : IClassFixture<P
             _ => commerce.Id.ToString()
         };
         using var request = Request(Token(user, access, scenario));
-        request.Headers.Add(AccesoSeleccionado.Cabecera, commerce.Id.ToString());
+        request.Headers.Add("X-NexoRuta-Acceso", commerce.Id.ToString());
         using var response = await client.SendAsync(request);
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
@@ -178,6 +178,16 @@ public sealed class JwtRbacHttpTests(PostgresFixture postgres) : IClassFixture<P
             foreach (var commerce in new[] { true, false })
             {
                 var access = await db.AccesosUsuario.SingleAsync(x => commerce ? x.ComercioId != null : x.OperadorId != null);
+                if (!commerce && policy == "envios.crear")
+                {
+                    var roleId = access.RolId!.Value;
+                    var permissionId = await db.Permisos.Where(x => x.Codigo == policy).Select(x => x.Id).SingleAsync();
+                    if (!await db.RolesPermisos.AnyAsync(x => x.RolId == roleId && x.PermisoId == permissionId))
+                    {
+                        db.Add(new RolPermiso(roleId, permissionId));
+                        await db.SaveChangesAsync();
+                    }
+                }
                 var context = await scope.ServiceProvider.GetRequiredService<IAccesosUsuarioRepository>().ObtenerAsync(access.Id);
                 var principal = new ClaimsPrincipal(new ClaimsIdentity([
                     new Claim(JwtRegisteredClaimNames.Sub, access.UsuarioId.ToString()),
@@ -193,20 +203,35 @@ public sealed class JwtRbacHttpTests(PostgresFixture postgres) : IClassFixture<P
     }
 
     [Theory]
-    [InlineData("Development", HttpStatusCode.OK)]
-    [InlineData("Testing", HttpStatusCode.Unauthorized)]
-    [InlineData("Production", HttpStatusCode.Unauthorized)]
-    public async Task DemoIdentityHeaderIsDevelopmentOnly(string environment, HttpStatusCode expected)
+    [InlineData("Development", "/api/envios")]
+    [InlineData("Development", "/api/roles")]
+    [InlineData("Development", "/api/usuarios/actual")]
+    [InlineData("Development", "/api/comercio/operadores")]
+    [InlineData("Testing", "/api/envios")]
+    [InlineData("Production", "/api/envios")]
+    public async Task LegacyAccessHeaderAloneNeverAuthenticates(string environment, string path)
     {
         var database = await postgres.CreateDatabaseAsync();
         using var factory = new IntegrationApiFactory(database, environment);
         using var client = factory.CreateHttpClient();
         await using var db = database.CreateDbContext();
         var access = await db.AccesosUsuario.SingleAsync(x => x.ComercioId != null);
-        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/envios");
-        request.Headers.Add(AccesoSeleccionado.Cabecera, access.Id.ToString());
+        using var request = new HttpRequestMessage(HttpMethod.Get, path);
+        request.Headers.Add("X-NexoRuta-Acceso", access.Id.ToString());
         using var response = await client.SendAsync(request);
-        Assert.Equal(expected, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task AnonymousGlobalAccessCatalogIsRemoved()
+    {
+        var database = await postgres.CreateDatabaseAsync();
+        using var factory = new IntegrationApiFactory(database, "Development");
+        using var client = factory.CreateHttpClient();
+
+        using var response = await client.GetAsync("/api/accesos?tipo=Comercio");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
     [Fact]
@@ -301,6 +326,7 @@ public sealed class JwtRbacHttpTests(PostgresFixture postgres) : IClassFixture<P
         var claims = new List<Claim>();
         if (user is not null) claims.Add(new Claim(JwtRegisteredClaimNames.Sub, user));
         if (access is not null) claims.Add(new Claim(AccesoSeleccionado.ClaimAccesoId, access));
+        claims.Add(new Claim(JwtSesionClaims.VersionSesion, "0"));
         if (additionalClaims is not null) claims.AddRange(additionalClaims);
         var key = scenario == "signature" ? System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)
             : Convert.FromBase64String(AuthenticationTestData.SigningKey);

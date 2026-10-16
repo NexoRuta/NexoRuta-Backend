@@ -89,9 +89,7 @@ public sealed class GenerarSeguimientoConsumerExitoTests(
             })
         };
 
-        request.Headers.Add(
-            "X-NexoRuta-Acceso",
-            accesoComercioId.ToString());
+        await client.SetBearerForAccessAsync(database, accesoComercioId);
 
         using var response = await client.SendAsync(request);
 

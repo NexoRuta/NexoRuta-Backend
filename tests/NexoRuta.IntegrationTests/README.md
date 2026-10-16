@@ -20,9 +20,11 @@ dotnet test tests/NexoRuta.IntegrationTests/NexoRuta.IntegrationTests.csproj --n
 dotnet test tests/NexoRuta.UnitTests/NexoRuta.UnitTests.csproj --no-build --no-restore --filter 'FullyQualifiedName~Seguimiento' --logger 'console;verbosity=normal'
 ```
 
-**Do not run the unfiltered integration suite against existing infrastructure.**
-The legacy `EnvioPostgresRoundTripTests` still has an external connection fallback;
-its refactor is outside this change's scope.
+The full integration suite is isolated from persistent PostgreSQL databases.
+`EnvioPostgresRoundTripTests` obtains its connection string from
+`PostgresFixture.CreateDatabaseAsync()` through `IntegrationDatabase.ConnectionString`;
+it does not read an external connection setting. Its test database is created in
+the fixture's owned Testcontainers PostgreSQL instance and disposed with it.
 
 ## Lifecycle and isolation
 

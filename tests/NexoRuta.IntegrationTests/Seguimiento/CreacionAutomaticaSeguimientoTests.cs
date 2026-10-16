@@ -53,9 +53,7 @@ public sealed class CreacionAutomaticaSeguimientoTests(
             })
         };
 
-        request.Headers.Add(
-            "X-NexoRuta-Acceso",
-            accesoComercioId.ToString());
+        await client.SetBearerForAccessAsync(database, accesoComercioId);
 
         // ACT: Registrar el envío.
         using var response = await client.SendAsync(request);
@@ -192,9 +190,7 @@ public sealed class CreacionAutomaticaSeguimientoTests(
             })
         };
 
-        request.Headers.Add(
-            "X-NexoRuta-Acceso",
-            accesoComercioId.ToString());
+        await client.SetBearerForAccessAsync(database, accesoComercioId);
 
         // ACT: el alta debe fallar debido al trigger.
         HttpStatusCode? codigo = null;

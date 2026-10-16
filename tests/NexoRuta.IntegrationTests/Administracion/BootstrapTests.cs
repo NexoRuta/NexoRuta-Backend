@@ -81,6 +81,69 @@ public sealed class BootstrapTests(PostgresFixture postgres) : IClassFixture<Pos
     }
 
     [Fact]
+    public async Task ConfiguredOperatorAdministratorRemainsProtectedAndReceivesEveryOperatorCatalogPermission()
+    {
+        var database = await postgres.CreateDatabaseAsync();
+        await using var db = database.CreateDbContext();
+        var initial = new AccesoInicial("owner@test.local", "Operator", "Commerce", "operator@test.local");
+        initial.OperadorRolCodigo = "operator-root";
+        var settings = AuthenticationTestData.BootstrapSettings(initial);
+        settings["Bootstrap:Roles:0:Codigo"] = initial.OperadorRolCodigo;
+        for (var index = 0; index < 4; index++)
+            settings.Remove($"Bootstrap:Roles:0:Permisos:{index}");
+        var seeder = new DatosInicialesSeeder(db, initial,
+            new ConfigurationBuilder().AddInMemoryCollection(settings).Build(), new PasswordHasher<string>());
+        await seeder.SeedAsync();
+
+        var administrator = await db.Roles.SingleAsync(x => x.OperadorId == initial.OperadorId
+            && x.Codigo == initial.OperadorRolCodigo);
+        var commerceRole = await db.Roles.SingleAsync(x => x.ComercioId == initial.ComercioId
+            && x.Codigo == initial.ComercioRolCodigo);
+        Assert.True(administrator.EsProtegidoSistema);
+        Assert.False(commerceRole.EsProtegidoSistema);
+        var operatorPermissionCodes = await (
+            from role in db.Roles
+            join grant in db.RolesPermisos on role.Id equals grant.RolId
+            join permission in db.Permisos on grant.PermisoId equals permission.Id
+            where role.OperadorId == initial.OperadorId
+            select permission.Codigo).Distinct().ToListAsync();
+        var administratorPermissionCodes = await (
+            from grant in db.RolesPermisos
+            join permission in db.Permisos on grant.PermisoId equals permission.Id
+            where grant.RolId == administrator.Id
+            select permission.Codigo).ToListAsync();
+        Assert.Subset(operatorPermissionCodes.ToHashSet(StringComparer.Ordinal), administratorPermissionCodes.ToHashSet(StringComparer.Ordinal));
+        Assert.Equal(CatalogoPermisos.Para(TipoAccesoUsuario.Operador).Select(x => x.Codigo).Order().ToArray(),
+            administratorPermissionCodes.Order().ToArray());
+        Assert.DoesNotContain("envios.crear", administratorPermissionCodes);
+
+        var operatorOnlyPermission = await db.Permisos.SingleAsync(x => x.Codigo == "envios.gestionar");
+        var missingGrant = await db.RolesPermisos.SingleAsync(x => x.RolId == administrator.Id && x.PermisoId == operatorOnlyPermission.Id);
+        db.Remove(missingGrant);
+        await db.SaveChangesAsync();
+        var priorGrants = administratorPermissionCodes.Order().ToArray();
+        await seeder.SeedAsync();
+        Assert.Equal(priorGrants, await db.RolesPermisos
+            .Where(x => x.RolId == administrator.Id)
+            .Join(db.Permisos, grant => grant.PermisoId, permission => permission.Id, (_, permission) => permission.Codigo)
+            .OrderBy(code => code).ToArrayAsync());
+    }
+
+    [Fact]
+    public async Task BootstrapRejectsCommerceOnlyPermissionInProtectedOperatorAdministratorDefinition()
+    {
+        var database = await postgres.CreateDatabaseAsync();
+        await using var db = database.CreateDbContext();
+        var initial = new AccesoInicial("owner@test.local", "Operator", "Commerce", "operator@test.local");
+        var settings = AuthenticationTestData.BootstrapSettings(initial);
+        settings["Bootstrap:Roles:0:Permisos:4"] = "envios.crear";
+        var seeder = new DatosInicialesSeeder(db, initial,
+            new ConfigurationBuilder().AddInMemoryCollection(settings).Build(), new PasswordHasher<string>());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => seeder.SeedAsync());
+    }
+
+    [Fact]
     public async Task SnapshotMatchesTheRuntimeModel()
     {
         var database = await postgres.CreateDatabaseAsync();

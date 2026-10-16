@@ -34,6 +34,19 @@ public sealed class RolTests
     }
 
     [Fact]
+    public void SystemProtectionIsOperatorOnlyAndBlocksDomainRename()
+    {
+        var role = new Rol("administrator", "Administrator", Guid.NewGuid(), null);
+        role.ProtegerComoRolSistema();
+        Assert.True(role.EsProtegidoSistema);
+        Assert.Throws<InvalidOperationException>(() => role.Renombrar("Changed"));
+
+        var commerceRole = new Rol("owner", "Owner", null, Guid.NewGuid());
+        Assert.Throws<InvalidOperationException>(() => commerceRole.ProtegerComoRolSistema());
+        Assert.False(commerceRole.EsProtegidoSistema);
+    }
+
+    [Fact]
     public void RemovingRoleRetainsAccessAndIdentity()
     {
         var role = new Rol("custom", "Custom", Guid.NewGuid(), null);

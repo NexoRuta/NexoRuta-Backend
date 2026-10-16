@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Authentication;
 using Microsoft.EntityFrameworkCore;
 using NexoRuta.Api.Core.Health;
 using NexoRuta.Api.Core.Security;
@@ -33,34 +32,10 @@ builder.Services.AddScoped<IAuthorizationHandler,PermisoAuthorizationHandler>();
 builder.Services
     .AddAuthentication(options =>
     {
-        options.DefaultAuthenticateScheme = "NexoRuta";
-        options.DefaultChallengeScheme = "NexoRuta";
-        options.DefaultForbidScheme = "NexoRuta";
+        options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+        options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+        options.DefaultForbidScheme = JwtBearerDefaults.AuthenticationScheme;
     })
-    .AddPolicyScheme("NexoRuta", "Autenticación NexoRuta", options =>
-    {
-        options.ForwardDefaultSelector = context =>
-        {
-            var authorization =
-                context.Request.Headers.Authorization.ToString();
-
-            if (authorization.StartsWith(
-                "Bearer ",
-                StringComparison.OrdinalIgnoreCase))
-            {
-                return JwtBearerDefaults.AuthenticationScheme;
-            }
-
-            // Compatibilidad temporal con el acceso demo.
-            // Exclusivamente durante Development.
-            return builder.Environment.IsDevelopment()
-                ? AccesoSeleccionado.Esquema
-                : JwtBearerDefaults.AuthenticationScheme;
-        };
-    })
-    .AddScheme<AuthenticationSchemeOptions, AccesoSeleccionadoHandler>(
-        AccesoSeleccionado.Esquema,
-        _ => { })
     .AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, options =>
     {
         options.MapInboundClaims = false;
@@ -108,21 +83,12 @@ builder.Services.AddAuthorization(options =>
                 _ => builder.Environment.IsDevelopment()));
 
     // Políticas RBAC.
-    string[] codigos =
-    [
-        "usuarios.gestionar",
-        "configuracion.gestionar",
-        "envios.crear",
-        "envios.consultar",
-        "envios.gestionar"
-    ];
-
-    foreach (var codigo in codigos)
+    foreach (var permiso in CatalogoPermisos.Todos)
     {
-        options.AddPolicy(codigo, policy =>
+        options.AddPolicy(permiso.Codigo, policy =>
             policy.RequireAuthenticatedUser()
                 .AddRequirements(
-                    new PermisoRequirement(codigo)));
+                    new PermisoRequirement(permiso.Codigo)));
     }
 });
 

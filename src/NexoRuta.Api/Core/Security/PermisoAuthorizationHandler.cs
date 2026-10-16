@@ -4,6 +4,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using NexoRuta.Application.Administracion.Context;
 using NexoRuta.Application.Administracion.Repositories;
+using NexoRuta.Domain.Administracion;
 
 namespace NexoRuta.Api.Core.Security;
 
@@ -23,6 +24,9 @@ public sealed class PermisoAuthorizationHandler(
 
         if (httpContext?.Items[typeof(ContextoUsuario)]
             is not ContextoUsuario usuario)
+            return;
+
+        if (!CatalogoPermisos.EsAplicable(requirement.Codigo, usuario.TipoAcceso))
             return;
 
         var claimUsuarioId =

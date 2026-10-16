@@ -1,4 +1,4 @@
-
+using System.Globalization;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Microsoft.IdentityModel.Tokens;
@@ -26,7 +26,10 @@ public sealed class JwtTokenService(JwtConfiguracion config)
 
             new Claim(
                 JwtRegisteredClaimNames.Jti,
-                Guid.NewGuid().ToString("N"))
+                Guid.NewGuid().ToString("N")),
+            new Claim(
+                JwtSesionClaims.VersionSesion,
+                sesion.VersionSesion.ToString(CultureInfo.InvariantCulture)),
         };
 
         var token = new JwtSecurityToken(

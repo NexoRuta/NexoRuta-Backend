@@ -26,17 +26,28 @@ public sealed class DatosInicialesSeeder(NexoRutaDbContext db, AccesoInicial ini
         var commerceEntity = await db.Comercios.SingleAsync(x => x.Id == initial.ComercioId, cancellationToken);
         var operatorCompleted = db.Entry(operatorEntity).Property<bool>("BootstrapCompletado").CurrentValue;
         var commerceCompleted = db.Entry(commerceEntity).Property<bool>("BootstrapCompletado").CurrentValue;
-        // Stable endpoint permission codes are technical contracts, not a role/grant catalog.
-        foreach (var code in new[] { "usuarios.gestionar", "configuracion.gestionar", "envios.crear", "envios.consultar", "envios.gestionar" })
-            if (!await db.Permisos.AnyAsync(x => x.Codigo == code, cancellationToken)) db.Add(new Permiso(code, code));
-        foreach (var definition in configuration.GetSection("Bootstrap:Roles").Get<RolInicial[]>() ?? [])
+        foreach (var permiso in CatalogoPermisos.Todos)
+            if (!await db.Permisos.AnyAsync(x => x.Codigo == permiso.Codigo, cancellationToken))
+                db.Add(new Permiso(permiso.Codigo, permiso.Nombre));
+        var definitions = configuration.GetSection("Bootstrap:Roles").Get<RolInicial[]>() ?? [];
+        foreach (var definition in definitions)
         {
             var role = new Rol(definition.Codigo, definition.Nombre, definition.OperadorId, definition.ComercioId);
             if (role.OperadorId != initial.OperadorId && role.ComercioId != initial.ComercioId)
                 throw new InvalidOperationException("Bootstrap roles must belong to the configured organizations.");
+            if (definition.Permisos.Any(code => !CatalogoPermisos.EsAplicable(code, role.TipoOrganizacion)))
+                throw new InvalidOperationException("Bootstrap roles can only receive registered permissions applicable to their organization.");
+            var isConfiguredOperatorAdministrator = role.OperadorId == initial.OperadorId
+                && role.Codigo == initial.OperadorRolCodigo;
+            var existing = await db.Roles.SingleOrDefaultAsync(x => x.Codigo == role.Codigo
+                && x.OrganizacionId == role.OrganizacionId && x.TipoOrganizacion == role.TipoOrganizacion, cancellationToken);
+            if (existing is not null)
+            {
+                if (isConfiguredOperatorAdministrator) existing.ProtegerComoRolSistema();
+                continue;
+            }
             if (role.OperadorId.HasValue ? operatorCompleted : commerceCompleted) continue;
-            if (await db.Roles.AnyAsync(x => x.Codigo == role.Codigo && x.OrganizacionId == role.OrganizacionId
-                && x.TipoOrganizacion == role.TipoOrganizacion, cancellationToken)) continue;
+            if (isConfiguredOperatorAdministrator) role.ProtegerComoRolSistema();
             db.Add(role);
             foreach (var code in definition.Permisos.Distinct(StringComparer.Ordinal))
             {
@@ -51,6 +62,7 @@ public sealed class DatosInicialesSeeder(NexoRutaDbContext db, AccesoInicial ini
             }
         }
         await db.SaveChangesAsync(cancellationToken);
+        await EnsureOperatorAdministratorPermissionsAsync(initial, definitions, cancellationToken);
         await EnsureAccount(initial.OperadorUsuarioEmail, initial.OperadorId, null, initial.OperadorRolCodigo,
             "AccesoInicial:OperadorUsuarioPassword", cancellationToken);
         await EnsureAccount(initial.UsuarioEmail, null, initial.ComercioId, initial.ComercioRolCodigo,
@@ -59,6 +71,39 @@ public sealed class DatosInicialesSeeder(NexoRutaDbContext db, AccesoInicial ini
         db.Entry(commerceEntity).Property<bool>("BootstrapCompletado").CurrentValue = true;
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+    }
+
+    private async Task EnsureOperatorAdministratorPermissionsAsync(
+        AccesoInicial initial, IReadOnlyList<RolInicial> definitions, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(initial.OperadorRolCodigo)) return;
+        var definition = definitions.SingleOrDefault(x => x.Codigo == initial.OperadorRolCodigo
+            && x.OperadorId == initial.OperadorId && x.ComercioId == null)
+            ?? throw new InvalidOperationException("The configured operator administrator must have an operator-scoped bootstrap role definition.");
+
+        var role = await db.Roles.SingleOrDefaultAsync(x => x.Codigo == initial.OperadorRolCodigo
+            && x.OperadorId == initial.OperadorId && x.ComercioId == null, ct);
+        if (role is null)
+            throw new InvalidOperationException("The configured operator administrator role is missing after bootstrap.");
+        role.ProtegerComoRolSistema();
+
+        // The centralized permission catalog is the source of truth for protected operator administrator grants.
+        var codes = CatalogoPermisos.Para(TipoAccesoUsuario.Operador).Select(x => x.Codigo).ToArray();
+        var permissions = new List<Permiso>(codes.Length);
+        foreach (var code in codes)
+        {
+            var permission = db.Permisos.Local.SingleOrDefault(x => x.Codigo == code)
+                ?? await db.Permisos.SingleOrDefaultAsync(x => x.Codigo == code, ct);
+            if (permission is null)
+                throw new InvalidOperationException($"Registered permission {code} is missing after bootstrap.");
+            permissions.Add(permission);
+        }
+
+        var grants = await db.RolesPermisos.Where(x => x.RolId == role.Id).ToListAsync(ct);
+        db.RemoveRange(grants.Where(x => !permissions.Any(p => p.Id == x.PermisoId)));
+        foreach (var permission in permissions.Where(p => !grants.Any(x => x.PermisoId == p.Id)))
+            db.Add(new RolPermiso(role.Id, permission.Id));
+        await db.SaveChangesAsync(ct);
     }
 
     private async Task EnsureAccount(string email, Guid? operatorId, Guid? commerceId, string? code,

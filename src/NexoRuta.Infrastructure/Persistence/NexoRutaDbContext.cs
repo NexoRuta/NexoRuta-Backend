@@ -71,7 +71,12 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
             entity.Property(x => x.TipoOrganizacion).HasConversion<string>().HasMaxLength(20).HasComputedColumnSql("CASE WHEN \"OperadorId\" IS NOT NULL THEN 'Operador' ELSE 'Comercio' END", stored: true).ValueGeneratedOnAdd().Metadata.SetBeforeSaveBehavior(PropertySaveBehavior.Ignore);
             entity.Property<bool?>("EsPropietario"); // Historical rollback only; never authorization.
             entity.Property(x => x.OrganizacionId).HasComputedColumnSql("COALESCE(\"OperadorId\", \"ComercioId\")", stored: true).ValueGeneratedOnAdd().Metadata.SetBeforeSaveBehavior(PropertySaveBehavior.Ignore);
-
+            entity.Property(x => x.Activo)
+                .HasDefaultValue(true)
+                .IsRequired();
+            entity.Property(x => x.VersionSesion)
+                .HasDefaultValue(0L)
+                .IsConcurrencyToken();
             entity.HasIndex(x => x.UsuarioId)
                 .IsUnique();
 
@@ -263,6 +268,7 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
         {
             entity.ToTable("Roles", table => table.HasCheckConstraint("CK_Roles_Pertenencia",
                 "((\"OperadorId\" IS NOT NULL AND \"ComercioId\" IS NULL AND \"TipoOrganizacion\" = 'Operador') OR (\"ComercioId\" IS NOT NULL AND \"OperadorId\" IS NULL AND \"TipoOrganizacion\" = 'Comercio'))"));
+            entity.Property(x => x.EsProtegidoSistema).HasDefaultValue(false).IsRequired();
             entity.Property(x => x.OrganizacionId).HasComputedColumnSql("COALESCE(\"OperadorId\", \"ComercioId\")", stored: true).ValueGeneratedOnAdd().Metadata.SetBeforeSaveBehavior(PropertySaveBehavior.Ignore);
             entity.HasAlternateKey(x => new { x.Id, x.TipoOrganizacion, x.OrganizacionId });
             entity.HasOne<Operador>().WithMany().HasForeignKey(x => x.OperadorId).OnDelete(DeleteBehavior.Restrict);

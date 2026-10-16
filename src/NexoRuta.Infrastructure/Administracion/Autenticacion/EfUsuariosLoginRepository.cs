@@ -19,13 +19,14 @@ public sealed class EfUsuariosLoginRepository(
             from usuario in db.Usuarios.AsNoTracking()
             join acceso in db.AccesosUsuario.AsNoTracking()
                 on usuario.Id equals acceso.UsuarioId
-            where usuario.Email.ToLower() == emailNormalizado
-                && usuario.PasswordHash != null && usuario.PasswordHash != "" && acceso.RolId != null
+            where usuario.Email.ToLower() == emailNormalizado && usuario.PasswordHash != null && usuario.PasswordHash != "" && acceso.RolId != null && acceso.Activo
+
             select new UsuarioLogin(
                 usuario.Id,
                 acceso.Id,
                 usuario.Email,
-                usuario.PasswordHash!)
+                usuario.PasswordHash!,
+                acceso.VersionSesion)
         ).SingleOrDefaultAsync(cancellationToken);
     }
 }

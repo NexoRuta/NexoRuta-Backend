@@ -3,13 +3,16 @@ using Microsoft.AspNetCore.Mvc;
 using NexoRuta.Application.Administracion.Context;
 using NexoRuta.Application.Administracion.Exceptions;
 using NexoRuta.Application.Administracion.Interfaces;
+using NexoRuta.Application.Administracion.UseCases;
 
 namespace NexoRuta.Api.Features.Usuarios.Controllers;
 
 [ApiController]
 [Authorize]
 [Route("api/usuarios/actual")]
-public sealed class UsuarioActualController(IUsuarioActual usuarioActual) : ControllerBase
+public sealed class UsuarioActualController(
+    IUsuarioActual usuarioActual,
+    ObtenerPermisosActualesUseCase permisosActuales) : ControllerBase
 {
     [HttpGet]
     [ProducesResponseType<ContextoUsuario>(StatusCodes.Status200OK)]
@@ -26,4 +29,10 @@ public sealed class UsuarioActualController(IUsuarioActual usuarioActual) : Cont
             return Problem(exception.Message, statusCode: StatusCodes.Status503ServiceUnavailable);
         }
     }
+
+    [HttpGet("permisos")]
+    [ProducesResponseType<IReadOnlyList<string>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<IReadOnlyList<string>>> GetPermissions(CancellationToken ct)
+        => Ok(await permisosActuales.EjecutarAsync(ct));
 }
