@@ -29,7 +29,7 @@ public sealed class BootstrapTests(PostgresFixture postgres) : IClassFixture<Pos
             settings[$"Bootstrap:Roles:{i}:Permisos:0"] = "envios.consultar";
         }
         var seeder = new DatosInicialesSeeder(db, initial,
-            new ConfigurationBuilder().AddInMemoryCollection(settings).Build(), new PasswordHasher<string>());
+            new ConfigurationBuilder().AddInMemoryCollection(settings).Build(), new PasswordHasher<string>(), AuthenticationTestData.PlatformRepository(db));
         await seeder.SeedAsync();
         Assert.Equal(count, await db.Roles.CountAsync());
         Assert.All(await db.AccesosUsuario.ToListAsync(), access => Assert.Null(access.RolId));
@@ -92,7 +92,7 @@ public sealed class BootstrapTests(PostgresFixture postgres) : IClassFixture<Pos
         for (var index = 0; index < 4; index++)
             settings.Remove($"Bootstrap:Roles:0:Permisos:{index}");
         var seeder = new DatosInicialesSeeder(db, initial,
-            new ConfigurationBuilder().AddInMemoryCollection(settings).Build(), new PasswordHasher<string>());
+            new ConfigurationBuilder().AddInMemoryCollection(settings).Build(), new PasswordHasher<string>(), AuthenticationTestData.PlatformRepository(db));
         await seeder.SeedAsync();
 
         var administrator = await db.Roles.SingleAsync(x => x.OperadorId == initial.OperadorId
@@ -138,7 +138,7 @@ public sealed class BootstrapTests(PostgresFixture postgres) : IClassFixture<Pos
         var settings = AuthenticationTestData.BootstrapSettings(initial);
         settings["Bootstrap:Roles:0:Permisos:4"] = "envios.crear";
         var seeder = new DatosInicialesSeeder(db, initial,
-            new ConfigurationBuilder().AddInMemoryCollection(settings).Build(), new PasswordHasher<string>());
+            new ConfigurationBuilder().AddInMemoryCollection(settings).Build(), new PasswordHasher<string>(), AuthenticationTestData.PlatformRepository(db));
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => seeder.SeedAsync());
     }

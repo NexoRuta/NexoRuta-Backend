@@ -10,6 +10,10 @@ namespace NexoRuta.Infrastructure.Persistence;
 
 public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> options) : DbContext(options)
 {
+    public DbSet<AccesoPlataforma> AccesosPlataforma => Set<AccesoPlataforma>();
+    public DbSet<RolPlataforma> RolesPlataforma => Set<RolPlataforma>();
+    public DbSet<RolPlataformaPermiso> RolesPlataformaPermisos => Set<RolPlataformaPermiso>();
+
     public DbSet<Operador> Operadores => Set<Operador>();
     public DbSet<Comercio> Comercios => Set<Comercio>();
     public DbSet<Usuario> Usuarios => Set<Usuario>();
@@ -31,6 +35,30 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<RolPlataformaPermiso>(entity =>
+        {
+            entity.ToTable("RolesPlataformaPermisos");
+            entity.HasKey(x => new { x.RolId, x.PermisoId });
+            entity.HasOne<RolPlataforma>().WithMany().HasForeignKey(x => x.RolId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Permiso>().WithMany().HasForeignKey(x => x.PermisoId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<RolPlataforma>(entity =>
+        {
+            entity.ToTable("RolesPlataforma", t => t.HasCheckConstraint("CK_RolesPlataforma_Protegido", "\"EsProtegidoSistema\""));
+            entity.HasKey(x => x.Id);
+        });
+        modelBuilder.Entity<AccesoPlataforma>(entity =>
+        {
+            entity.ToTable("AccesosPlataforma", t => t.HasCheckConstraint("CK_AccesosPlataforma_Inicial", "\"Id\" = 1"));
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).ValueGeneratedNever();
+            entity.HasIndex(x => x.AccesoId).IsUnique();
+            entity.HasIndex(x => x.UsuarioId).IsUnique();
+            entity.Property(x => x.VersionSesion).IsConcurrencyToken();
+            entity.HasOne<Usuario>().WithMany().HasForeignKey(x => x.UsuarioId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<RolPlataforma>().WithMany().HasForeignKey(x => x.RolId).OnDelete(DeleteBehavior.Restrict);
+        });
+
         modelBuilder.Entity<Operador>(entity =>
         {
             entity.ToTable("Operadores");

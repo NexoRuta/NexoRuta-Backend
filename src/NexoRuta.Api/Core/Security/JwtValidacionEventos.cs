@@ -7,7 +7,7 @@ using NexoRuta.Application.Administracion.Repositories;
 namespace NexoRuta.Api.Core.Security;
 
 public sealed class JwtValidacionEventos(
-    IAccesosUsuarioRepository accesos) : JwtBearerEvents
+    IAccesosUsuarioRepository accesos, IPlataformaRepository plataforma) : JwtBearerEvents
 {
     public override async Task TokenValidated(
         TokenValidatedContext context)
@@ -35,6 +35,24 @@ public sealed class JwtValidacionEventos(
                 out var versionToken))
         {
             context.Fail("Versión de sesión inválida.");
+            return;
+        }
+
+        var ambito = context.Principal?.FindFirst(AccesoSeleccionado.ClaimAmbito)?.Value;
+        if (ambito == "plataforma")
+        {
+            var platformAccess = await plataforma.ObtenerAccesoAsync(accesoId, context.HttpContext.RequestAborted);
+            if (platformAccess is null || platformAccess.UsuarioId != usuarioId || platformAccess.VersionSesion != versionToken)
+            {
+                context.Fail("The platform session is no longer available.");
+                return;
+            }
+            context.HttpContext.Items[typeof(ContextoPlataforma)] = platformAccess;
+            return;
+        }
+        if (ambito is not null)
+        {
+            context.Fail("Invalid authentication scope.");
             return;
         }
 

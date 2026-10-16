@@ -7,6 +7,10 @@ public sealed record DefinicionPermiso(string Codigo, string Nombre, IReadOnlyLi
 
 public static class CatalogoPermisos
 {
+    // Platform grants have no organizational scope and never enter Para/EsAplicable.
+    public static IReadOnlyList<DefinicionPermiso> Plataforma { get; } = Array.AsReadOnly<DefinicionPermiso>(
+        [new(RolPlataforma.GestionarOrganizaciones, "Manage platform organizations", [])]);
+
     private static readonly IReadOnlyList<DefinicionPermiso> Definiciones = Array.AsReadOnly<DefinicionPermiso>(
     [
         new("usuarios.gestionar", "usuarios.gestionar", [TipoAccesoUsuario.Operador, TipoAccesoUsuario.Comercio]),

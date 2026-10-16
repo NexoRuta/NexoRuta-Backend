@@ -39,6 +39,7 @@ public static class DependencyInjection
                 ComercioRolCodigo = configuration["AccesoInicial:ComercioRolCodigo"]
             };
         });
+        services.AddScoped<IPlataformaRepository, EfPlataformaRepository>();
         services.AddScoped<IRolesRepository, EfRolesRepository>();
         services.AddScoped<IAccesosUsuarioRepository, EfAccesosUsuarioRepository>();
         services.AddScoped<IOperadoresRepository, EfOperadoresRepository>();

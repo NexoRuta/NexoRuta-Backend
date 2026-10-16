@@ -8,6 +8,7 @@ namespace NexoRuta.Api.Features.Seguimiento.Controllers;
 
 [ApiController]
 [Authorize(Policy = "seguimiento-demo")]
+[Authorize(Policy = "organizacion")]
 [Route("api/envios")]
 public sealed class EnlaceSeguimientoController(RecuperarEnlaceSeguimiento recuperar) : ControllerBase
 {

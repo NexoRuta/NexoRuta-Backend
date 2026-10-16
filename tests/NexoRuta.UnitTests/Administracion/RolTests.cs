@@ -34,7 +34,7 @@ public sealed class RolTests
     }
 
     [Fact]
-    public void SystemProtectionIsOperatorOnlyAndBlocksDomainRename()
+    public void SystemProtectionCoversBothOrganizationKindsAndBlocksDomainRename()
     {
         var role = new Rol("administrator", "Administrator", Guid.NewGuid(), null);
         role.ProtegerComoRolSistema();
@@ -42,8 +42,9 @@ public sealed class RolTests
         Assert.Throws<InvalidOperationException>(() => role.Renombrar("Changed"));
 
         var commerceRole = new Rol("owner", "Owner", null, Guid.NewGuid());
-        Assert.Throws<InvalidOperationException>(() => commerceRole.ProtegerComoRolSistema());
-        Assert.False(commerceRole.EsProtegidoSistema);
+        commerceRole.ProtegerComoRolSistema();
+        Assert.True(commerceRole.EsProtegidoSistema);
+        Assert.Throws<InvalidOperationException>(() => commerceRole.Renombrar("Changed"));
     }
 
     [Fact]

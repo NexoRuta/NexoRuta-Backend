@@ -9,13 +9,13 @@ namespace NexoRuta.Infrastructure.Administracion.Autenticacion;
 public sealed class EfUsuariosLoginRepository(
     NexoRutaDbContext db) : IUsuariosLoginRepository
 {
-    public Task<UsuarioLogin?> ObtenerPorEmailAsync(
+    public async Task<UsuarioLogin?> ObtenerPorEmailAsync(
         string email,
         CancellationToken cancellationToken = default)
     {
         var emailNormalizado = email.Trim().ToLowerInvariant();
 
-        return (
+        var organization = await (
             from usuario in db.Usuarios.AsNoTracking()
             join acceso in db.AccesosUsuario.AsNoTracking()
                 on usuario.Id equals acceso.UsuarioId
@@ -28,5 +28,12 @@ public sealed class EfUsuariosLoginRepository(
                 usuario.PasswordHash!,
                 acceso.VersionSesion)
         ).SingleOrDefaultAsync(cancellationToken);
+        if (organization is not null) return organization;
+        return await (from user in db.Usuarios.AsNoTracking()
+                      join access in db.AccesosPlataforma on user.Id equals access.UsuarioId
+                      join role in db.RolesPlataforma on access.RolId equals role.Id
+                      where user.Email.ToLower() == emailNormalizado && user.PasswordHash != null && user.PasswordHash != "" && access.Activo
+                      select new UsuarioLogin(user.Id, access.AccesoId, user.Email, user.PasswordHash!, access.VersionSesion, true))
+            .SingleOrDefaultAsync(cancellationToken);
     }
 }

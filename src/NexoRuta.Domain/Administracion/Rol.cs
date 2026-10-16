@@ -39,8 +39,6 @@ public sealed class Rol
 
     public void ProtegerComoRolSistema()
     {
-        if (TipoOrganizacion != TipoAccesoUsuario.Operador)
-            throw new InvalidOperationException("Only operator roles can be system-protected.");
         EsProtegidoSistema = true;
     }
 }

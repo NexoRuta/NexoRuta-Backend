@@ -3,12 +3,35 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using NexoRuta.Domain.Administracion;
 using NexoRuta.Infrastructure.Administracion;
+using NexoRuta.Application.Administracion.Repositories;
+using NexoRuta.Application.Administracion.Exceptions;
 
 namespace NexoRuta.Infrastructure.Persistence;
 
 public sealed class DatosInicialesSeeder(NexoRutaDbContext db, AccesoInicial initial,
-    IConfiguration configuration, IPasswordHasher<string> passwordHasher)
+    IConfiguration configuration, IPasswordHasher<string> passwordHasher, IPlataformaRepository plataforma)
 {
+    public async Task SeedPlataformaAsync(CancellationToken ct = default)
+    {
+        if (!configuration.GetValue<bool>("PlatformInitialization:Enabled")) return;
+        var email = configuration["PlatformInitialization:Email"];
+        var password = configuration["PlatformInitialization:Password"];
+        if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
+            throw new InvalidOperationException("Platform initialization requires PlatformInitialization:Email and PlatformInitialization:Password; no account was changed.");
+        try
+        {
+            await plataforma.InicializarAsync(email, password, ct, permitirExistente: true);
+        }
+        catch (ArgumentException)
+        {
+            throw new InvalidOperationException("Platform initialization requires a valid email and a password of at least 12 characters; no account was changed.");
+        }
+        catch (CorreoYaRegistradoException)
+        {
+            throw new InvalidOperationException("Platform initialization email belongs to an existing identity; it will not be elevated or modified.");
+        }
+    }
+
     public async Task SeedAsync(CancellationToken cancellationToken = default)
     {
         if (initial.OperadorId is null || initial.ComercioId is null || initial.OperadorId == Guid.Empty || initial.ComercioId == Guid.Empty)

@@ -1,5 +1,9 @@
 # CU-01 — usuarios, roles propios y autorización
 
+## Additional platform administration slice
+
+The [platform administration guide](../workflow/platform-administration.md) documents the separate platform authority, controlled first-account command and transactional operator/commerce APIs. Initial commerce administrator roles now receive the same system protection as initial operator administrator roles. This slice does not complete CU-01; Identity/OIDC and RLS remain pending; Admin is implemented separately.
+
 ## Modelo vigente
 
 Cada `Rol` pertenece exactamente a un operador o comercio **concreto** mediante UUID. Su código es único dentro de esa organización y tipo; no existe un catálogo obligatorio de roles. `Permiso` es un catálogo global de funcionalidades. `RolesPermisos` y las asignaciones de usuarios son decisiones administrativas persistentes.

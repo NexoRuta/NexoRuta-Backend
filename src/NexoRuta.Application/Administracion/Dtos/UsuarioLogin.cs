@@ -6,4 +6,5 @@ public sealed record UsuarioLogin(
     Guid AccesoId,
     string Email,
     string PasswordHash,
-    long VersionSesion);
+    long VersionSesion,
+    bool EsPlataforma = false);

@@ -1,5 +1,7 @@
 # NexoRuta Backend
 
+Platform organization administration: [authority, API and first-account procedure](docs/workflow/platform-administration.md). This is an additional backend slice, not completion of CU-01; Identity/OIDC and RLS remain pending; the separate Admin frontend is available in the frontend repository.
+
 Backend de la plataforma multioperador de distribución de última milla del Taller .NET 2026. Este repositorio usa .NET 10 y está organizado como base de un **monolito modular**, con un Worker independiente. La entrega de análisis y diseño del 04/10/2026 y el enunciado del laboratorio fundamentan las decisiones resumidas aquí.
 
 > **Estado actual:** están implementados los recortes del primer monitoreo: [CU-01 — autenticación y roles propios](docs/cu/CU-01-comercios-usuarios.md), [CU-07 — alta individual de envíos](docs/cu/CU-07-alta-envios.md) y [CU-08 — bulto](docs/cu/CU-08-bultos.md), con EF Core/PostgreSQL. M05 incorpora seguimiento público, recuperación de enlaces y Outbox transaccional con procesos separados para RabbitMQ y Kafka. CU-01 incorpora login JWT y administración de roles propios; RLS sigue pendiente.

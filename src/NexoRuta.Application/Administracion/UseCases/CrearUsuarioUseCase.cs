@@ -1,5 +1,4 @@
 
-using System.ComponentModel.DataAnnotations;
 using NexoRuta.Application.Administracion.Dtos;
 using NexoRuta.Application.Administracion.Exceptions;
 using NexoRuta.Application.Administracion.Interfaces;
@@ -34,24 +33,7 @@ public sealed class CrearUsuarioUseCase(
         }
 
         // 2. Validar los datos.
-        var emailNormalizado = email?.Trim().ToLowerInvariant();
-
-        if (string.IsNullOrWhiteSpace(emailNormalizado) ||
-            emailNormalizado.Length > 254 ||
-            !new EmailAddressAttribute().IsValid(emailNormalizado))
-        {
-            throw new ArgumentException(
-                "El correo electrónico no es válido.",
-                nameof(email));
-        }
-
-        if (string.IsNullOrWhiteSpace(password) ||
-            password.Length < 12)
-        {
-            throw new ArgumentException(
-                "La contraseña debe tener al menos 12 caracteres.",
-                nameof(password));
-        }
+        var emailNormalizado = ValidacionCredenciales.Validar(email, password);
 
         if (rolId == Guid.Empty)
         {

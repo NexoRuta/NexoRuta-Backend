@@ -56,5 +56,8 @@ internal static class AuthenticationTestData
 
     public static DatosInicialesSeeder Seeder(NexoRutaDbContext db, AccesoInicial initial) => new(
         db, initial, new ConfigurationBuilder().AddInMemoryCollection(BootstrapSettings(initial)).Build(),
-        new PasswordHasher<string>());
+        new PasswordHasher<string>(), PlatformRepository(db));
+
+    public static NexoRuta.Infrastructure.Administracion.Repositories.EfPlataformaRepository PlatformRepository(NexoRutaDbContext db)
+        => new(db, new NexoRuta.Infrastructure.Administracion.Autenticacion.GeneradorPasswordHash(new PasswordHasher<string>()));
 }

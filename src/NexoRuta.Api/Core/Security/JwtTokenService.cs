@@ -14,7 +14,7 @@ public sealed class JwtTokenService(JwtConfiguracion config)
         var ahora = DateTime.UtcNow;
         var expiracion = ahora.AddMinutes(15);
 
-        var claims = new[]
+        var claims = new List<Claim>
         {
             new Claim(
                 JwtRegisteredClaimNames.Sub,
@@ -31,6 +31,9 @@ public sealed class JwtTokenService(JwtConfiguracion config)
                 JwtSesionClaims.VersionSesion,
                 sesion.VersionSesion.ToString(CultureInfo.InvariantCulture)),
         };
+
+        if (sesion.EsPlataforma)
+            claims.Add(new Claim(AccesoSeleccionado.ClaimAmbito, "plataforma"));
 
         var token = new JwtSecurityToken(
             issuer: config.Issuer,

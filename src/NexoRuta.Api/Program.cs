@@ -14,13 +14,26 @@ using Microsoft.IdentityModel.Tokens;
 using NexoRuta.Application.Administracion.Context;
 using NexoRuta.Application.Administracion.Repositories;
 using Microsoft.AspNetCore.Authorization;
-var builder = WebApplication.CreateBuilder(args);
+var platformCommand = args.FirstOrDefault() == "platform-admin";
+if (platformCommand && !args.SequenceEqual(["platform-admin", "create"]))
+{
+    Console.Error.WriteLine("Usage: platform-admin create (interactive credentials; no additional arguments).");
+    Environment.ExitCode = 2;
+    return;
+}
+var builder = WebApplication.CreateBuilder(platformCommand ? [] : args);
 
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 builder.Services.AddNexoRutaPersistence(builder.Configuration);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IUsuarioActual, UsuarioActualHttp>();
+if (platformCommand)
+{
+    await using var commandApp = builder.Build();
+    Environment.ExitCode = await NexoRuta.Api.Features.Plataforma.InicializarPlataformaCommand.EjecutarAsync(commandApp.Services);
+    return;
+}
 
 
 var jwt = new JwtConfiguracion(builder.Configuration);
@@ -69,6 +82,11 @@ builder.Services.AddHealthChecks().AddCheck<PostgreSqlHealthCheck>("postgres");
 
 builder.Services.AddAuthorization(options =>
 {
+    options.AddPolicy("organizacion", policy => policy.RequireAuthenticatedUser()
+        .RequireAssertion(context => context.Resource is HttpContext http && http.Items[typeof(ContextoUsuario)] is ContextoUsuario));
+    options.AddPolicy(RolPlataforma.GestionarOrganizaciones, policy => policy.RequireAuthenticatedUser()
+        .RequireAssertion(context => context.Resource is HttpContext http &&
+            http.Items[typeof(ContextoPlataforma)] is ContextoPlataforma { PuedeGestionarOrganizaciones: true }));
     // Política existente para cuentas de comercio.
     options.AddPolicy(nameof(TipoAccesoUsuario.Comercio), policy =>
         policy.RequireAuthenticatedUser()
@@ -155,6 +173,7 @@ var app = builder.Build();
         await scope.ServiceProvider.GetRequiredService<NexoRutaDbContext>().Database.MigrateAsync();
     if (app.Configuration.GetValue<bool>("DatabaseInitialization:SeedData"))
         await scope.ServiceProvider.GetRequiredService<DatosInicialesSeeder>().SeedAsync();
+    await scope.ServiceProvider.GetRequiredService<DatosInicialesSeeder>().SeedPlataformaAsync();
 }
 
 if (app.Environment.IsDevelopment())

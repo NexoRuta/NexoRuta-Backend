@@ -5,4 +5,5 @@ public sealed record SesionIniciada(
     Guid UsuarioId,
     Guid AccesoId,
     string Email,
-    long VersionSesion);
+    long VersionSesion,
+    bool EsPlataforma = false);

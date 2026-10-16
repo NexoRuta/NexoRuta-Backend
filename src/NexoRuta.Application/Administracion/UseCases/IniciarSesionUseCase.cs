@@ -39,6 +39,7 @@ public sealed class IniciarSesionUseCase(
             usuario.UsuarioId,
             usuario.AccesoId,
             usuario.Email,
-            usuario.VersionSesion);
+            usuario.VersionSesion,
+            usuario.EsPlataforma);
     }
 }
