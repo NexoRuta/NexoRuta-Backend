@@ -70,6 +70,19 @@ public sealed class IniciarSesionUseCaseTests
         Assert.Equal(0, verifier.Calls);
     }
 
+    [Fact]
+    public async Task LoginWithoutMembershipHasExplicitIdentityOnlyState()
+    {
+        var user = new UsuarioLogin(Guid.NewGuid(), null, "person@example.test", "stored-hash", 0);
+        var session = await new IniciarSesionUseCase(new Users(user), new PasswordVerifier(true))
+            .EjecutarAsync(user.Email, "valid-password");
+        Assert.NotNull(session);
+        Assert.Equal(user.UsuarioId, session.UsuarioId);
+        Assert.Null(session.AccesoId);
+        Assert.True(session.SinOrganizacion);
+        Assert.False(session.EsPlataforma);
+    }
+
     private sealed class Users(UsuarioLogin? user) : IUsuariosLoginRepository
     {
         public string? Email { get; private set; }

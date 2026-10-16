@@ -21,10 +21,6 @@ public sealed class JwtTokenService(JwtConfiguracion config)
                 sesion.UsuarioId.ToString()),
 
             new Claim(
-                AccesoSeleccionado.ClaimAccesoId,
-                sesion.AccesoId.ToString()),
-
-            new Claim(
                 JwtRegisteredClaimNames.Jti,
                 Guid.NewGuid().ToString("N")),
             new Claim(
@@ -32,6 +28,10 @@ public sealed class JwtTokenService(JwtConfiguracion config)
                 sesion.VersionSesion.ToString(CultureInfo.InvariantCulture)),
         };
 
+        if (sesion.AccesoId is Guid accessId)
+            claims.Add(new Claim(AccesoSeleccionado.ClaimAccesoId, accessId.ToString()));
+        if (sesion.SinOrganizacion)
+            claims.Add(new Claim(AccesoSeleccionado.ClaimAmbito, "identidad"));
         if (sesion.EsPlataforma)
             claims.Add(new Claim(AccesoSeleccionado.ClaimAmbito, "plataforma"));
 

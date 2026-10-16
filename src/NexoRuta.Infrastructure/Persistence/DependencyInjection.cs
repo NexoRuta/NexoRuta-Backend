@@ -40,6 +40,8 @@ public static class DependencyInjection
             };
         });
         services.AddScoped<IPlataformaRepository, EfPlataformaRepository>();
+        services.AddScoped<IAltaPropiaRepository, EfPlataformaRepository>();
+        services.AddScoped<IRegistroRepository, EfRegistroRepository>();
         services.AddScoped<IRolesRepository, EfRolesRepository>();
         services.AddScoped<IAccesosUsuarioRepository, EfAccesosUsuarioRepository>();
         services.AddScoped<IOperadoresRepository, EfOperadoresRepository>();

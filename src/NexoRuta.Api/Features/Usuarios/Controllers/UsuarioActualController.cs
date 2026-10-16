@@ -25,6 +25,8 @@ public sealed class UsuarioActualController(
     {
         try
         {
+            if (HttpContext.Items[typeof(IdentidadSinOrganizacion)] is IdentidadSinOrganizacion identidad)
+                return Ok(UsuarioActualResponse.Desde(identidad));
             if (HttpContext.Items[typeof(ContextoPlataforma)] is ContextoPlataforma plataforma)
                 return Ok(UsuarioActualResponse.Desde(plataforma));
             return Ok(UsuarioActualResponse.Desde(await usuarioActual.ObtenerAsync(cancellationToken)));
@@ -39,7 +41,9 @@ public sealed class UsuarioActualController(
     [ProducesResponseType<IReadOnlyList<string>>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<IReadOnlyList<string>>> GetPermissions(CancellationToken ct)
-        => HttpContext.Items[typeof(ContextoPlataforma)] is ContextoPlataforma plataforma
+        => HttpContext.Items[typeof(IdentidadSinOrganizacion)] is IdentidadSinOrganizacion
+            ? Ok(Array.Empty<string>())
+            : HttpContext.Items[typeof(ContextoPlataforma)] is ContextoPlataforma plataforma
             ? Ok(plataforma.PuedeGestionarOrganizaciones ? new[] { RolPlataforma.GestionarOrganizaciones } : [])
             : Ok(await permisosActuales.EjecutarAsync(ct));
 }

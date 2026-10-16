@@ -148,18 +148,21 @@ builder.Services.AddRateLimiter(options =>
             }));
 
 
-    options.AddPolicy("auth-login", context =>
-        RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey:
-                context.Connection.RemoteIpAddress?.ToString()
-                ?? "sin-ip",
-            factory: _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = 5,
-                Window = TimeSpan.FromMinutes(1),
-                QueueLimit = 0,
-                AutoReplenishment = true
-            }));
+    foreach (var policy in new[] { "auth-login", "auth-register" })
+    {
+        options.AddPolicy(policy, context =>
+            RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey:
+                    context.Connection.RemoteIpAddress?.ToString()
+                    ?? "sin-ip",
+                factory: _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 5,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                }));
+    }
 
 });
 

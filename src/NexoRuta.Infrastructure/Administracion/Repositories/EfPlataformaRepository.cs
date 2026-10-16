@@ -10,7 +10,7 @@ using Npgsql;
 
 namespace NexoRuta.Infrastructure.Administracion.Repositories;
 
-public sealed class EfPlataformaRepository(NexoRutaDbContext db, IGeneradorPasswordHash hasher) : IPlataformaRepository
+public sealed class EfPlataformaRepository(NexoRutaDbContext db, IGeneradorPasswordHash hasher) : IPlataformaRepository, IAltaPropiaRepository
 {
     public Task<ContextoPlataforma?> ObtenerAccesoAsync(Guid accesoId, CancellationToken ct)
         => (from access in db.AccesosPlataforma.AsNoTracking()
@@ -75,27 +75,43 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, IGeneradorPassw
         }
     }
 
-    public async Task<AltaOrganizacion> CrearAsync(TipoAccesoUsuario tipo, string nombre, string email, string password, CancellationToken ct)
+    public Task<AltaOrganizacion> CrearAsync(TipoAccesoUsuario tipo, string nombre, string email, string password, CancellationToken ct)
+    {
+        var normalized = ValidacionCredenciales.Validar(email, password);
+        return CrearOrganizacionAsync(tipo, nombre, new Usuario(normalized, hasher.Generar(normalized, password)), true, ct);
+    }
+
+    public async Task<AltaOrganizacion> CrearPropiaAsync(Guid usuarioId, TipoAccesoUsuario tipo, string nombre, CancellationToken ct)
+    {
+        var user = await db.Usuarios.SingleOrDefaultAsync(x => x.Id == usuarioId, ct)
+            ?? throw new ArgumentException("La identidad no existe.");
+        return await CrearOrganizacionAsync(tipo, nombre, user, false, ct);
+    }
+
+    private async Task<AltaOrganizacion> CrearOrganizacionAsync(TipoAccesoUsuario tipo, string nombre, Usuario user, bool nuevaIdentidad, CancellationToken ct)
     {
         if (tipo is not (TipoAccesoUsuario.Operador or TipoAccesoUsuario.Comercio))
             throw new ArgumentException("Invalid organization type.", nameof(tipo));
         if (string.IsNullOrWhiteSpace(nombre) || nombre.Trim().Length > 160)
             throw new ArgumentException("An organization name of at most 160 characters is required.", nameof(nombre));
-        var normalized = ValidacionCredenciales.Validar(email, password);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
-        if (await EmailExists(normalized, ct)) throw new CorreoYaRegistradoException();
+        if (nuevaIdentidad)
+        {
+            if (await EmailExists(user.Email, ct)) throw new CorreoYaRegistradoException();
+        }
+        else if (await db.AccesosUsuario.AnyAsync(x => x.UsuarioId == user.Id, ct) ||
+                 await db.AccesosPlataforma.AnyAsync(x => x.UsuarioId == user.Id, ct))
+            throw new OrganizacionYaAsignadaException();
         var operatorEntity = tipo == TipoAccesoUsuario.Operador ? new Operador(nombre) : null;
         var commerceEntity = tipo == TipoAccesoUsuario.Comercio ? new Comercio(nombre) : null;
         object organization = (object?)operatorEntity ?? commerceEntity!;
         var id = operatorEntity?.Id ?? commerceEntity!.Id;
-        var role = new Rol("administrador", "Administrator", operatorEntity?.Id, commerceEntity?.Id);
+        var role = new Rol(nuevaIdentidad ? "administrador" : "dueno", nuevaIdentidad ? "Administrator" : "Owner", operatorEntity?.Id, commerceEntity?.Id);
         role.ProtegerComoRolSistema();
-        var user = new Usuario(normalized, hasher.Generar(normalized, password));
         var access = new AccesoUsuario(user.Id, operatorEntity?.Id, commerceEntity?.Id, role);
         try
         {
-            // Catalog rows may be absent on an installation that never ran demo seeders.
-            // ON CONFLICT also serializes concurrent attempts to register the same catalog entry.
+            // Catalog upserts and every organization row belong to the same transaction.
             foreach (var definition in CatalogoPermisos.Para(tipo))
             {
                 var permission = new Permiso(definition.Codigo, definition.Nombre);
@@ -107,7 +123,8 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, IGeneradorPassw
             }
             var codes = CatalogoPermisos.Para(tipo).Select(x => x.Codigo).ToArray();
             var permissions = await db.Permisos.Where(x => codes.Contains(x.Codigo)).ToListAsync(ct);
-            db.AddRange(organization, role, user, access);
+            db.AddRange(organization, role, access);
+            if (nuevaIdentidad) db.Add(user);
             db.Entry(organization).Property("BootstrapCompletado").CurrentValue = true;
             db.AddRange(permissions.Select(p => new RolPermiso(role.Id, p.Id)));
             await db.SaveChangesAsync(ct);
@@ -115,7 +132,8 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, IGeneradorPassw
         }
         catch (DbUpdateException error) when (IsUniqueViolation(error))
         {
-            throw new CorreoYaRegistradoException();
+            if (nuevaIdentidad) throw new CorreoYaRegistradoException();
+            throw new OrganizacionYaAsignadaException();
         }
         return new AltaOrganizacion(new() { Id = id, Nombre = nombre.Trim() }, user.Id, access.Id, role.Id);
     }

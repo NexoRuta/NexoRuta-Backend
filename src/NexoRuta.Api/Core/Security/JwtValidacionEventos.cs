@@ -7,7 +7,7 @@ using NexoRuta.Application.Administracion.Repositories;
 namespace NexoRuta.Api.Core.Security;
 
 public sealed class JwtValidacionEventos(
-    IAccesosUsuarioRepository accesos, IPlataformaRepository plataforma) : JwtBearerEvents
+    IAccesosUsuarioRepository accesos, IPlataformaRepository plataforma, IRegistroRepository identidades) : JwtBearerEvents
 {
     public override async Task TokenValidated(
         TokenValidatedContext context)
@@ -18,8 +18,7 @@ public sealed class JwtValidacionEventos(
         var accesoClaim = context.Principal?
             .FindFirst(AccesoSeleccionado.ClaimAccesoId)?.Value;
 
-        if (!Guid.TryParse(usuarioClaim, out var usuarioId) ||
-            !Guid.TryParse(accesoClaim, out var accesoId))
+        if (!Guid.TryParse(usuarioClaim, out var usuarioId) || usuarioId == Guid.Empty)
         {
             context.Fail("Identidad inválida.");
             return;
@@ -39,6 +38,22 @@ public sealed class JwtValidacionEventos(
         }
 
         var ambito = context.Principal?.FindFirst(AccesoSeleccionado.ClaimAmbito)?.Value;
+        if (ambito == "identidad")
+        {
+            var unassignedIdentity = accesoClaim is null && versionToken == 0
+                ? await identidades.ObtenerSinOrganizacionAsync(usuarioId, context.HttpContext.RequestAborted)
+                : null;
+            if (unassignedIdentity is null)
+                context.Fail("La sesión sin organización ya no está disponible. Ingresá nuevamente.");
+            else
+                context.HttpContext.Items[typeof(IdentidadSinOrganizacion)] = unassignedIdentity;
+            return;
+        }
+        if (!Guid.TryParse(accesoClaim, out var accesoId))
+        {
+            context.Fail("Acceso inválido.");
+            return;
+        }
         if (ambito == "plataforma")
         {
             var platformAccess = await plataforma.ObtenerAccesoAsync(accesoId, context.HttpContext.RequestAborted);

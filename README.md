@@ -120,3 +120,5 @@ Cada CU tiene un módulo principal. Las dependencias entre módulos se resuelven
 La [bitácora individual de Zarsu - Franco](docs/bitacora-ia/zarsu-franco.md) muestra el formato acumulativo. El registro de uso de IA por componente responde al §9.5 de `Laboratorio__NET_2026.pdf`.
 
 Las organizaciones ya existentes al aplicar la normalización se marcan como inicializadas: su configuración posterior debe administrarse explícitamente, sin volver a ejecutar plantillas iniciales sobre decisiones históricas.
+
+Self-service registration (`POST /api/auth/register`) and authenticated organization onboarding (`POST /api/alta-propia/comercios`, `/api/alta-propia/operadores`) are the normal entry path. Platform Admin remains for support. See `../docs/registro-alta-propia.md` for session boundaries, compatibility and checks; CU-01 remains open.
