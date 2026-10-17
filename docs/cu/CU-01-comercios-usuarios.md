@@ -2,7 +2,11 @@
 
 ## Additional platform administration slice
 
-The [platform administration guide](../workflow/platform-administration.md) documents the separate platform authority, controlled first-account command and transactional operator/commerce APIs. Initial commerce administrator roles now receive the same system protection as initial operator administrator roles. This slice does not complete CU-01; Identity/OIDC and RLS remain pending; Admin is implemented separately.
+The [platform administration guide](../workflow/platform-administration.md) documents the separate platform authority, controlled first-account command and transactional operator/commerce APIs. Initial commerce administrator roles now receive the same system protection as initial operator administrator roles. This slice does not complete CU-01; RLS remains pending; Admin is implemented separately.
+
+## Sesiones móviles renovables — 17/10/2026
+
+El usuario confirmó conservar JWT y PasswordHasher del sistema central y agregar renovación móvil por 30 días desde el ingreso, configurables. Se implementaron `POST /api/auth/mobile/login`, `/refresh` y `/logout`, con rotación, hashes, revocación por sesión y expiración absoluta. El [contrato y la evidencia del corte](../workflow/sesiones-moviles.md) describen persistencia, concurrencia, errores, pruebas y límites. No se incorpora Identity completo ni compatibilidad con versiones anteriores. Perfil repartidor, RLS e integración del cliente MAUI siguen pendientes.
 
 ## Modelo vigente
 

@@ -7,7 +7,8 @@ using NexoRuta.Application.Administracion.Repositories;
 namespace NexoRuta.Api.Core.Security;
 
 public sealed class JwtValidacionEventos(
-    IAccesosUsuarioRepository accesos, IPlataformaRepository plataforma, IRegistroRepository identidades) : JwtBearerEvents
+    IAccesosUsuarioRepository accesos, IPlataformaRepository plataforma, IRegistroRepository identidades,
+    ISesionesMovilesRepository sesiones, TimeProvider reloj) : JwtBearerEvents
 {
     public override async Task TokenValidated(
         TokenValidatedContext context)
@@ -38,6 +39,16 @@ public sealed class JwtValidacionEventos(
         }
 
         var ambito = context.Principal?.FindFirst(AccesoSeleccionado.ClaimAmbito)?.Value;
+        var claimSesion = context.Principal?.FindAll(JwtSesionClaims.SesionMovil).ToArray() ?? [];
+        if (claimSesion.Length > 0 && (claimSesion.Length != 1 || ambito is not null
+            || !Guid.TryParse(claimSesion[0].Value, out var sesionId)
+            || !Guid.TryParse(accesoClaim, out var accesoMovilId)
+            || !await sesiones.EstaVigenteAsync(sesionId, usuarioId, accesoMovilId, versionToken,
+                reloj.GetUtcNow(), context.HttpContext.RequestAborted)))
+        {
+            context.Fail("La sesión móvil ya no está disponible.");
+            return;
+        }
         if (ambito == "identidad")
         {
             var unassignedIdentity = accesoClaim is null && versionToken == 0

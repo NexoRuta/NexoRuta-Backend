@@ -156,7 +156,7 @@ builder.Services.AddRateLimiter(options =>
             }));
 
 
-    foreach (var policy in new[] { "auth-login", "auth-register" })
+    foreach (var policy in new[] { "auth-login", "auth-register", "auth-refresh" })
     {
         options.AddPolicy(policy, context =>
             RateLimitPartition.GetFixedWindowLimiter(
@@ -165,7 +165,7 @@ builder.Services.AddRateLimiter(options =>
                     ?? "sin-ip",
                 factory: _ => new FixedWindowRateLimiterOptions
                 {
-                    PermitLimit = 5,
+                    PermitLimit = policy == "auth-refresh" ? 30 : 5,
                     Window = TimeSpan.FromMinutes(1),
                     QueueLimit = 0,
                     AutoReplenishment = true

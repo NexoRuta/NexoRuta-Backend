@@ -3,7 +3,8 @@ namespace NexoRuta.Infrastructure.Outbox;
 public enum OutboxDestino
 {
     RabbitMq,
-    Kafka
+    Kafka,
+    PushFcm
 }
 
 public enum OutboxEstado

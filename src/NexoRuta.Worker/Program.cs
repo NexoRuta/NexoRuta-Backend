@@ -50,9 +50,16 @@ else if (transport == "RabbitMq")
     // Publicación desde Outbox y consumo de RabbitMQ.
     builder.Services.AddHostedService<GenerarSeguimientoConsumer>();
 }
+else if (transport == "Push")
+{
+    builder.Services.AddScoped<NexoRuta.Infrastructure.Notificaciones.CifradorRegistroPush>();
+    builder.Services.AddScoped<NexoRuta.Infrastructure.Notificaciones.EfDespachoPushRepository>();
+    builder.Services.AddSingleton<ITransporteFcm, TransporteFcm>();
+    builder.Services.AddHostedService<PushOutboxWorker>();
+}
 else
 {
-    throw new InvalidOperationException("Messaging:Transport must be RabbitMq or Kafka.");
+    throw new InvalidOperationException("Messaging:Transport must be RabbitMq, Kafka or Push.");
 }
 
 var host = builder.Build();

@@ -125,10 +125,10 @@ public sealed class EfOutboxRepository(NexoRutaDbContext db)
     Guid mensajeId,
     Guid procesadorId,
     string error,
-    CancellationToken cancellationToken = default)
+    CancellationToken cancellationToken = default, TimeSpan? demora = null)
     {
         var ahora = DateTimeOffset.UtcNow;
-        var proximoIntento = ahora.AddSeconds(30);
+        var proximoIntento = ahora.Add(demora ?? TimeSpan.FromSeconds(30));
 
         var mensajeError = string.IsNullOrWhiteSpace(error)
             ? "Error de publicación"
