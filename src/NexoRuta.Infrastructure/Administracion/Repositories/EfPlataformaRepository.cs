@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Identity;
 using NexoRuta.Application.Administracion;
 using NexoRuta.Application.Administracion.Context;
 using NexoRuta.Application.Administracion.Exceptions;
@@ -10,7 +11,7 @@ using Npgsql;
 
 namespace NexoRuta.Infrastructure.Administracion.Repositories;
 
-public sealed class EfPlataformaRepository(NexoRutaDbContext db, IGeneradorPasswordHash hasher) : IPlataformaRepository, IAltaPropiaRepository
+public sealed class EfPlataformaRepository(NexoRutaDbContext db, UserManager<Usuario> identityUsers) : IPlataformaRepository, IAltaPropiaRepository
 {
     public Task<ContextoPlataforma?> ObtenerAccesoAsync(Guid accesoId, CancellationToken ct)
         => (from access in db.AccesosPlataforma.AsNoTracking()
@@ -21,7 +22,7 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, IGeneradorPassw
                 role.PuedeGestionarOrganizaciones &&
                     (from grant in db.RolesPlataformaPermisos join permission in db.Permisos on grant.PermisoId equals permission.Id
                      where grant.RolId == role.Id && permission.Codigo == RolPlataforma.GestionarOrganizaciones select grant).Any(),
-                user.Email)).SingleOrDefaultAsync(ct);
+                user.Email!)).SingleOrDefaultAsync(ct);
 
     public async Task InicializarAsync(string email, string password, CancellationToken ct = default, bool permitirExistente = false)
     {
@@ -42,7 +43,7 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, IGeneradorPassw
             var grants = await (from grant in db.RolesPlataformaPermisos
                                 join permission in db.Permisos on grant.PermisoId equals permission.Id
                                 where grant.RolId == existing.platformRole.Id select permission.Codigo).ToArrayAsync(ct);
-            if (existing.account.Email.Trim().ToLowerInvariant() != normalized || string.IsNullOrWhiteSpace(existing.account.PasswordHash) ||
+            if (existing.account.Email!.Trim().ToLowerInvariant() != normalized || string.IsNullOrWhiteSpace(existing.account.PasswordHash) ||
                 !existing.access.Activo || !existing.platformRole.EsProtegidoSistema || !existing.platformRole.PuedeGestionarOrganizaciones ||
                 !grants.ToHashSet(StringComparer.Ordinal).SetEquals(codes) ||
                 await db.AccesosUsuario.AnyAsync(x => x.UsuarioId == existing.account.Id, ct))
@@ -51,11 +52,18 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, IGeneradorPassw
             return;
         }
         if (await EmailExists(normalized, ct)) throw new CorreoYaRegistradoException();
-        var user = new Usuario(normalized, hasher.Generar(normalized, password));
-        var role = new RolPlataforma();
-        db.AddRange(user, role, new AccesoPlataforma(user, role));
         try
         {
+            var user = new Usuario(normalized);
+            var userResult = await identityUsers.CreateAsync(user, password);
+            if (!userResult.Succeeded)
+            {
+                if (userResult.Errors.Any(x => x.Code is "DuplicateEmail" or "DuplicateUserName"))
+                    throw new CorreoYaRegistradoException();
+                throw new ArgumentException("La cuenta no cumple las reglas de Identity.", nameof(password));
+            }
+            var role = new RolPlataforma();
+            db.AddRange(role, new AccesoPlataforma(user, role));
             foreach (var definition in CatalogoPermisos.Plataforma)
             {
                 var permission = new Permiso(definition.Codigo, definition.Nombre);
@@ -78,17 +86,17 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, IGeneradorPassw
     public Task<AltaOrganizacion> CrearAsync(TipoAccesoUsuario tipo, string nombre, string email, string password, CancellationToken ct)
     {
         var normalized = ValidacionCredenciales.Validar(email, password);
-        return CrearOrganizacionAsync(tipo, nombre, new Usuario(normalized, hasher.Generar(normalized, password)), true, ct);
+        return CrearOrganizacionAsync(tipo, nombre, new Usuario(normalized), true, password, ct);
     }
 
     public async Task<AltaOrganizacion> CrearPropiaAsync(Guid usuarioId, TipoAccesoUsuario tipo, string nombre, CancellationToken ct)
     {
         var user = await db.Usuarios.SingleOrDefaultAsync(x => x.Id == usuarioId, ct)
             ?? throw new ArgumentException("La identidad no existe.");
-        return await CrearOrganizacionAsync(tipo, nombre, user, false, ct);
+        return await CrearOrganizacionAsync(tipo, nombre, user, false, null, ct);
     }
 
-    private async Task<AltaOrganizacion> CrearOrganizacionAsync(TipoAccesoUsuario tipo, string nombre, Usuario user, bool nuevaIdentidad, CancellationToken ct)
+    private async Task<AltaOrganizacion> CrearOrganizacionAsync(TipoAccesoUsuario tipo, string nombre, Usuario user, bool nuevaIdentidad, string? password, CancellationToken ct)
     {
         if (tipo is not (TipoAccesoUsuario.Operador or TipoAccesoUsuario.Comercio))
             throw new ArgumentException("Invalid organization type.", nameof(tipo));
@@ -97,7 +105,7 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, IGeneradorPassw
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         if (nuevaIdentidad)
         {
-            if (await EmailExists(user.Email, ct)) throw new CorreoYaRegistradoException();
+            if (await EmailExists(user.Email!, ct)) throw new CorreoYaRegistradoException();
         }
         else if (await db.AccesosUsuario.AnyAsync(x => x.UsuarioId == user.Id, ct) ||
                  await db.AccesosPlataforma.AnyAsync(x => x.UsuarioId == user.Id, ct))
@@ -124,7 +132,16 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, IGeneradorPassw
             var codes = CatalogoPermisos.Para(tipo).Select(x => x.Codigo).ToArray();
             var permissions = await db.Permisos.Where(x => codes.Contains(x.Codigo)).ToListAsync(ct);
             db.AddRange(organization, role, access);
-            if (nuevaIdentidad) db.Add(user);
+            if (nuevaIdentidad)
+            {
+                var userResult = await identityUsers.CreateAsync(user, password!);
+                if (!userResult.Succeeded)
+                {
+                    if (userResult.Errors.Any(x => x.Code is "DuplicateEmail" or "DuplicateUserName"))
+                        throw new CorreoYaRegistradoException();
+                    throw new ArgumentException("La cuenta no cumple las reglas de Identity.", nameof(password));
+                }
+            }
             db.Entry(organization).Property("BootstrapCompletado").CurrentValue = true;
             db.AddRange(permissions.Select(p => new RolPermiso(role.Id, p.Id)));
             await db.SaveChangesAsync(ct);
@@ -160,7 +177,7 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, IGeneradorPassw
             : db.Comercios.AsNoTracking().Select(x => new OrganizacionAdministrativa { Id = x.Id, Nombre = x.Nombre, Estado = x.Estado.ToString(), Version = x.Version });
 
     private Task<bool> EmailExists(string email, CancellationToken ct)
-        => db.Usuarios.AnyAsync(x => x.Email.Trim().ToLower() == email, ct);
+        => db.Usuarios.AnyAsync(x => x.Email!.Trim().ToLower() == email, ct);
 
     private static bool IsUniqueViolation(DbUpdateException error)
         => error.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation };

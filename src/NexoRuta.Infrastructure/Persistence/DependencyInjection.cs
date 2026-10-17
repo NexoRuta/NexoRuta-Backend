@@ -15,6 +15,7 @@ using Microsoft.AspNetCore.Identity;
 using NexoRuta.Application.Administracion.Interfaces;
 using NexoRuta.Application.Administracion.UseCases;
 using NexoRuta.Infrastructure.Administracion.Autenticacion;
+using NexoRuta.Domain.Administracion;
 namespace NexoRuta.Infrastructure.Persistence;
 
 public static class DependencyInjection
@@ -27,6 +28,18 @@ public static class DependencyInjection
             ?? throw new InvalidOperationException("Falta ConnectionStrings:Postgres.");
 
         services.AddDbContext<NexoRutaDbContext>(options => options.UseNpgsql(connectionString));
+        services.AddIdentityCore<Usuario>(options =>
+            {
+                options.User.RequireUniqueEmail = true;
+                options.User.AllowedUserNameCharacters = string.Empty;
+                options.Password.RequiredLength = 12;
+                options.Password.RequireDigit = false;
+                options.Password.RequireLowercase = false;
+                options.Password.RequireUppercase = false;
+                options.Password.RequireNonAlphanumeric = false;
+                options.Password.RequiredUniqueChars = 1;
+            })
+            .AddEntityFrameworkStores<NexoRutaDbContext>();
         services.AddSingleton(_ =>
         {
             if (!configuration.GetValue<bool>("DatabaseInitialization:SeedData"))
@@ -72,9 +85,6 @@ public static class DependencyInjection
 
 
 
-
-        services.AddSingleton<IPasswordHasher<string>, PasswordHasher<string>>();
-        services.AddSingleton<IGeneradorPasswordHash, GeneradorPasswordHash>();
 
         services.AddScoped<DatosInicialesSeeder>();
 

@@ -44,7 +44,7 @@ public sealed class PlatformSeederTests(PostgresFixture postgres) : IClassFixtur
             ["PlatformInitialization:Enabled"] = enabled.ToString(),
             ["PlatformInitialization:Email"] = email,
             ["PlatformInitialization:Password"] = password
-        }).Build(), new PasswordHasher<string>(), AuthenticationTestData.PlatformRepository(db));
+        }).Build(), AuthenticationTestData.UserManager(db), AuthenticationTestData.PlatformRepository(db));
 
     [Fact]
     public async Task RepeatedInitializationPreservesIdentityPasswordAndProtectedCatalogGrants()
@@ -90,7 +90,7 @@ public sealed class PlatformSeederTests(PostgresFixture postgres) : IClassFixtur
         var database = await postgres.CreateDatabaseAsync();
         await using var db = database.CreateDbContext();
         await new DatosInicialesSeeder(db, new AccesoInicial("unused@example.test", "Unused", "Unused", "Unused"), new ConfigurationBuilder().Build(),
-            new PasswordHasher<string>(), AuthenticationTestData.PlatformRepository(db)).SeedPlataformaAsync();
+            AuthenticationTestData.UserManager(db), AuthenticationTestData.PlatformRepository(db)).SeedPlataformaAsync();
         Assert.Empty(await db.Usuarios.ToListAsync());
         Assert.Empty(await db.Permisos.ToListAsync());
     }

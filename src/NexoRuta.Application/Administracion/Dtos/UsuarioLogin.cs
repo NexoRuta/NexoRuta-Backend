@@ -7,7 +7,6 @@ public sealed record UsuarioLogin(
     Guid UsuarioId,
     Guid? AccesoId,
     string Email,
-    string PasswordHash,
     long VersionSesion,
     bool EsPlataforma = false,
     TipoAccesoUsuario? TipoOrganizacion = null,

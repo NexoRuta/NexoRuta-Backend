@@ -1,5 +1,10 @@
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using NexoRuta.Domain.Administracion;
 using NexoRuta.Infrastructure.Administracion;
 using NexoRuta.Infrastructure.Persistence;
 
@@ -56,8 +61,25 @@ internal static class AuthenticationTestData
 
     public static DatosInicialesSeeder Seeder(NexoRutaDbContext db, AccesoInicial initial) => new(
         db, initial, new ConfigurationBuilder().AddInMemoryCollection(BootstrapSettings(initial)).Build(),
-        new PasswordHasher<string>(), PlatformRepository(db));
+        UserManager(db), PlatformRepository(db));
+
+    public static UserManager<Usuario> UserManager(NexoRutaDbContext db)
+    {
+        var options = new IdentityOptions();
+        options.User.RequireUniqueEmail = true;
+        options.Password.RequiredLength = 12;
+        options.Password.RequireDigit = false;
+        options.Password.RequireLowercase = false;
+        options.Password.RequireUppercase = false;
+        options.Password.RequireNonAlphanumeric = false;
+        options.Password.RequiredUniqueChars = 1;
+        return new UserManager<Usuario>(new UserOnlyStore<Usuario, NexoRutaDbContext, Guid>(db),
+            Options.Create(options), new PasswordHasher<Usuario>(), [new UserValidator<Usuario>()],
+            [new PasswordValidator<Usuario>()], new UpperInvariantLookupNormalizer(),
+            new IdentityErrorDescriber(), new ServiceCollection().BuildServiceProvider(),
+            NullLogger<UserManager<Usuario>>.Instance);
+    }
 
     public static NexoRuta.Infrastructure.Administracion.Repositories.EfPlataformaRepository PlatformRepository(NexoRutaDbContext db)
-        => new(db, new NexoRuta.Infrastructure.Administracion.Autenticacion.GeneradorPasswordHash(new PasswordHasher<string>()));
+        => new(db, UserManager(db));
 }

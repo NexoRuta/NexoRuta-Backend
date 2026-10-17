@@ -31,7 +31,7 @@ public sealed class EfAccesosUsuarioRepository(NexoRutaDbContext db) : IAccesosU
             usuario.Id,
             acceso.OperadorId,
             acceso.ComercioId,
-            usuario.Email,
+            usuario.Email!,
             operador == null ? null : operador.Nombre,
             comercio == null ? null : comercio.Nombre,
             rol.Id,

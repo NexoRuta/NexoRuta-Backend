@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using NexoRuta.Domain.Administracion;
 using NexoRuta.Domain.Envios;
 using NexoRuta.Domain.Seguimiento;
@@ -8,7 +9,7 @@ using NexoRuta.Infrastructure.Outbox;
 
 namespace NexoRuta.Infrastructure.Persistence;
 
-public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> options) : DbContext(options)
+public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> options) : IdentityUserContext<Usuario, Guid>(options)
 {
     public DbSet<AccesoPlataforma> AccesosPlataforma => Set<AccesoPlataforma>();
     public DbSet<RolPlataforma> RolesPlataforma => Set<RolPlataforma>();
@@ -38,6 +39,7 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        base.OnModelCreating(modelBuilder);
         modelBuilder.Entity<RolPlataformaPermiso>(entity =>
         {
             entity.ToTable("RolesPlataformaPermisos");
@@ -166,6 +168,7 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
 
         modelBuilder.Entity<Usuario>(entity =>
         {
+            // Keep the existing account table as the sole Identity user store so existing foreign keys and IDs remain intact.
             entity.ToTable("Usuarios");
             entity.HasKey(x => x.Id);
             entity.Property(x => x.PasswordHash)
@@ -173,6 +176,7 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
             entity.Property(x => x.Email).HasMaxLength(254).IsRequired();
             entity.Property(x => x.Version).HasDefaultValue(0L).IsConcurrencyToken();
             entity.HasIndex(x => x.Email).IsUnique();
+            entity.HasIndex(x => x.NormalizedEmail).IsUnique();
         });
 
 

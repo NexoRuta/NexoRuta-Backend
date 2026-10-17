@@ -9,7 +9,7 @@ using NexoRuta.Application.Administracion.Exceptions;
 namespace NexoRuta.Infrastructure.Persistence;
 
 public sealed class DatosInicialesSeeder(NexoRutaDbContext db, AccesoInicial initial,
-    IConfiguration configuration, IPasswordHasher<string> passwordHasher, IPlataformaRepository plataforma)
+    IConfiguration configuration, UserManager<Usuario> identityUsers, IPlataformaRepository plataforma)
 {
     public async Task SeedPlataformaAsync(CancellationToken ct = default)
     {
@@ -140,15 +140,17 @@ public sealed class DatosInicialesSeeder(NexoRutaDbContext db, AccesoInicial ini
         string passwordSetting, CancellationToken ct)
     {
         var normalized = email.Trim().ToLowerInvariant();
-        var user = await db.Usuarios.SingleOrDefaultAsync(x => x.Email.ToLower() == normalized, ct);
+        var user = await db.Usuarios.SingleOrDefaultAsync(x => x.Email!.ToLower() == normalized, ct);
         var isNew = user is null;
         if (isNew)
         {
             var password = configuration[passwordSetting];
             if (string.IsNullOrWhiteSpace(password) || password.Length < 12)
                 throw new InvalidOperationException($"A bootstrap password of at least 12 characters is required: {passwordSetting}.");
-            user = new Usuario(normalized, passwordHasher.HashPassword(normalized, password));
-            db.Add(user);
+            user = new Usuario(normalized);
+            var result = await identityUsers.CreateAsync(user, password);
+            if (!result.Succeeded)
+                throw new InvalidOperationException("The configured bootstrap identity was rejected by Identity.");
         }
         if (await db.AccesosUsuario.AnyAsync(x => x.UsuarioId == user!.Id, ct)) return;
         // ponytail: bootstrap grants are create-only; repair of an existing user requires explicit administrative assignment.
