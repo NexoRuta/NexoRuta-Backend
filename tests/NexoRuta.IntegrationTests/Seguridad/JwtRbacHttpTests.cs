@@ -159,7 +159,7 @@ public sealed class JwtRbacHttpTests(PostgresFixture postgres) : IClassFixture<P
 
     [Theory]
     [InlineData("usuarios.gestionar", true, true)]
-    [InlineData("configuracion.gestionar", false, true)]
+    [InlineData("configuracion.gestionar", true, true)]
     [InlineData("envios.crear", true, false)]
     [InlineData("envios.consultar", true, true)]
     [InlineData("envios.gestionar", false, true)]

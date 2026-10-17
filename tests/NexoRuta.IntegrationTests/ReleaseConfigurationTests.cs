@@ -94,7 +94,9 @@ public sealed class ReleaseConfigurationTests
         Assert.Equal(new AccesoInicial("custom@example.test", "Custom Operator", "Custom Commerce", "operator@example.test")
         {
             OperadorId = Guid.Parse(values["AccesoInicial:OperadorId"]!),
-            ComercioId = Guid.Parse(values["AccesoInicial:ComercioId"]!)
+            ComercioId = Guid.Parse(values["AccesoInicial:ComercioId"]!),
+            OperadorRolCodigo = values["AccesoInicial:OperadorRolCodigo"]!.Trim(),
+            ComercioRolCodigo = values["AccesoInicial:ComercioRolCodigo"]!.Trim()
         }, access);
         Assert.IsType<UsuarioActualHttp>(scope.ServiceProvider.GetRequiredService<IUsuarioActual>());
         Assert.IsType<EfAccesosUsuarioRepository>(scope.ServiceProvider.GetRequiredService<IAccesosUsuarioRepository>());
@@ -132,7 +134,9 @@ public sealed class ReleaseConfigurationTests
         ["AccesoInicial:UsuarioEmail"] = "custom@example.test",
         ["AccesoInicial:ComercioNombre"] = "Custom Commerce",
         ["AccesoInicial:OperadorNombre"] = "Custom Operator",
-        ["AccesoInicial:OperadorUsuarioEmail"] = "operator@example.test"
+        ["AccesoInicial:OperadorUsuarioEmail"] = "operator@example.test",
+        ["AccesoInicial:OperadorRolCodigo"] = "owner-operator",
+        ["AccesoInicial:ComercioRolCodigo"] = "owner-commerce"
     };
 
     private static IConfiguration Configuration(Dictionary<string, string?> values)

@@ -130,6 +130,7 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
             new PasswordHasher<string>().VerifyHashedPassword(user.Email, user.PasswordHash!, Password));
         var access = await db.AccesosUsuario.SingleAsync();
         Assert.True(access.Activo);
+        Assert.True(access.EsPropietario);
         Assert.Equal(created.AccesoId, access.Id);
         Assert.Equal(created.RolId, access.RolId);
         Assert.Equal(created.Organizacion.Id, access.OrganizacionId);
@@ -380,7 +381,7 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
     {
         var database = await postgres.CreateDatabaseAsync();
         await using var db = database.CreateDbContext();
-        await db.Database.MigrateAsync("20261016021011_ProtectSystemAdministratorRoles");
+        await db.Database.MigrateAsync();
         var shipment = await SeguimientoTestData.CreateEnvioAsync(db);
         var role = new Rol("legacy", "Legacy", shipment.OperadorId, null);
         role.ProtegerComoRolSistema();
@@ -389,6 +390,7 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
         db.AddRange(role, access, permission, new RolPermiso(role.Id, permission.Id));
         await db.SaveChangesAsync();
         var hash = (await db.Usuarios.SingleAsync()).PasswordHash;
+        await db.Database.MigrateAsync("20261016021011_ProtectSystemAdministratorRoles");
         await db.Database.MigrateAsync();
         db.ChangeTracker.Clear();
         Assert.Equal(shipment.Id, (await db.Envios.SingleAsync()).Id);

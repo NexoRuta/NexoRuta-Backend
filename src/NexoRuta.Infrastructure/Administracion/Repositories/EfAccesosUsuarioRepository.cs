@@ -36,7 +36,8 @@ public sealed class EfAccesosUsuarioRepository(NexoRutaDbContext db) : IAccesosU
             comercio == null ? null : comercio.Nombre,
             rol.Id,
             rol.Codigo,
-            acceso.VersionSesion);
+            acceso.VersionSesion,
+            operador != null ? operador.Estado : comercio!.Estado);
 
 
     public async Task<IReadOnlyList<ContextoUsuario>> ListarAsync(
@@ -48,4 +49,9 @@ public sealed class EfAccesosUsuarioRepository(NexoRutaDbContext db) : IAccesosU
 
     public Task<ContextoUsuario?> ObtenerAsync(Guid accesoId, CancellationToken cancellationToken = default)
         => Consulta(db.AccesosUsuario.Where(x => x.Id == accesoId)).SingleOrDefaultAsync(cancellationToken);
+
+    public Task<bool> EsPropietarioAsync(Guid usuarioId, Guid accesoId, CancellationToken cancellationToken = default)
+        => db.AccesosUsuario.AsNoTracking().AnyAsync(
+            x => x.UsuarioId == usuarioId && x.Id == accesoId && x.EsPropietario,
+            cancellationToken);
 }

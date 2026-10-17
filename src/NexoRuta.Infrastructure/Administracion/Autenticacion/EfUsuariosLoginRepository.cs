@@ -1,5 +1,6 @@
 
 using Microsoft.EntityFrameworkCore;
+using NexoRuta.Domain.Administracion;
 using NexoRuta.Application.Administracion.Dtos;
 using NexoRuta.Application.Administracion.Repositories;
 using NexoRuta.Infrastructure.Persistence;
@@ -26,7 +27,12 @@ public sealed class EfUsuariosLoginRepository(
                 acceso.Id,
                 usuario.Email,
                 usuario.PasswordHash!,
-                acceso.VersionSesion)
+                acceso.VersionSesion,
+                false,
+                acceso.OperadorId != null ? TipoAccesoUsuario.Operador : TipoAccesoUsuario.Comercio,
+                acceso.OperadorId != null
+                    ? db.Operadores.Where(x => x.Id == acceso.OperadorId).Select(x => (EstadoOrganizacion?)x.Estado).SingleOrDefault()
+                    : db.Comercios.Where(x => x.Id == acceso.ComercioId).Select(x => (EstadoOrganizacion?)x.Estado).SingleOrDefault())
         ).SingleOrDefaultAsync(cancellationToken);
         if (organization is not null) return organization;
         var platform = await (from user in db.Usuarios.AsNoTracking()

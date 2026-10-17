@@ -53,6 +53,11 @@ public sealed class AuthController(
         return Ok(new LoginResponse(
             token,
             "Bearer",
-            expiracion));
+            expiracion,
+            sesion.EsPlataforma ? "Plataforma"
+                : sesion.SinOrganizacion ? "SinOrganizacion"
+                : sesion.OrganizacionSuspendida ? "OrganizacionSuspendida"
+                : sesion.TipoOrganizacion?.ToString() ?? "Desconocido",
+            sesion.TipoOrganizacion?.ToString()));
     }
 }

@@ -4,4 +4,6 @@ namespace NexoRuta.Api.Contracts.Auth;
 public sealed record LoginResponse(
     string AccessToken,
     string TokenType,
-    DateTime ExpiresAtUtc);
+    DateTime ExpiresAtUtc,
+    string Contexto,
+    string? TipoOrganizacion);

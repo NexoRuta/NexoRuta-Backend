@@ -35,8 +35,8 @@ public static class DependencyInjection
             {
                 OperadorId = OrganizationId("OperadorId"),
                 ComercioId = OrganizationId("ComercioId"),
-                OperadorRolCodigo = configuration["AccesoInicial:OperadorRolCodigo"],
-                ComercioRolCodigo = configuration["AccesoInicial:ComercioRolCodigo"]
+                OperadorRolCodigo = Value("OperadorRolCodigo"),
+                ComercioRolCodigo = Value("ComercioRolCodigo")
             };
         });
         services.AddScoped<IPlataformaRepository, EfPlataformaRepository>();
@@ -48,6 +48,8 @@ public static class DependencyInjection
         services.AddScoped<IComerciosRepository, EfComerciosRepository>();
         services.AddScoped<IEnviosRepository, EfEnviosRepository>();
         services.AddScoped<IUsuariosOrganizacionRepository, EfUsuariosOrganizacionRepository>();
+        services.AddScoped<IOrganizacionPropiaRepository, EfOrganizacionPropiaRepository>();
+        services.AddScoped<IOrganizacionLifecycleRepository, EfOrganizacionLifecycleRepository>();
         services.AddScoped<IPermisosUsuarioRepository, EfPermisosUsuarioRepository>();
         services.AddScoped<IUsuariosLoginRepository, EfUsuariosLoginRepository>();
         services.AddScoped<IVerificadorPassword, VerificadorPassword>();
@@ -61,6 +63,11 @@ public static class DependencyInjection
         services.AddScoped<IniciarSesionUseCase>();
         services.AddScoped<CambiarEstadoUsuarioUseCase>();
         services.AddScoped<ObtenerPermisosActualesUseCase>();
+        services.AddScoped<EsPropietarioOrganizacionUseCase>();
+        services.AddScoped<ConsultarOrganizacionPropiaUseCase>();
+        services.AddScoped<EditarNombreOrganizacionPropiaUseCase>();
+        services.AddScoped<GestionarBajasOrganizacionUseCase>();
+        services.AddScoped<GestionarReactivacionesOrganizacionUseCase>();
 
 
 

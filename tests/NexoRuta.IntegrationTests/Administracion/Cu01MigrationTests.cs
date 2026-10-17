@@ -52,8 +52,7 @@ public sealed class Cu01MigrationTests(PostgresFixture postgres) : IClassFixture
             Assert.Equal(commerceIds[i], access.ComercioId);
             Assert.Equal(commerceIds[i], roles.Single(x => x.Id == access.RolId).ComercioId);
             Assert.True(await permissions.TienePermisoAsync(userIds[i], accessIds[i], "envios.consultar"));
-            if (!formerlyAppliedSchema) Assert.True(db.Entry(access).Property<bool?>("EsPropietario").CurrentValue);
-            else Assert.Null(db.Entry(access).Property<bool?>("EsPropietario").CurrentValue);
+            Assert.Equal(!formerlyAppliedSchema, access.EsPropietario);
         }
         var firstRole = (await db.AccesosUsuario.SingleAsync(x => x.Id == accessIds[0])).RolId;
         db.Remove(await db.RolesPermisos.SingleAsync(x => x.RolId == firstRole));

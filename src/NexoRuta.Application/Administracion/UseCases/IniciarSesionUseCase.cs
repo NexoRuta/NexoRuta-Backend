@@ -40,6 +40,8 @@ public sealed class IniciarSesionUseCase(
             usuario.AccesoId,
             usuario.Email,
             usuario.VersionSesion,
-            usuario.EsPlataforma);
+            usuario.EsPlataforma,
+            usuario.TipoOrganizacion,
+            usuario.EstadoOrganizacion == NexoRuta.Domain.Administracion.EstadoOrganizacion.Suspendida);
     }
 }

@@ -81,6 +81,53 @@ public sealed class BootstrapTests(PostgresFixture postgres) : IClassFixture<Pos
     }
 
     [Fact]
+    public async Task InitialOwnerAccountsAreProtectedAndReceiveTheirFullOrganizationCatalogIdempotently()
+    {
+        var database = await postgres.CreateDatabaseAsync();
+        await using var db = database.CreateDbContext();
+        var initial = new AccesoInicial("commerce-owner@test.local", "Operator", "Commerce", "operator-owner@test.local");
+        var seeder = AuthenticationTestData.Seeder(db, initial);
+
+        await seeder.SeedAsync();
+
+        Assert.Equal(2, await db.Usuarios.CountAsync());
+        Assert.Single(await db.Comercios.ToListAsync());
+        Assert.Single(await db.Operadores.ToListAsync());
+        var accesses = await db.AccesosUsuario.OrderBy(x => x.TipoOrganizacion).ToListAsync();
+        Assert.Equal(2, accesses.Count);
+        Assert.All(accesses, access =>
+        {
+            Assert.True(access.Activo);
+            Assert.True(access.EsPropietario);
+        });
+
+        foreach (var (scope, roleCode) in new[]
+        {
+            (TipoAccesoUsuario.Comercio, initial.ComercioRolCodigo!),
+            (TipoAccesoUsuario.Operador, initial.OperadorRolCodigo!)
+        })
+        {
+            var role = await db.Roles.SingleAsync(x => x.TipoOrganizacion == scope && x.Codigo == roleCode);
+            Assert.True(role.EsProtegidoSistema);
+            var granted = await db.RolesPermisos.Where(x => x.RolId == role.Id)
+                .Join(db.Permisos, grant => grant.PermisoId, permission => permission.Id,
+                    (_, permission) => permission.Codigo)
+                .OrderBy(code => code).ToArrayAsync();
+            Assert.Equal(CatalogoPermisos.Para(scope).Select(x => x.Codigo).Order(), granted);
+        }
+
+        var identityIds = await db.Usuarios.OrderBy(x => x.Email).Select(x => new { x.Email, x.Id, x.PasswordHash }).ToListAsync();
+        var roleCount = await db.Roles.CountAsync();
+        await seeder.SeedAsync();
+        db.ChangeTracker.Clear();
+
+        Assert.Equal(identityIds, await db.Usuarios.OrderBy(x => x.Email).Select(x => new { x.Email, x.Id, x.PasswordHash }).ToListAsync());
+        Assert.Equal(2, await db.AccesosUsuario.CountAsync());
+        Assert.Equal(2, await db.AccesosUsuario.CountAsync(x => x.EsPropietario && x.Activo));
+        Assert.Equal(roleCount, await db.Roles.CountAsync());
+    }
+
+    [Fact]
     public async Task ConfiguredOperatorAdministratorRemainsProtectedAndReceivesEveryOperatorCatalogPermission()
     {
         var database = await postgres.CreateDatabaseAsync();
@@ -100,7 +147,7 @@ public sealed class BootstrapTests(PostgresFixture postgres) : IClassFixture<Pos
         var commerceRole = await db.Roles.SingleAsync(x => x.ComercioId == initial.ComercioId
             && x.Codigo == initial.ComercioRolCodigo);
         Assert.True(administrator.EsProtegidoSistema);
-        Assert.False(commerceRole.EsProtegidoSistema);
+        Assert.True(commerceRole.EsProtegidoSistema);
         var operatorPermissionCodes = await (
             from role in db.Roles
             join grant in db.RolesPermisos on role.Id equals grant.RolId

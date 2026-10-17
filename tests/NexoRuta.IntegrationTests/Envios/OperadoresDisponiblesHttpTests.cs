@@ -13,6 +13,52 @@ namespace NexoRuta.IntegrationTests.Envios;
 
 public sealed class OperadoresDisponiblesHttpTests(PostgresFixture postgres) : IClassFixture<PostgresFixture>
 {
+    [Fact]
+    public async Task SuspendedOperatorsAreHiddenAndManualSelectionCannotCreateShipment()
+    {
+        var database = await postgres.CreateDatabaseAsync();
+        await using (var db = database.CreateDbContext())
+        {
+            await AuthenticationTestData.Seeder(db,
+                new AccesoInicial("owner@example.test", "Active operator", "Test commerce", "operator@example.test"))
+                .SeedAsync();
+            var suspended = new Operador("Suspended operator");
+            suspended.CambiarEstado(EstadoOrganizacion.Suspendida);
+            db.Operadores.Add(suspended);
+            await db.SaveChangesAsync();
+        }
+        using var api = new IntegrationApiFactory(database, settings: new Dictionary<string, string?>
+        {
+            ["DatabaseInitialization:SeedData"] = "false"
+        });
+        using var client = api.CreateHttpClient();
+        var commerceToken = await LoginAsync(client, "owner@example.test");
+        using var catalogRequest = new HttpRequestMessage(HttpMethod.Get, "/api/operadores");
+        catalogRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", commerceToken);
+        using var catalogResponse = await client.SendAsync(catalogRequest);
+        Assert.Equal(HttpStatusCode.OK, catalogResponse.StatusCode);
+        var catalog = await catalogResponse.Content.ReadFromJsonAsync<OperadorDisponible[]>();
+        Assert.Equal(new[] { "Active operator" }, catalog!.Select(x => x.Nombre));
+
+        Guid suspendedId;
+        await using (var db = database.CreateDbContext())
+            suspendedId = await db.Operadores.Where(x => x.Estado == EstadoOrganizacion.Suspendida).Select(x => x.Id).SingleAsync();
+        using var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/envios")
+        {
+            Content = JsonContent.Create(new
+            {
+                OperadorId = suspendedId, DestinatarioNombre = "Ana", Direccion = "Rivera 123", CodigoBulto = "B-001",
+                PesoGramos = 100m, LargoCentimetros = 10m, AnchoCentimetros = 10m, AltoCentimetros = 10m
+            })
+        };
+        createRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", commerceToken);
+        using var rejected = await client.SendAsync(createRequest);
+        Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+        await using var verify = database.CreateDbContext();
+        Assert.Empty(await verify.Envios.ToListAsync());
+        Assert.Empty(await verify.OutboxMessages.ToListAsync());
+    }
+
     [Theory]
     [InlineData("api/operadores")]
     [InlineData("api/comercio/operadores")]

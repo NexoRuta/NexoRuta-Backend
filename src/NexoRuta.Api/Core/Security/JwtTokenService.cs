@@ -34,6 +34,8 @@ public sealed class JwtTokenService(JwtConfiguracion config)
             claims.Add(new Claim(AccesoSeleccionado.ClaimAmbito, "identidad"));
         if (sesion.EsPlataforma)
             claims.Add(new Claim(AccesoSeleccionado.ClaimAmbito, "plataforma"));
+        if (sesion.OrganizacionSuspendida)
+            claims.Add(new Claim(AccesoSeleccionado.ClaimAmbito, AccesoSeleccionado.ClaimSesionSuspendida));
 
         var token = new JwtSecurityToken(
             issuer: config.Issuer,

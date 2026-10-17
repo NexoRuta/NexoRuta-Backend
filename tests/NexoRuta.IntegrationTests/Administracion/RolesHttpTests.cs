@@ -99,8 +99,11 @@ public sealed class RolesHttpTests(PostgresFixture postgres) : IClassFixture<Pos
         var operatorRole = await db.Roles.SingleAsync(x => x.OperadorId != null && x.Codigo == "administrador_operador");
         var commerceRole = await db.Roles.SingleAsync(x => x.Id == commerceAccess.RolId);
         var configurationPermission = await db.Permisos.SingleAsync(x => x.Codigo == "configuracion.gestionar");
-        db.Add(new RolPermiso(commerceRole.Id, configurationPermission.Id));
-        await db.SaveChangesAsync();
+        if (!await db.RolesPermisos.AnyAsync(x => x.RolId == commerceRole.Id && x.PermisoId == configurationPermission.Id))
+        {
+            db.Add(new RolPermiso(commerceRole.Id, configurationPermission.Id));
+            await db.SaveChangesAsync();
+        }
 
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", await Login(client, commerceUser.Email));
         using var listed = await client.GetAsync("/api/roles");

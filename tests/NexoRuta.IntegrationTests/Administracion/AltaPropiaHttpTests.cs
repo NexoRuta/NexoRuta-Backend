@@ -10,6 +10,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using NexoRuta.Application.Administracion.Repositories;
 using NexoRuta.Domain.Administracion;
+using NexoRuta.Infrastructure.Administracion.Repositories;
 using NexoRuta.Infrastructure.Persistence;
 using NexoRuta.IntegrationTests.Fixtures;
 
@@ -103,6 +104,11 @@ public sealed class AltaPropiaHttpTests(PostgresFixture postgres) : IClassFixtur
         var permissions = await (from grant in db.RolesPermisos join permission in db.Permisos on grant.PermisoId equals permission.Id select permission.Codigo).ToListAsync();
         Assert.Equal(CatalogoPermisos.Para(type).Select(x => x.Codigo).Order(), permissions.Order());
         Assert.True((await db.AccesosUsuario.SingleAsync()).Activo);
+        Assert.True((await db.AccesosUsuario.SingleAsync()).EsPropietario);
+        var createdAccess = await db.AccesosUsuario.SingleAsync();
+        var ownership = new EfAccesosUsuarioRepository(db);
+        Assert.True(await ownership.EsPropietarioAsync(userId, createdAccess.Id));
+        Assert.False(await ownership.EsPropietarioAsync(Guid.NewGuid(), createdAccess.Id));
         Assert.Empty(await db.AccesosPlataforma.ToListAsync());
         Assert.Equal(type == TipoAccesoUsuario.Comercio ? 1 : 0, await db.Comercios.CountAsync());
         Assert.Equal(type == TipoAccesoUsuario.Operador ? 1 : 0, await db.Operadores.CountAsync());
@@ -135,6 +141,7 @@ public sealed class AltaPropiaHttpTests(PostgresFixture postgres) : IClassFixtur
         Assert.Equal(1, await final.AccesosUsuario.CountAsync());
         Assert.Equal(1, await final.Roles.CountAsync());
         var access = await final.AccesosUsuario.SingleAsync();
+        Assert.True(access.EsPropietario);
         Assert.Equal(access.RolId, (await final.Roles.SingleAsync()).Id);
         Assert.Equal(CatalogoPermisos.Para(access.TipoOrganizacion).Count, await final.RolesPermisos.CountAsync());
     }
@@ -192,6 +199,7 @@ public sealed class AltaPropiaHttpTests(PostgresFixture postgres) : IClassFixtur
         Assert.Equal(2, await db.Usuarios.CountAsync());
         Assert.Equal(2, await db.AccesosUsuario.CountAsync());
         Assert.All(await db.AccesosUsuario.ToListAsync(), x => Assert.True(x.Activo));
+        Assert.All(await db.AccesosUsuario.ToListAsync(), x => Assert.True(x.EsPropietario));
         Assert.False(db.Database.HasPendingModelChanges());
     }
 
@@ -254,6 +262,70 @@ public sealed class AltaPropiaHttpTests(PostgresFixture postgres) : IClassFixtur
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.PostAsJsonAsync("/api/alta-propia/comercios", new { Nombre = "Denied" })).StatusCode);
         Assert.Empty(await db.AccesosUsuario.ToListAsync());
         Assert.Empty(await db.Comercios.ToListAsync());
+    }
+
+    [Fact]
+    public async Task SelfServiceCommerceOwnerManagesScopedRolesAndEmployeesWithoutEditingOwnPrivileges()
+    {
+        var database = await postgres.CreateDatabaseAsync();
+        using var factory = Factory(database);
+        using var client = factory.CreateHttpClient();
+        Assert.Equal(HttpStatusCode.Created, (await client.PostAsJsonAsync("/api/auth/register", new { Email = "roles-owner@example.test", Password })).StatusCode);
+        await Login(client, "roles-owner@example.test");
+        using var creation = await client.PostAsJsonAsync("/api/alta-propia/comercios", new { Nombre = "Roles commerce" });
+        Assert.Equal(HttpStatusCode.Created, creation.StatusCode);
+        var owner = (await creation.Content.ReadFromJsonAsync<AltaOrganizacion>())!;
+        await Login(client, "roles-owner@example.test");
+        var expected = new[] { "configuracion.gestionar", "envios.consultar", "envios.crear", "usuarios.gestionar" };
+        Assert.Equal(expected, await client.GetFromJsonAsync<string[]>("/api/usuarios/actual/permisos"));
+        var catalog = await client.GetFromJsonAsync<JsonElement>("/api/roles/permisos");
+        Assert.Equal(expected, catalog.EnumerateArray().Select(x => x.GetProperty("codigo").GetString()).Order());
+        using var created = await client.PostAsJsonAsync("/api/roles", new { Codigo = "equipo", Nombre = "Team" });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var roleId = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var grants = new[] { "envios.crear", "envios.consultar" };
+        Assert.Equal(HttpStatusCode.NoContent, (await client.PutAsJsonAsync($"/api/roles/{roleId}/permisos", new { Permisos = grants })).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await client.PutAsJsonAsync($"/api/roles/{roleId}", new { Nombre = "Editable team" })).StatusCode);
+        foreach (var denied in new[] { "envios.gestionar", RolPlataforma.GestionarOrganizaciones })
+            Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync($"/api/roles/{roleId}/permisos", new { Permisos = new[] { denied } })).StatusCode);
+        var roles = await client.GetFromJsonAsync<JsonElement>("/api/roles");
+        var team = roles.EnumerateArray().Single(x => x.GetProperty("id").GetGuid() == roleId);
+        Assert.Equal("Editable team", team.GetProperty("nombre").GetString());
+        Assert.Equal(grants.Order(), team.GetProperty("permisos").EnumerateArray().Select(x => x.GetString()).Order());
+        var ownRole = roles.EnumerateArray().Single(x => x.GetProperty("id").GetGuid() == owner.RolId);
+        Assert.True(ownRole.GetProperty("esPropio").GetBoolean());
+        Assert.True(ownRole.GetProperty("esProtegidoSistema").GetBoolean());
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PutAsJsonAsync($"/api/roles/{owner.RolId}", new { Nombre = "Not allowed" })).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.DeleteAsync($"/api/roles/{owner.RolId}")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PutAsJsonAsync($"/api/roles/{owner.RolId}/permisos", new { Permisos = grants })).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PutAsJsonAsync($"/api/roles/accesos/{owner.AccesoId}", new { RolId = roleId })).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PatchAsJsonAsync($"/api/usuarios/{owner.UsuarioId}/estado", new { Activo = false })).StatusCode);
+        using var employee = await client.PostAsJsonAsync("/api/usuarios", new { Email = "employee-roles@example.test", Password, RolId = roleId });
+        Assert.Equal(HttpStatusCode.Created, employee.StatusCode);
+        var accessId = (await employee.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("accesoId").GetGuid();
+        Assert.Equal(HttpStatusCode.Conflict, (await client.DeleteAsync($"/api/roles/{roleId}")).StatusCode);
+        using var replacement = await client.PostAsJsonAsync("/api/roles", new { Codigo = "consulta", Nombre = "Read only" });
+        Assert.Equal(HttpStatusCode.Created, replacement.StatusCode);
+        var replacementId = (await replacement.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        Assert.Equal(HttpStatusCode.NoContent, (await client.PutAsJsonAsync($"/api/roles/{replacementId}/permisos", new { Permisos = new[] { "envios.consultar" } })).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await client.PutAsJsonAsync($"/api/roles/accesos/{accessId}", new { RolId = replacementId })).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/roles/{roleId}")).StatusCode);
+        await using (var db = database.CreateDbContext())
+        {
+            foreach (var type in new[] { TipoAccesoUsuario.Comercio, TipoAccesoUsuario.Operador })
+            {
+                var foreign = await AuthenticationTestData.PlatformRepository(db).CrearAsync(type, "Other scope", $"other-{type}@example.test", Password, default);
+                Assert.Equal(HttpStatusCode.Forbidden, (await client.PutAsJsonAsync($"/api/roles/{foreign.RolId}/permisos", new { Permisos = grants })).StatusCode);
+                Assert.Equal(HttpStatusCode.Forbidden, (await client.PutAsJsonAsync($"/api/roles/accesos/{foreign.AccesoId}", new { RolId = replacementId })).StatusCode);
+                Assert.DoesNotContain(foreign.RolId.ToString(), await client.GetStringAsync("/api/roles"));
+            }
+        }
+        Assert.Equal(expected, await client.GetFromJsonAsync<string[]>("/api/usuarios/actual/permisos"));
+        await Login(client, "employee-roles@example.test");
+        Assert.Equal(new[] { "envios.consultar" }, await client.GetFromJsonAsync<string[]>("/api/usuarios/actual/permisos"));
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/roles")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/usuarios")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/admin/comercios")).StatusCode);
     }
 
     private static async Task Login(HttpClient client, string email)

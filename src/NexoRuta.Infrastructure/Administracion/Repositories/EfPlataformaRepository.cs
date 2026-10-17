@@ -108,7 +108,7 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, IGeneradorPassw
         var id = operatorEntity?.Id ?? commerceEntity!.Id;
         var role = new Rol(nuevaIdentidad ? "administrador" : "dueno", nuevaIdentidad ? "Administrator" : "Owner", operatorEntity?.Id, commerceEntity?.Id);
         role.ProtegerComoRolSistema();
-        var access = new AccesoUsuario(user.Id, operatorEntity?.Id, commerceEntity?.Id, role);
+        var access = new AccesoUsuario(user.Id, operatorEntity?.Id, commerceEntity?.Id, role, esPropietario: true);
         try
         {
             // Catalog upserts and every organization row belong to the same transaction.
@@ -138,11 +138,13 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, IGeneradorPassw
         return new AltaOrganizacion(new() { Id = id, Nombre = nombre.Trim() }, user.Id, access.Id, role.Id);
     }
 
-    public async Task<PaginaOrganizaciones> ListarAsync(TipoAccesoUsuario tipo, int pagina, int tamanoPagina, CancellationToken ct)
+    public async Task<PaginaOrganizaciones> ListarAsync(TipoAccesoUsuario tipo, EstadoOrganizacion? estado, int pagina, int tamanoPagina, CancellationToken ct)
     {
         if (pagina < 1 || tamanoPagina is < 1 or > 100 || pagina > int.MaxValue / tamanoPagina)
             throw new ArgumentException("Pagina must be positive and tamanoPagina must be between 1 and 100.");
         var query = Consulta(tipo);
+        if (estado is not null)
+            query = query.Where(x => x.Estado == estado.Value.ToString());
         var total = await query.CountAsync(ct);
         var items = await query.OrderBy(x => x.Nombre).ThenBy(x => x.Id)
             .Skip((pagina - 1) * tamanoPagina).Take(tamanoPagina).ToListAsync(ct);
@@ -154,8 +156,8 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, IGeneradorPassw
 
     private IQueryable<OrganizacionAdministrativa> Consulta(TipoAccesoUsuario tipo)
         => tipo == TipoAccesoUsuario.Operador
-            ? db.Operadores.AsNoTracking().Select(x => new OrganizacionAdministrativa { Id = x.Id, Nombre = x.Nombre })
-            : db.Comercios.AsNoTracking().Select(x => new OrganizacionAdministrativa { Id = x.Id, Nombre = x.Nombre });
+            ? db.Operadores.AsNoTracking().Select(x => new OrganizacionAdministrativa { Id = x.Id, Nombre = x.Nombre, Estado = x.Estado.ToString(), Version = x.Version })
+            : db.Comercios.AsNoTracking().Select(x => new OrganizacionAdministrativa { Id = x.Id, Nombre = x.Nombre, Estado = x.Estado.ToString(), Version = x.Version });
 
     private Task<bool> EmailExists(string email, CancellationToken ct)
         => db.Usuarios.AnyAsync(x => x.Email.Trim().ToLower() == email, ct);

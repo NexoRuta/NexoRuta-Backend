@@ -82,6 +82,14 @@ builder.Services.AddHealthChecks().AddCheck<PostgreSqlHealthCheck>("postgres");
 
 builder.Services.AddAuthorization(options =>
 {
+    options.DefaultPolicy = new AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser()
+        .RequireAssertion(context => !context.User.HasClaim(
+            AccesoSeleccionado.ClaimAmbito, AccesoSeleccionado.ClaimSesionSuspendida))
+        .Build();
+    options.AddPolicy("organizacion-suspendida", policy => policy.RequireAuthenticatedUser()
+        .RequireAssertion(context => context.Resource is HttpContext http &&
+            http.Items[typeof(ContextoOrganizacionSuspendida)] is ContextoOrganizacionSuspendida));
     options.AddPolicy("organizacion", policy => policy.RequireAuthenticatedUser()
         .RequireAssertion(context => context.Resource is HttpContext http && http.Items[typeof(ContextoUsuario)] is ContextoUsuario));
     options.AddPolicy(RolPlataforma.GestionarOrganizaciones, policy => policy.RequireAuthenticatedUser()

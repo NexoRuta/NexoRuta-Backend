@@ -1,4 +1,6 @@
 
+using NexoRuta.Domain.Administracion;
+
 namespace NexoRuta.Application.Administracion.Results;
 
 public sealed record SesionIniciada(
@@ -6,7 +8,9 @@ public sealed record SesionIniciada(
     Guid? AccesoId,
     string Email,
     long VersionSesion,
-    bool EsPlataforma = false)
+    bool EsPlataforma = false,
+    TipoAccesoUsuario? TipoOrganizacion = null,
+    bool OrganizacionSuspendida = false)
 {
     public bool SinOrganizacion => AccesoId is null && !EsPlataforma;
 }

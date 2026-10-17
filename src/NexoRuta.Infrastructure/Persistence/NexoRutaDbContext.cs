@@ -18,6 +18,9 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
     public DbSet<Comercio> Comercios => Set<Comercio>();
     public DbSet<Usuario> Usuarios => Set<Usuario>();
     public DbSet<AccesoUsuario> AccesosUsuario => Set<AccesoUsuario>();
+    public DbSet<SolicitudBajaOrganizacion> SolicitudesBajaOrganizacion => Set<SolicitudBajaOrganizacion>();
+    public DbSet<SolicitudReactivacionOrganizacion> SolicitudesReactivacionOrganizacion => Set<SolicitudReactivacionOrganizacion>();
+    public DbSet<CambioEstadoOrganizacion> CambiosEstadoOrganizacion => Set<CambioEstadoOrganizacion>();
     public DbSet<Destinatario> Destinatarios => Set<Destinatario>();
     public DbSet<Direccion> Direcciones => Set<Direccion>();
     public DbSet<Envio> Envios => Set<Envio>();
@@ -65,6 +68,9 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
             entity.Property<bool>("BootstrapCompletado").HasDefaultValue(false);
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Nombre).HasMaxLength(160).IsRequired();
+            entity.Property(x => x.Estado).HasConversion<string>().HasMaxLength(20)
+                .HasDefaultValue(EstadoOrganizacion.Activa).IsRequired();
+            entity.Property(x => x.Version).HasDefaultValue(0L).IsConcurrencyToken().ValueGeneratedNever();
         });
 
         modelBuilder.Entity<Comercio>(entity =>
@@ -73,6 +79,89 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
             entity.Property<bool>("BootstrapCompletado").HasDefaultValue(false);
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Nombre).HasMaxLength(160).IsRequired();
+            entity.Property(x => x.Estado).HasConversion<string>().HasMaxLength(20)
+                .HasDefaultValue(EstadoOrganizacion.Activa).IsRequired();
+            entity.Property(x => x.Version).HasDefaultValue(0L).IsConcurrencyToken().ValueGeneratedNever();
+        });
+
+        modelBuilder.Entity<SolicitudBajaOrganizacion>(entity =>
+        {
+            entity.ToTable("SolicitudesBajaOrganizacion", table =>
+            {
+                table.HasCheckConstraint("CK_SolicitudesBajaOrganizacion_Organizacion",
+                    "(\"OperadorId\" IS NULL) <> (\"ComercioId\" IS NULL)");
+                table.HasCheckConstraint("CK_SolicitudesBajaOrganizacion_Resolucion",
+                    "((\"Estado\" = 'Pendiente' AND \"ResueltaPorUsuarioId\" IS NULL AND \"ResueltaEnUtc\" IS NULL AND \"MotivoResolucion\" IS NULL) OR (\"Estado\" IN ('Aprobada', 'Rechazada') AND \"ResueltaPorUsuarioId\" IS NOT NULL AND \"ResueltaEnUtc\" IS NOT NULL AND \"MotivoResolucion\" IS NOT NULL))");
+            });
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).ValueGeneratedNever();
+            entity.Property(x => x.TipoOrganizacion).HasConversion<string>().HasMaxLength(20)
+                .HasComputedColumnSql("CASE WHEN \"OperadorId\" IS NOT NULL THEN 'Operador' ELSE 'Comercio' END", stored: true)
+                .ValueGeneratedOnAdd().Metadata.SetBeforeSaveBehavior(PropertySaveBehavior.Ignore);
+            entity.Property(x => x.OrganizacionId).HasComputedColumnSql("COALESCE(\"OperadorId\", \"ComercioId\")", stored: true)
+                .ValueGeneratedOnAdd().Metadata.SetBeforeSaveBehavior(PropertySaveBehavior.Ignore);
+            entity.Property(x => x.Estado).HasConversion<string>().HasMaxLength(20)
+                .HasDefaultValue(EstadoSolicitudBaja.Pendiente).IsRequired();
+            entity.Property(x => x.Motivo).HasMaxLength(2000).IsRequired();
+            entity.Property(x => x.MotivoResolucion).HasMaxLength(2000);
+            entity.Property(x => x.Version).HasDefaultValue(0L).IsConcurrencyToken().ValueGeneratedNever();
+            entity.HasIndex(x => new { x.TipoOrganizacion, x.OrganizacionId }).IsUnique()
+                .HasFilter("\"Estado\" = 'Pendiente'").HasDatabaseName("UX_SolicitudesBaja_Pendiente");
+            entity.HasOne<Usuario>().WithMany().HasForeignKey(x => x.SolicitadaPorUsuarioId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Usuario>().WithMany().HasForeignKey(x => x.ResueltaPorUsuarioId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Operador>().WithMany().HasForeignKey(x => x.OperadorId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Comercio>().WithMany().HasForeignKey(x => x.ComercioId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SolicitudReactivacionOrganizacion>(entity =>
+        {
+            entity.ToTable("SolicitudesReactivacionOrganizacion", table =>
+            {
+                table.HasCheckConstraint("CK_SolicitudesReactivacionOrganizacion_Organizacion",
+                    "(\"OperadorId\" IS NULL) <> (\"ComercioId\" IS NULL)");
+                table.HasCheckConstraint("CK_SolicitudesReactivacionOrganizacion_Resolucion",
+                    "((\"Estado\" = 'Pendiente' AND \"ResueltaPorUsuarioId\" IS NULL AND \"ResueltaEnUtc\" IS NULL AND \"MotivoResolucion\" IS NULL) OR (\"Estado\" IN ('Aprobada', 'Rechazada', 'AtendidaPorSoporte') AND \"ResueltaPorUsuarioId\" IS NOT NULL AND \"ResueltaEnUtc\" IS NOT NULL AND \"MotivoResolucion\" IS NOT NULL))");
+            });
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).ValueGeneratedNever();
+            entity.Property(x => x.TipoOrganizacion).HasConversion<string>().HasMaxLength(20)
+                .HasComputedColumnSql("CASE WHEN \"OperadorId\" IS NOT NULL THEN 'Operador' ELSE 'Comercio' END", stored: true)
+                .ValueGeneratedOnAdd().Metadata.SetBeforeSaveBehavior(PropertySaveBehavior.Ignore);
+            entity.Property(x => x.OrganizacionId).HasComputedColumnSql("COALESCE(\"OperadorId\", \"ComercioId\")", stored: true)
+                .ValueGeneratedOnAdd().Metadata.SetBeforeSaveBehavior(PropertySaveBehavior.Ignore);
+            entity.Property(x => x.Estado).HasConversion<string>().HasMaxLength(20)
+                .HasDefaultValue(EstadoSolicitudReactivacion.Pendiente).IsRequired();
+            entity.Property(x => x.Motivo).HasMaxLength(2000).IsRequired();
+            entity.Property(x => x.MotivoResolucion).HasMaxLength(2000);
+            entity.Property(x => x.Version).HasDefaultValue(0L).IsConcurrencyToken().ValueGeneratedNever();
+            entity.HasIndex(x => new { x.TipoOrganizacion, x.OrganizacionId }).IsUnique()
+                .HasFilter("\"Estado\" = 'Pendiente'").HasDatabaseName("UX_SolicitudesReactivacion_Pendiente");
+            entity.HasOne<Usuario>().WithMany().HasForeignKey(x => x.SolicitadaPorUsuarioId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Usuario>().WithMany().HasForeignKey(x => x.ResueltaPorUsuarioId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Operador>().WithMany().HasForeignKey(x => x.OperadorId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Comercio>().WithMany().HasForeignKey(x => x.ComercioId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<CambioEstadoOrganizacion>(entity =>
+        {
+            entity.ToTable("CambiosEstadoOrganizacion", table =>
+                table.HasCheckConstraint("CK_CambiosEstadoOrganizacion_Organizacion",
+                    "(\"OperadorId\" IS NULL) <> (\"ComercioId\" IS NULL)"));
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).ValueGeneratedNever();
+            entity.Property(x => x.TipoOrganizacion).HasConversion<string>().HasMaxLength(20)
+                .HasComputedColumnSql("CASE WHEN \"OperadorId\" IS NOT NULL THEN 'Operador' ELSE 'Comercio' END", stored: true)
+                .ValueGeneratedOnAdd().Metadata.SetBeforeSaveBehavior(PropertySaveBehavior.Ignore);
+            entity.Property(x => x.OrganizacionId).HasComputedColumnSql("COALESCE(\"OperadorId\", \"ComercioId\")", stored: true)
+                .ValueGeneratedOnAdd().Metadata.SetBeforeSaveBehavior(PropertySaveBehavior.Ignore);
+            entity.Property(x => x.EstadoAnterior).HasConversion<string>().HasMaxLength(20).IsRequired();
+            entity.Property(x => x.EstadoNuevo).HasConversion<string>().HasMaxLength(20).IsRequired();
+            entity.Property(x => x.Motivo).HasMaxLength(2000).IsRequired();
+            entity.HasIndex(x => new { x.TipoOrganizacion, x.OrganizacionId, x.OcurridoEnUtc });
+            entity.HasOne<Usuario>().WithMany().HasForeignKey(x => x.ActorUsuarioId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<SolicitudBajaOrganizacion>().WithMany().HasForeignKey(x => x.SolicitudBajaId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Operador>().WithMany().HasForeignKey(x => x.OperadorId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Comercio>().WithMany().HasForeignKey(x => x.ComercioId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<Usuario>(entity =>
@@ -97,8 +186,8 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
 
             entity.HasKey(x => x.Id);
             entity.Property(x => x.TipoOrganizacion).HasConversion<string>().HasMaxLength(20).HasComputedColumnSql("CASE WHEN \"OperadorId\" IS NOT NULL THEN 'Operador' ELSE 'Comercio' END", stored: true).ValueGeneratedOnAdd().Metadata.SetBeforeSaveBehavior(PropertySaveBehavior.Ignore);
-            entity.Property<bool?>("EsPropietario"); // Historical rollback only; never authorization.
             entity.Property(x => x.OrganizacionId).HasComputedColumnSql("COALESCE(\"OperadorId\", \"ComercioId\")", stored: true).ValueGeneratedOnAdd().Metadata.SetBeforeSaveBehavior(PropertySaveBehavior.Ignore);
+            entity.Property(x => x.EsPropietario).HasDefaultValue(false).ValueGeneratedNever().IsRequired();
             entity.Property(x => x.Activo)
                 .HasDefaultValue(true)
                 .IsRequired();
@@ -107,6 +196,9 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
                 .IsConcurrencyToken();
             entity.HasIndex(x => x.UsuarioId)
                 .IsUnique();
+            entity.HasIndex(x => new { x.TipoOrganizacion, x.OrganizacionId })
+                .IsUnique()
+                .HasFilter("\"EsPropietario\" = TRUE");
 
             entity.HasOne<Usuario>()
                 .WithMany()

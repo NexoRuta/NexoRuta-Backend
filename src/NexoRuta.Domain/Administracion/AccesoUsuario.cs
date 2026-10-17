@@ -16,13 +16,16 @@ public sealed class AccesoUsuario
 
     public bool Activo { get; private set; } = true;
 
+    public bool EsPropietario { get; private set; }
+
     public long VersionSesion { get; private set; }
 
     public AccesoUsuario(
         Guid usuarioId,
         Guid? operadorId,
         Guid? comercioId,
-        Rol? rol = null)
+        Rol? rol = null,
+        bool esPropietario = false)
     {
         if (usuarioId == Guid.Empty)
             throw new ArgumentException(
@@ -39,6 +42,7 @@ public sealed class AccesoUsuario
         UsuarioId = usuarioId;
         OperadorId = operadorId;
         ComercioId = comercioId;
+        EsPropietario = esPropietario;
 
         OrganizacionId = (operadorId ?? comercioId)!.Value;
         TipoOrganizacion = operadorId.HasValue ? TipoAccesoUsuario.Operador : TipoAccesoUsuario.Comercio;

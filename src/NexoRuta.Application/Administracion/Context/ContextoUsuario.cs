@@ -15,7 +15,8 @@ public sealed record ContextoUsuario(
     Guid RolId,
     string RolCodigo,
     [property: System.Text.Json.Serialization.JsonIgnore]
-    long VersionSesion = 0)
+    long VersionSesion = 0,
+    EstadoOrganizacion Estado = EstadoOrganizacion.Activa)
 {
     public TipoAccesoUsuario TipoAcceso => ComercioId.HasValue
         ? TipoAccesoUsuario.Comercio

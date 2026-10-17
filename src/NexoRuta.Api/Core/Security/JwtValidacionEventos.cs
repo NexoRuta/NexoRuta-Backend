@@ -65,7 +65,7 @@ public sealed class JwtValidacionEventos(
             context.HttpContext.Items[typeof(ContextoPlataforma)] = platformAccess;
             return;
         }
-        if (ambito is not null)
+        if (ambito is not null && ambito != AccesoSeleccionado.ClaimSesionSuspendida)
         {
             context.Fail("Invalid authentication scope.");
             return;
@@ -81,6 +81,31 @@ public sealed class JwtValidacionEventos(
             acceso.VersionSesion != versionToken)
         {
             context.Fail("La sesión ya no está disponible.");
+            return;
+        }
+
+        if (ambito == AccesoSeleccionado.ClaimSesionSuspendida)
+        {
+            if (acceso.Estado != NexoRuta.Domain.Administracion.EstadoOrganizacion.Suspendida)
+            {
+                context.Fail("La organización ya no está suspendida. Ingresá nuevamente.");
+                return;
+            }
+            var organizationId = acceso.OperadorId ?? acceso.ComercioId;
+            if (organizationId is null)
+            {
+                context.Fail("Restricted organization context is invalid.");
+                return;
+            }
+            context.HttpContext.Items[typeof(ContextoOrganizacionSuspendida)] = new ContextoOrganizacionSuspendida(
+                acceso.UsuarioId, acceso.AccesoId, organizationId.Value, acceso.TipoAcceso,
+                acceso.OperadorId.HasValue ? acceso.OperadorNombre! : acceso.ComercioNombre!, acceso.VersionSesion);
+            return;
+        }
+
+        if (acceso.Estado == NexoRuta.Domain.Administracion.EstadoOrganizacion.Suspendida)
+        {
+            context.Fail("La organización está suspendida.");
             return;
         }
 

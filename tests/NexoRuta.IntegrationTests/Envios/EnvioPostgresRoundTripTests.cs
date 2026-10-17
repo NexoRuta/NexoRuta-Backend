@@ -2,6 +2,7 @@ using NexoRuta.IntegrationTests.Fixtures;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using NexoRuta.Application.Administracion.Dtos;
@@ -19,6 +20,7 @@ using NexoRuta.Infrastructure.Administracion.Repositories;
 using NexoRuta.Infrastructure.Envios.Repositories;
 using NexoRuta.Infrastructure.Persistence;
 using Npgsql;
+using System.Data.Common;
 
 namespace NexoRuta.IntegrationTests.Envios;
 
@@ -34,6 +36,65 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
     }
 
     public Task DisposeAsync() => Task.CompletedTask;
+
+    [Fact]
+    public async Task SuspensionConfirmedBeforeShipmentLockPreventsNewShipmentAndOutboxRows()
+    {
+        var accessData = Datos();
+        await using (var seed = new NexoRutaDbContext(options))
+            await AuthenticationTestData.Seeder(seed, accessData).SeedAsync();
+        Guid commerceId;
+        Guid operatorId;
+        Guid userId;
+        await using (var seed = new NexoRutaDbContext(options))
+        {
+            commerceId = await seed.Comercios.Select(x => x.Id).SingleAsync();
+            operatorId = await seed.Operadores.Select(x => x.Id).SingleAsync();
+            userId = await seed.AccesosUsuario.Where(x => x.ComercioId != null).Select(x => x.UsuarioId).SingleAsync();
+        }
+
+        await using var suspension = new NexoRutaDbContext(options);
+        await using var transaction = await suspension.Database.BeginTransactionAsync();
+        var commerce = await suspension.Comercios.SingleAsync(x => x.Id == commerceId);
+        commerce.CambiarEstado(EstadoOrganizacion.Suspendida);
+        await suspension.SaveChangesAsync();
+
+        var lockObserver = new ShipmentLockObserver();
+        var optionsWithObserver = new DbContextOptionsBuilder<NexoRutaDbContext>()
+            .UseNpgsql(suspension.Database.GetConnectionString())
+            .AddInterceptors(lockObserver)
+            .Options;
+        await using var shipmentDb = new NexoRutaDbContext(optionsWithObserver);
+        var recipient = new Destinatario(operatorId, "Test recipient");
+        var address = new Direccion(operatorId, "Test address");
+        var shipment = new Envio(operatorId, commerceId, userId, recipient.Id, address.Id);
+        var parcel = new Bulto(operatorId, shipment.Id, "RACE-1", 100m, 10m, 10m, 10m);
+        var save = new EfEnviosRepository(shipmentDb).GuardarAsync(shipment, recipient, address, parcel);
+        await lockObserver.LockStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(save.IsCompleted);
+
+        await transaction.CommitAsync();
+        await Assert.ThrowsAsync<OrganizacionSuspendidaException>(() => save);
+        await using var verify = new NexoRutaDbContext(options);
+        Assert.Empty(await verify.Envios.ToListAsync());
+        Assert.Empty(await verify.OutboxMessages.ToListAsync());
+        Assert.Empty(await verify.Destinatarios.ToListAsync());
+        Assert.Empty(await verify.Direcciones.ToListAsync());
+    }
+
+    private sealed class ShipmentLockObserver : DbCommandInterceptor
+    {
+        public TaskCompletionSource LockStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.Contains("FOR UPDATE", StringComparison.Ordinal))
+                LockStarted.TrySetResult();
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
+    }
 
     [Fact]
     public async Task Repositorios_ConsultanEmpresasSinUsuariosNiEnvios()
@@ -228,6 +289,12 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         Assert.Equal(1, await db.Comercios.CountAsync());
         Assert.Equal(1, await db.Operadores.CountAsync());
         Assert.Equal(2, await db.AccesosUsuario.CountAsync());
+        var suspendedCommerce = await db.Comercios.SingleAsync(x => x.Id == initial.ComercioId);
+        suspendedCommerce.CambiarEstado(EstadoOrganizacion.Suspendida);
+        await db.SaveChangesAsync();
+        await AuthenticationTestData.Seeder(db, initial).SeedAsync();
+        Assert.Equal(EstadoOrganizacion.Suspendida,
+            (await db.Comercios.SingleAsync(x => x.Id == initial.ComercioId)).Estado);
     }
 
     [Fact]
@@ -324,7 +391,7 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         Assert.Null((await db.Usuarios.SingleAsync(x => x.Id == usuario.Id)).PasswordHash);
         Assert.Null(await new EfAccesosUsuarioRepository(db).ObtenerAsync(cuentaAnterior));
         Assert.Equal(envio.Id, await db.Database.SqlQueryRaw<Guid>("SELECT \"Id\" AS \"Value\" FROM \"Envios\"").SingleAsync());
-        Assert.False(db.Entry(historical).Property<bool?>("EsPropietario").CurrentValue);
+        Assert.False(historical.EsPropietario);
 
         await migrator.MigrateAsync(anterior);
         // ShipmentCommerce rollback reconstructs shipment-backed links only. No synthetic operator account is seeded.
@@ -350,6 +417,11 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         await AuthenticationTestData.Seeder(db, inicial).SeedAsync();
         var cuenta = await Cuenta(db, inicial.UsuarioEmail, TipoAccesoUsuario.Comercio);
         var operador = await Cuenta(db, inicial.OperadorUsuarioEmail, TipoAccesoUsuario.Operador);
+        // This legacy migration intentionally refuses to discard recorded operator ownership.
+        // The round-trip only exercises shipment-link compatibility, so remove that marker in
+        // this ephemeral fixture before downgrading; production data is never changed here.
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE \"AccesosUsuario\" SET \"EsPropietario\" = FALSE WHERE \"OperadorId\" = {operador.OperadorId}");
         await migrator.MigrateAsync(anterior);
         var vinculo = Guid.CreateVersion7();
         await db.Database.ExecuteSqlInterpolatedAsync(

@@ -1,4 +1,6 @@
 
+using NexoRuta.Domain.Administracion;
+
 namespace NexoRuta.Application.Administracion.Dtos;
 
 public sealed record UsuarioLogin(
@@ -7,4 +9,6 @@ public sealed record UsuarioLogin(
     string Email,
     string PasswordHash,
     long VersionSesion,
-    bool EsPlataforma = false);
+    bool EsPlataforma = false,
+    TipoAccesoUsuario? TipoOrganizacion = null,
+    EstadoOrganizacion? EstadoOrganizacion = null);

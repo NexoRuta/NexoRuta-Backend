@@ -50,6 +50,10 @@ public sealed class EnviosController(
         {
             return BadRequest(new { message = exception.Message });
         }
+        catch (OrganizacionSuspendidaException exception)
+        {
+            return Conflict(new { message = exception.Message });
+        }
         catch (AccesoNoPermitidoException exception)
         {
             return Problem(

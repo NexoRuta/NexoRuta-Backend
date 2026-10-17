@@ -30,14 +30,14 @@ public sealed class OrganizacionesController(IPlataformaRepository plataforma) :
     [HttpGet("operadores")]
     [ProducesResponseType<PaginaOrganizaciones>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public Task<IActionResult> Operadores([FromQuery] int pagina = 1, [FromQuery] int tamanoPagina = 20, CancellationToken ct = default)
-        => Listar(TipoAccesoUsuario.Operador, pagina, tamanoPagina, ct);
+    public Task<IActionResult> Operadores([FromQuery] string? estado, [FromQuery] int pagina = 1, [FromQuery] int tamanoPagina = 20, CancellationToken ct = default)
+        => Listar(TipoAccesoUsuario.Operador, estado, pagina, tamanoPagina, ct);
 
     [HttpGet("comercios")]
     [ProducesResponseType<PaginaOrganizaciones>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public Task<IActionResult> Comercios([FromQuery] int pagina = 1, [FromQuery] int tamanoPagina = 20, CancellationToken ct = default)
-        => Listar(TipoAccesoUsuario.Comercio, pagina, tamanoPagina, ct);
+    public Task<IActionResult> Comercios([FromQuery] string? estado, [FromQuery] int pagina = 1, [FromQuery] int tamanoPagina = 20, CancellationToken ct = default)
+        => Listar(TipoAccesoUsuario.Comercio, estado, pagina, tamanoPagina, ct);
 
     [HttpGet("operadores/{id:guid}")]
     [ProducesResponseType<OrganizacionAdministrativa>(StatusCodes.Status200OK)]
@@ -60,9 +60,16 @@ public sealed class OrganizacionesController(IPlataformaRepository plataforma) :
         catch (ArgumentException error) { return BadRequest(new { message = error.Message }); }
     }
 
-    private async Task<IActionResult> Listar(TipoAccesoUsuario tipo, int pagina, int tamano, CancellationToken ct)
+    private async Task<IActionResult> Listar(TipoAccesoUsuario tipo, string? estado, int pagina, int tamano, CancellationToken ct)
     {
-        try { return Ok(await plataforma.ListarAsync(tipo, pagina, tamano, ct)); }
+        EstadoOrganizacion? parsedState = null;
+        if (!string.IsNullOrWhiteSpace(estado))
+        {
+            if (!Enum.TryParse(estado, ignoreCase: false, out EstadoOrganizacion parsed) || !Enum.IsDefined(parsed))
+                return BadRequest(new { message = "El filtro estado debe ser Activa o Suspendida." });
+            parsedState = parsed;
+        }
+        try { return Ok(await plataforma.ListarAsync(tipo, parsedState, pagina, tamano, ct)); }
         catch (ArgumentException error) { return BadRequest(new { message = error.Message }); }
     }
 
