@@ -76,4 +76,6 @@ public sealed class AccesoUsuario
         VersionSesion = checked(VersionSesion + 1);
     }
 
+    public void RevocarSesiones() => VersionSesion = checked(VersionSesion + 1);
+
 }

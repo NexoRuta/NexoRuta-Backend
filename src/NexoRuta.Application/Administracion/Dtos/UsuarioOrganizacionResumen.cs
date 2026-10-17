@@ -8,4 +8,7 @@ public sealed record UsuarioOrganizacionResumen(
     Guid? RolId,
     string? RolCodigo,
     string? RolNombre,
-    bool Activo);
+    bool Activo,
+    long Version = 0,
+    bool RolProtegido = false,
+    bool EsPropietario = false);

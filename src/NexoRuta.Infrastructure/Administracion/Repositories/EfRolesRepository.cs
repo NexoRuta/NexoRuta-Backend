@@ -19,7 +19,8 @@ public sealed class EfRolesRepository(NexoRutaDbContext db) : IRolesRepository
              where grant.RolId == x.Id orderby permission.Codigo select permission.Codigo).ToList())
         {
             EsProtegidoSistema = x.EsProtegidoSistema,
-            EsPropio = x.Id == actor.RolId || db.AccesosUsuario.Any(a => a.UsuarioId == actor.UsuarioId && a.RolId == x.Id)
+            EsPropio = x.Id == actor.RolId || db.AccesosUsuario.Any(a => a.UsuarioId == actor.UsuarioId && a.RolId == x.Id),
+            EsRolPropietario = db.AccesosUsuario.Any(a => a.EsPropietario && a.RolId == x.Id)
         }).ToListAsync(ct);
 
     public async Task<IReadOnlyList<PermisoResumen>> PermisosAsync(ContextoUsuario actor, CancellationToken ct)
@@ -40,7 +41,7 @@ public sealed class EfRolesRepository(NexoRutaDbContext db) : IRolesRepository
         var actorAccesses = await LockActorAccessesAsync(actor.UsuarioId, ct);
         var role = await LockOwnedRoleAsync(actor, id, ct);
         if (role is null) return false;
-        EnsureEditable(actor, actorAccesses, role);
+        await EnsureEditableAsync(actor, actorAccesses, role, ct);
         role.Renombrar(nombre);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
@@ -53,7 +54,7 @@ public sealed class EfRolesRepository(NexoRutaDbContext db) : IRolesRepository
         var actorAccesses = await LockActorAccessesAsync(actor.UsuarioId, ct);
         var role = await LockOwnedRoleAsync(actor, id, ct);
         if (role is null) return false;
-        EnsureEditable(actor, actorAccesses, role);
+        await EnsureEditableAsync(actor, actorAccesses, role, ct);
         if (await db.AccesosUsuario.AnyAsync(x => x.RolId == id, ct))
             throw new InvalidOperationException("An assigned role cannot be deleted.");
         db.RolesPermisos.RemoveRange(await db.RolesPermisos.Where(x => x.RolId == id).ToListAsync(ct));
@@ -69,7 +70,7 @@ public sealed class EfRolesRepository(NexoRutaDbContext db) : IRolesRepository
         var actorAccesses = await LockActorAccessesAsync(actor.UsuarioId, ct);
         var role = await LockOwnedRoleAsync(actor, id, ct);
         if (role is null) return false;
-        EnsureEditable(actor, actorAccesses, role);
+        await EnsureEditableAsync(actor, actorAccesses, role, ct);
         var codes = codigos.Distinct(StringComparer.Ordinal).ToArray();
         var applicableCodes = CatalogoPermisos.Para(actor.TipoAcceso)
             .Select(x => x.Codigo).ToHashSet(StringComparer.Ordinal);
@@ -91,7 +92,8 @@ public sealed class EfRolesRepository(NexoRutaDbContext db) : IRolesRepository
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var access = await LockOwnedAccessAsync(actor, accesoId, ct);
         if (access is null) return false;
-        if (access.UsuarioId == actor.UsuarioId)
+        if (await db.AccesosUsuario.AsNoTracking().AnyAsync(x => x.Id == access.Id && x.EsPropietario, ct) ||
+            access.UsuarioId == actor.UsuarioId)
             throw new AccesoNoPermitidoException();
 
         if (rolId is null)
@@ -143,9 +145,11 @@ public sealed class EfRolesRepository(NexoRutaDbContext db) : IRolesRepository
             FOR UPDATE
             """).SingleOrDefaultAsync(ct);
 
-    private static void EnsureEditable(ContextoUsuario actor, IEnumerable<AccesoUsuario> actorAccesses, Rol role)
+    private async Task EnsureEditableAsync(ContextoUsuario actor, IEnumerable<AccesoUsuario> actorAccesses, Rol role, CancellationToken ct)
     {
         if (role.EsProtegidoSistema || role.Id == actor.RolId || actorAccesses.Any(x => x.RolId == role.Id))
+            throw new AccesoNoPermitidoException();
+        if (await db.AccesosUsuario.AnyAsync(x => x.RolId == role.Id && x.EsPropietario, ct))
             throw new AccesoNoPermitidoException();
     }
 }

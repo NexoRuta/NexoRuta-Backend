@@ -151,11 +151,14 @@ public sealed class PlatformSeederTests(PostgresFixture postgres) : IClassFixtur
         var role = new RolPlataforma();
         var disabledRole = new RolPlataforma();
         var access = new AccesoPlataforma(user, role);
-        db.AddRange(user, role, disabledRole, access);
+        // The context maps the current model; insert the legacy identity with its actual old columns.
+        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Usuarios\" (\"Id\", \"Email\", \"PasswordHash\") VALUES ({user.Id}, {user.Email}, {user.PasswordHash})");
+        db.AddRange(role, disabledRole, access);
         await db.SaveChangesAsync();
         await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE \"RolesPlataforma\" SET \"PuedeGestionarOrganizaciones\" = false WHERE \"Id\" = {disabledRole.Id}");
         await db.Database.MigrateAsync();
         Assert.Equal(user.PasswordHash, (await db.Usuarios.AsNoTracking().SingleAsync()).PasswordHash);
+        Assert.Equal(0, (await db.Usuarios.AsNoTracking().SingleAsync()).Version);
         Assert.Equal(access.AccesoId, (await db.AccesosPlataforma.AsNoTracking().SingleAsync()).AccesoId);
         var grant = await db.RolesPlataformaPermisos.SingleAsync();
         Assert.Equal(role.Id, grant.RolId);

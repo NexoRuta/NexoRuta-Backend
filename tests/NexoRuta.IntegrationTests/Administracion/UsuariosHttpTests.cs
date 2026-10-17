@@ -15,6 +15,222 @@ public sealed class UsuariosHttpTests(PostgresFixture postgres) : IClassFixture<
 {
     private const string NewUserPassword = "New-user-integration-password-2026!";
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task EditingEmployeeEmailRevokesOnlyOnEffectiveChangeAndPreservesAccess(bool operador)
+    {
+        var database = await postgres.CreateDatabaseAsync();
+        using var factory = database.CreateApiFactory();
+        using var client = factory.CreateHttpClient();
+        await using var db = database.CreateDbContext();
+        var owner = await db.AccesosUsuario.SingleAsync(x => operador ? x.OperadorId != null : x.ComercioId != null);
+        var ownerUser = await db.Usuarios.SingleAsync(x => x.Id == owner.UsuarioId);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
+            await LoginAsync(client, ownerUser.Email, AuthenticationTestData.Password));
+        var role = await db.Roles.SingleAsync(x => operador
+            ? x.OperadorId == owner.OperadorId && x.Id != owner.RolId
+            : x.ComercioId == owner.ComercioId && x.Id != owner.RolId);
+        var original = $"employee-{Guid.NewGuid():N}@example.test";
+        using var creation = await client.PostAsJsonAsync("/api/usuarios", new { Email = original, Password = NewUserPassword, RolId = role.Id });
+        Assert.Equal(HttpStatusCode.Created, creation.StatusCode);
+        var employee = (await creation.Content.ReadFromJsonAsync<UsuarioOrganizacionResumen>())!;
+        var passwordHash = (await ReadUserAsync(database, employee.UsuarioId)).PasswordHash;
+        var oldToken = await LoginAsync(client, original, NewUserPassword);
+        var changed = operador ? CreateBoundaryEmail(56).ToUpperInvariant()
+            : $"CHANGED-{Guid.NewGuid():N}@EXAMPLE.TEST";
+
+        using var update = await client.PatchAsJsonAsync($"/api/usuarios/{employee.UsuarioId}/email", new { Email = changed, Version = employee.Version });
+        Assert.Equal(HttpStatusCode.NoContent, update.StatusCode);
+        var after = await ReadUserAsync(database, employee.UsuarioId);
+        Assert.Equal(changed.ToLowerInvariant(), after.Email);
+        Assert.Equal(1, after.Version);
+        Assert.Equal(employee.UsuarioId, after.Id);
+        Assert.Equal(passwordHash, after.PasswordHash);
+        var access = await ReadStateAsync(database, employee.UsuarioId);
+        Assert.Equal((true, 1L), access);
+        await using (var accessCheck = database.CreateDbContext())
+        {
+            var persisted = await accessCheck.AccesosUsuario.SingleAsync(x => x.UsuarioId == employee.UsuarioId);
+            Assert.Equal(role.Id, persisted.RolId);
+            Assert.Equal(owner.OperadorId, persisted.OperadorId);
+            Assert.Equal(owner.ComercioId, persisted.ComercioId);
+            Assert.False(persisted.EsPropietario);
+        }
+        Assert.Equal(HttpStatusCode.Unauthorized, (await GetWithTokenAsync(client, "/api/usuarios/actual", oldToken)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.PostAsJsonAsync("/api/auth/login", new { Email = original, Password = NewUserPassword })).StatusCode);
+        var newToken = await LoginAsync(client, after.Email, NewUserPassword);
+        Assert.Equal(HttpStatusCode.OK, (await GetWithTokenAsync(client, "/api/usuarios/actual", newToken)).StatusCode);
+
+        using var unchanged = await client.PatchAsJsonAsync($"/api/usuarios/{employee.UsuarioId}/email", new { Email = after.Email.ToUpperInvariant(), Version = 1 });
+        Assert.Equal(HttpStatusCode.NoContent, unchanged.StatusCode);
+        Assert.Equal(1, (await ReadUserAsync(database, employee.UsuarioId)).Version);
+        Assert.Equal((true, 1L), await ReadStateAsync(database, employee.UsuarioId));
+        Assert.Equal(HttpStatusCode.OK, (await GetWithTokenAsync(client, "/api/usuarios/actual", newToken)).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await client.PatchAsJsonAsync($"/api/usuarios/{employee.UsuarioId}/email", new { Email = "stale@example.test", Version = 0 })).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PatchAsJsonAsync($"/api/usuarios/{owner.UsuarioId}/email", new { Email = "own@example.test", Version = 0 })).StatusCode);
+    }
+
+    [Fact]
+    public async Task EmailEditRejectsForeignProtectedDuplicateAndInvalidRequests()
+    {
+        var database = await postgres.CreateDatabaseAsync();
+        using var factory = database.CreateApiFactory();
+        using var client = factory.CreateHttpClient();
+        await using var db = database.CreateDbContext();
+        var owner = await AuthenticateOperatorAdminAsync(db, client);
+        var foreign = await db.AccesosUsuario.SingleAsync(x => x.ComercioId != null);
+        var employeeId = await CreateOperatorUserAsync(client, db, owner, $"edit-{Guid.NewGuid():N}@example.test");
+        var path = $"/api/usuarios/{employeeId}/email";
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PatchAsJsonAsync($"/api/usuarios/{foreign.UsuarioId}/email", new { Email = "foreign@example.test", Version = 0 })).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await client.PatchAsJsonAsync(path, new { Email = (await ReadUserAsync(database, foreign.UsuarioId)).Email, Version = 0 })).StatusCode);
+        foreach (var invalid in new object[] { new { Email = "invalid", Version = (long?)0 }, new { Email = "", Version = (long?)0 }, new { Email = new string('a', 255), Version = (long?)0 }, new { Email = "valid@example.test", Version = (long?)null } })
+            Assert.Equal(HttpStatusCode.BadRequest, (await client.PatchAsJsonAsync(path, invalid)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PatchAsJsonAsync(path, new { Email = "valid@example.test", Version = 0, RolId = Guid.NewGuid() })).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PatchAsJsonAsync($"/api/usuarios/{owner.UsuarioId}/email", new { Email = "protected@example.test", Version = 0 })).StatusCode);
+        using var protectedCreation = await client.PostAsJsonAsync("/api/usuarios", new
+        { Email = $"protected-{Guid.NewGuid():N}@example.test", Password = NewUserPassword, RolId = owner.RolId });
+        Assert.Equal(HttpStatusCode.Created, protectedCreation.StatusCode);
+        var protectedUser = (await protectedCreation.Content.ReadFromJsonAsync<UsuarioOrganizacionResumen>())!;
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PatchAsJsonAsync($"/api/usuarios/{protectedUser.UsuarioId}/email", new { Email = "blocked@example.test", Version = 0 })).StatusCode);
+        Assert.Equal(0, (await ReadUserAsync(database, employeeId)).Version);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
+            await LoginAsync(client, (await ReadUserAsync(database, employeeId)).Email, NewUserPassword));
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PatchAsJsonAsync($"/api/usuarios/{protectedUser.UsuarioId}/email",
+            new { Email = "without-permission@example.test", Version = 0 })).StatusCode);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task OwnerAccessAndRoleAreImmutableForAnotherAdminAndTheOwner(bool operador)
+    {
+        var database = await postgres.CreateDatabaseAsync();
+        using var factory = database.CreateApiFactory();
+        using var client = factory.CreateHttpClient();
+        await using var db = database.CreateDbContext();
+        var ownerAccess = await db.AccesosUsuario.SingleAsync(x => x.EsPropietario &&
+            (operador ? x.OperadorId != null : x.ComercioId != null));
+        var owner = await db.Usuarios.SingleAsync(x => x.Id == ownerAccess.UsuarioId);
+        var ownerRoleId = ownerAccess.RolId!.Value;
+        var ownerRole = await db.Roles.SingleAsync(x => x.Id == ownerRoleId);
+        var ownerPermissions = await db.RolesPermisos.Where(x => x.RolId == ownerRoleId)
+            .Select(x => x.PermisoId).Order().ToArrayAsync();
+
+        // The persisted ownership flag, not the system-role marker, protects the account and role.
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE \"Roles\" SET \"EsProtegidoSistema\" = FALSE WHERE \"Id\" = {ownerRoleId}");
+        var managerEmail = $"other-admin-{Guid.NewGuid():N}@example.test";
+        var manager = new Usuario(managerEmail, owner.PasswordHash!);
+        var managerRole = new Rol($"owner-manager-{Guid.NewGuid():N}", "Other administrator",
+            ownerAccess.OperadorId, ownerAccess.ComercioId);
+        var permissions = await db.RolesPermisos.Where(x => x.RolId == ownerRoleId)
+            .Select(x => x.PermisoId).ToListAsync();
+        db.AddRange(manager, managerRole,
+            new AccesoUsuario(manager.Id, ownerAccess.OperadorId, ownerAccess.ComercioId, managerRole));
+        db.AddRange(permissions.Select(id => new RolPermiso(managerRole.Id, id)));
+        await db.SaveChangesAsync();
+
+        var ownerToken = await LoginAsync(client, owner.Email, AuthenticationTestData.Password);
+        var managerToken = await LoginAsync(client, managerEmail, AuthenticationTestData.Password);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", managerToken);
+
+        using (var listing = await client.GetAsync("/api/usuarios"))
+        {
+            Assert.Equal(HttpStatusCode.OK, listing.StatusCode);
+            var rows = await listing.Content.ReadFromJsonAsync<UsuarioOrganizacionResumen[]>();
+            Assert.Contains(rows!, x => x.UsuarioId == owner.Id && x.EsPropietario);
+        }
+        using (var roles = await client.GetAsync("/api/roles"))
+        {
+            Assert.Equal(HttpStatusCode.OK, roles.StatusCode);
+            var rows = await roles.Content.ReadFromJsonAsync<JsonElement[]>();
+            Assert.Contains(rows!, x => x.GetProperty("id").GetGuid() == ownerRoleId &&
+                x.GetProperty("esRolPropietario").GetBoolean());
+        }
+
+        async Task AssertOwnerMutationsRejectedAsync()
+        {
+            using var email = await client.PatchAsJsonAsync($"/api/usuarios/{owner.Id}/email",
+                new { Email = $"changed-{Guid.NewGuid():N}@example.test", Version = owner.Version });
+            using var state = await PatchStateAsync(client, owner.Id, false);
+            using var assignRole = await client.PutAsJsonAsync($"/api/roles/accesos/{ownerAccess.Id}", new { RolId = managerRole.Id });
+            using var removeRole = await client.PutAsJsonAsync($"/api/roles/accesos/{ownerAccess.Id}", new { RolId = (Guid?)null });
+            using var renameRole = await client.PutAsJsonAsync($"/api/roles/{ownerRoleId}", new { Nombre = "Changed owner role" });
+            using var deleteRole = await client.DeleteAsync($"/api/roles/{ownerRoleId}");
+            using var changePermissions = await client.PutAsJsonAsync($"/api/roles/{ownerRoleId}/permisos",
+                new { Permisos = Array.Empty<string>() });
+            Assert.All(new[] { email.StatusCode, state.StatusCode, assignRole.StatusCode,
+                removeRole.StatusCode, renameRole.StatusCode, deleteRole.StatusCode,
+                changePermissions.StatusCode }, status => Assert.Equal(HttpStatusCode.Forbidden, status));
+        }
+
+        await AssertOwnerMutationsRejectedAsync();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+        await AssertOwnerMutationsRejectedAsync();
+
+        await using (var verification = database.CreateDbContext())
+        {
+            var actualOwner = await verification.Usuarios.AsNoTracking().SingleAsync(x => x.Id == owner.Id);
+            var actualAccess = await verification.AccesosUsuario.AsNoTracking().SingleAsync(x => x.Id == ownerAccess.Id);
+            var actualRole = await verification.Roles.AsNoTracking().SingleAsync(x => x.Id == ownerRoleId);
+            var actualPermissions = await verification.RolesPermisos.Where(x => x.RolId == ownerRoleId)
+                .Select(x => x.PermisoId).Order().ToArrayAsync();
+            Assert.Equal(owner.Email, actualOwner.Email);
+            Assert.Equal(owner.Version, actualOwner.Version);
+            Assert.Equal(ownerAccess.Activo, actualAccess.Activo);
+            Assert.Equal(ownerAccess.RolId, actualAccess.RolId);
+            Assert.Equal(ownerAccess.EsPropietario, actualAccess.EsPropietario);
+            Assert.Equal(ownerAccess.VersionSesion, actualAccess.VersionSesion);
+            Assert.Equal(ownerRole.Codigo, actualRole.Codigo);
+            Assert.Equal(ownerRole.Nombre, actualRole.Nombre);
+            Assert.Equal(ownerPermissions, actualPermissions);
+        }
+        Assert.Equal(HttpStatusCode.OK, (await GetWithTokenAsync(client, "/api/usuarios/actual", ownerToken)).StatusCode);
+
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", managerToken);
+        var employeeEmail = $"employee-{Guid.NewGuid():N}@example.test";
+        var employeeRole = await db.Roles.Where(x => x.OperadorId == ownerAccess.OperadorId &&
+            x.ComercioId == ownerAccess.ComercioId && x.Id != ownerRoleId).OrderBy(x => x.Codigo).FirstAsync();
+        using var created = await client.PostAsJsonAsync("/api/usuarios", new
+        { Email = employeeEmail, Password = NewUserPassword, RolId = employeeRole.Id });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var employee = (await created.Content.ReadFromJsonAsync<UsuarioOrganizacionResumen>())!;
+        using var emailChange = await client.PatchAsJsonAsync($"/api/usuarios/{employee.UsuarioId}/email",
+            new { Email = $"changed-{Guid.NewGuid():N}@example.test", Version = employee.Version });
+        using var roleChange = await client.PutAsJsonAsync($"/api/roles/accesos/{employee.AccesoId}",
+            new { RolId = managerRole.Id });
+        using var stateChange = await PatchStateAsync(client, employee.UsuarioId, false);
+        Assert.Equal(HttpStatusCode.NoContent, emailChange.StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, roleChange.StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, stateChange.StatusCode);
+    }
+
+    [Fact]
+    public async Task ConcurrentEmailEditsHaveOneWinnerAndNoPartialRevocation()
+    {
+        var database = await postgres.CreateDatabaseAsync();
+        using var factory = database.CreateApiFactory();
+        using var client = factory.CreateHttpClient();
+        await using var db = database.CreateDbContext();
+        var owner = await AuthenticateOperatorAdminAsync(db, client);
+        var first = await CreateOperatorUserAsync(client, db, owner, $"first-{Guid.NewGuid():N}@example.test");
+        var second = await CreateOperatorUserAsync(client, db, owner, $"second-{Guid.NewGuid():N}@example.test");
+        var shared = $"shared-{Guid.NewGuid():N}@example.test";
+        var responses = await Task.WhenAll(
+            client.PatchAsJsonAsync($"/api/usuarios/{first}/email", new { Email = shared, Version = 0 }),
+            client.PatchAsJsonAsync($"/api/usuarios/{second}/email", new { Email = shared, Version = 0 }));
+        using (responses[0]) using (responses[1])
+        {
+            Assert.Single(responses, x => x.StatusCode == HttpStatusCode.NoContent);
+            Assert.Single(responses, x => x.StatusCode == HttpStatusCode.Conflict);
+        }
+        await using var check = database.CreateDbContext();
+        Assert.Single(await check.Usuarios.Where(x => x.Email == shared).ToListAsync());
+        var accesses = await check.AccesosUsuario.Where(x => x.UsuarioId == first || x.UsuarioId == second).ToListAsync();
+        Assert.Equal(1, accesses.Sum(x => x.VersionSesion));
+    }
+
     [Fact]
     public async Task LoginAndJwtFollowUserStateAndVersionChangesOnlyOnTransitions()
     {

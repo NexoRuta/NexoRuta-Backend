@@ -43,7 +43,10 @@ public sealed class EfUsuariosOrganizacionRepository(
                 acceso.RolId,
                 rol == null ? null : rol.Codigo,
                 rol == null ? null : rol.Nombre,
-                acceso.Activo)
+                acceso.Activo,
+                usuario.Version,
+                rol != null && rol.EsProtegidoSistema,
+                acceso.EsPropietario)
         ).ToListAsync(cancellationToken);
     }
 
@@ -92,6 +95,15 @@ public sealed class EfUsuariosOrganizacionRepository(
                 "La organización del usuario no es válida.");
         }
 
+        var esPropietario = await db.AccesosUsuario.AsNoTracking().AnyAsync(
+            x => x.UsuarioId == usuarioId
+                && x.OperadorId == actor.OperadorId
+                && x.ComercioId == actor.ComercioId
+                && x.EsPropietario,
+            cancellationToken);
+        if (esPropietario)
+            throw new AccesoNoPermitidoException();
+
         var acceso = await db.AccesosUsuario.SingleOrDefaultAsync(
             x => x.UsuarioId == usuarioId
                 && x.OperadorId == actor.OperadorId
@@ -101,10 +113,54 @@ public sealed class EfUsuariosOrganizacionRepository(
         if (acceso is null)
             return false;
 
+        if (acceso.EsPropietario)
+            throw new AccesoNoPermitidoException();
+
         acceso.CambiarEstado(activo);
 
         await db.SaveChangesAsync(cancellationToken);
 
+        return true;
+    }
+
+    public async Task<bool> CambiarEmailAsync(
+        ContextoUsuario actor, Guid usuarioId, string emailNormalizado,
+        long version, CancellationToken cancellationToken = default)
+    {
+        if (actor.OperadorId.HasValue == actor.ComercioId.HasValue)
+            throw new AccesoNoPermitidoException();
+
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var acceso = await db.AccesosUsuario.FromSqlInterpolated($"""
+            SELECT * FROM "AccesosUsuario"
+            WHERE "UsuarioId" = {usuarioId}
+              AND "OperadorId" IS NOT DISTINCT FROM {actor.OperadorId}
+              AND "ComercioId" IS NOT DISTINCT FROM {actor.ComercioId}
+            FOR UPDATE
+            """).SingleOrDefaultAsync(cancellationToken);
+        if (acceso is null) return false;
+        await db.Entry(acceso).ReloadAsync(cancellationToken);
+        if (acceso.EsPropietario || acceso.UsuarioId == actor.UsuarioId ||
+            await db.Roles.AnyAsync(x => x.Id == acceso.RolId && x.EsProtegidoSistema, cancellationToken))
+            throw new AccesoNoPermitidoException();
+
+        var usuario = await db.Usuarios.SingleAsync(x => x.Id == usuarioId, cancellationToken);
+        if (usuario.Version != version)
+            throw new DbUpdateConcurrencyException("El correo cambió durante la operación. Recargá e intentá nuevamente.");
+        if (usuario.Email.Trim().ToLowerInvariant() == emailNormalizado) return true;
+        usuario.CambiarEmail(emailNormalizado);
+
+        acceso.RevocarSesiones();
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is Npgsql.PostgresException
+            { SqlState: Npgsql.PostgresErrorCodes.UniqueViolation })
+        {
+            throw new CorreoYaRegistradoException();
+        }
         return true;
     }
 

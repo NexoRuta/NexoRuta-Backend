@@ -171,6 +171,7 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
             entity.Property(x => x.PasswordHash)
                 .HasMaxLength(1024);
             entity.Property(x => x.Email).HasMaxLength(254).IsRequired();
+            entity.Property(x => x.Version).HasDefaultValue(0L).IsConcurrencyToken();
             entity.HasIndex(x => x.Email).IsUnique();
         });
 

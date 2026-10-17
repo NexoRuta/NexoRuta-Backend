@@ -300,19 +300,21 @@ public sealed class RolesHttpTests(PostgresFixture postgres) : IClassFixture<Pos
         using var actorClient = factory.CreateHttpClient();
         using var otherAdminClient = factory.CreateHttpClient();
         await using var db = database.CreateDbContext();
-        var actorAccess = await db.AccesosUsuario.SingleAsync(x => x.OperadorId != null);
-        var actorUser = await db.Usuarios.SingleAsync(x => x.Id == actorAccess.UsuarioId);
-        var systemRole = await db.Roles.SingleAsync(x => x.Id == actorAccess.RolId);
+        var ownerAccess = await db.AccesosUsuario.SingleAsync(x => x.OperadorId != null && x.EsPropietario);
+        var systemRole = await db.Roles.SingleAsync(x => x.Id == ownerAccess.RolId);
         var systemGrants = await db.RolesPermisos.Where(x => x.RolId == systemRole.Id).Select(x => x.PermisoId).ToListAsync();
-        var actorRole = new Rol("race-actor-admin", "Race actor admin", actorAccess.OperadorId, null);
-        var replacementRole = new Rol("race-replacement", "Replacement", actorAccess.OperadorId, null);
-        var otherAdminRole = new Rol("race-other-admin", "Other admin", actorAccess.OperadorId, null);
+        var actorRole = new Rol("race-actor-admin", "Race actor admin", ownerAccess.OperadorId, null);
+        var replacementRole = new Rol("race-replacement", "Replacement", ownerAccess.OperadorId, null);
+        var otherAdminRole = new Rol("race-other-admin", "Other admin", ownerAccess.OperadorId, null);
         db.AddRange(actorRole, replacementRole, otherAdminRole);
         db.AddRange(systemGrants.Select(id => new RolPermiso(actorRole.Id, id)));
         db.AddRange(systemGrants.Select(id => new RolPermiso(otherAdminRole.Id, id)));
-        actorAccess.AsignarRol(actorRole);
+        var actorEmail = "race-actor@test.local";
+        var actorUser = new Usuario(actorEmail, AuthenticationTestData.Hash(actorEmail));
+        var actorAccess = new AccesoUsuario(actorUser.Id, ownerAccess.OperadorId, null, actorRole);
         var otherAdmin = new Usuario("race-admin@test.local", AuthenticationTestData.Hash("race-admin@test.local"));
-        db.AddRange(otherAdmin, new AccesoUsuario(otherAdmin.Id, actorAccess.OperadorId, null, otherAdminRole));
+        db.AddRange(actorUser, actorAccess, otherAdmin,
+            new AccesoUsuario(otherAdmin.Id, ownerAccess.OperadorId, null, otherAdminRole));
         await db.SaveChangesAsync();
 
         actorClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", await Login(actorClient, actorUser.Email));

@@ -24,4 +24,8 @@ public interface IUsuariosOrganizacionRepository
         Guid usuarioId,
         bool activo,
         CancellationToken cancellationToken = default);
+
+    Task<bool> CambiarEmailAsync(
+        ContextoUsuario actor, Guid usuarioId, string emailNormalizado,
+        long version, CancellationToken cancellationToken = default);
 }

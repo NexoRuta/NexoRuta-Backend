@@ -14,7 +14,8 @@ namespace NexoRuta.Api.Controllers;
 public sealed class UsuariosController(
     ListarUsuariosUseCase listarUsuarios,
     CrearUsuarioUseCase crearUsuario,
-    CambiarEstadoUsuarioUseCase cambiarEstadoUsuario) : ControllerBase
+    CambiarEstadoUsuarioUseCase cambiarEstadoUsuario,
+    CambiarEmailUsuarioUseCase cambiarEmailUsuario) : ControllerBase
 {
     [HttpGet]
     [ProducesResponseType(
@@ -107,6 +108,28 @@ public sealed class UsuariosController(
         {
             return BadRequest(new { message = ex.Message });
         }
+    }
+
+    [HttpPatch("{usuarioId:guid}/email")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> CambiarEmail(Guid usuarioId,
+        [FromBody] CambiarEmailUsuarioRequest request, CancellationToken ct)
+    {
+        try
+        {
+            var actualizado = await cambiarEmailUsuario.EjecutarAsync(
+                usuarioId, request.Email, request.Version!.Value, ct);
+            return actualizado ? NoContent() : NotFound();
+        }
+        catch (CorreoYaRegistradoException) { return Conflict(new { message = "El correo ya está registrado." }); }
+        catch (DbUpdateConcurrencyException) { return Conflict(new { message = "La identidad cambió. Recargá e intentá nuevamente." }); }
+        catch (AccesoNoPermitidoException) { return Forbid(); }
+        catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
     }
 
 

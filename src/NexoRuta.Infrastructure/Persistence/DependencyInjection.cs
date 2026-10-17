@@ -62,6 +62,7 @@ public static class DependencyInjection
         services.AddScoped<CrearUsuarioUseCase>();
         services.AddScoped<IniciarSesionUseCase>();
         services.AddScoped<CambiarEstadoUsuarioUseCase>();
+        services.AddScoped<CambiarEmailUsuarioUseCase>();
         services.AddScoped<ObtenerPermisosActualesUseCase>();
         services.AddScoped<EsPropietarioOrganizacionUseCase>();
         services.AddScoped<ConsultarOrganizacionPropiaUseCase>();

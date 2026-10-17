@@ -42,6 +42,8 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
             Assert.Equal(JsonValueKind.Null, context.GetProperty(key).ValueKind);
         Assert.Equal(new[] { RolPlataforma.GestionarOrganizaciones }, await client.GetFromJsonAsync<string[]>("/api/usuarios/actual/permisos"));
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/envios")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PatchAsJsonAsync($"/api/usuarios/{Guid.NewGuid()}/email",
+            new { Email = "platform-edit@example.test", Version = 0 })).StatusCode);
         await using var db = database.CreateDbContext();
         await db.Database.ExecuteSqlRawAsync("UPDATE \"RolesPlataforma\" SET \"PuedeGestionarOrganizaciones\" = false");
         Assert.Empty((await client.GetFromJsonAsync<string[]>("/api/usuarios/actual/permisos"))!);

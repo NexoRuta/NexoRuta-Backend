@@ -90,6 +90,8 @@ public sealed class SuspensionSessionHttpTests(PostgresFixture postgres) : IClas
         Assert.Equal("Suspendida", (await limitedStatus.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("estado").GetString());
         using var deniedWork = await ownerClient.GetAsync("/api/envios");
         Assert.Equal(HttpStatusCode.Forbidden, deniedWork.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await ownerClient.PatchAsJsonAsync($"/api/usuarios/{owner.InactiveEmployeeId}/email",
+            new { Email = "suspended-edit@example.test", Version = 0 })).StatusCode);
         using var deniedCurrentContext = await ownerClient.GetAsync("/api/usuarios/actual");
         Assert.Equal(HttpStatusCode.Forbidden, deniedCurrentContext.StatusCode);
 

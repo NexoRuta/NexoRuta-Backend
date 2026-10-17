@@ -88,6 +88,9 @@ public sealed class CrearUsuarioUseCase(
             rol.Id,
             rol.Codigo,
             rol.Nombre,
-            acceso.Activo);
+            acceso.Activo,
+            usuario.Version,
+            rol.EsProtegidoSistema,
+            acceso.EsPropietario);
     }
 }
