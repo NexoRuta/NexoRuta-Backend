@@ -1,3 +1,4 @@
+
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
 
@@ -8,17 +9,8 @@ public sealed class NexoRutaDbContextFactory
 {
     public NexoRutaDbContext CreateDbContext(string[] args)
     {
-        var connectionString = Environment.GetEnvironmentVariable(
-            "ConnectionStrings__Postgres");
-
-        if (string.IsNullOrWhiteSpace(connectionString))
-        {
-            throw new InvalidOperationException(
-                "Falta la variable ConnectionStrings__Postgres.");
-        }
-
         var options = new DbContextOptionsBuilder<NexoRutaDbContext>()
-            .UseNpgsql(connectionString)
+            .UseNpgsql()
             .Options;
 
         return new NexoRutaDbContext(options);

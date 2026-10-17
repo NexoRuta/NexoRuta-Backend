@@ -25,7 +25,7 @@ public sealed class ProcesarGeneracionSeguimientoTests(
         // ARRANGE: base PostgreSQL exclusiva de esta prueba.
         var database = await postgres.CreateDatabaseAsync();
 
-        using var factory = database.CreateApiFactory();
+        using var factory = new IntegrationApiFactory(database, "Development");
         using var client = factory.CreateHttpClient();
 
         Guid operadorId;
@@ -60,9 +60,7 @@ public sealed class ProcesarGeneracionSeguimientoTests(
             })
         };
 
-        request.Headers.Add(
-            "X-NexoRuta-Acceso",
-            accesoComercioId.ToString());
+        await client.SetBearerForAccessAsync(database, accesoComercioId);
 
         using var response = await client.SendAsync(request);
 
@@ -254,7 +252,7 @@ public sealed class ProcesarGeneracionSeguimientoTests(
         // ARRANGE: PostgreSQL exclusivo de esta prueba.
         var database = await postgres.CreateDatabaseAsync();
 
-        using var factory = database.CreateApiFactory();
+        using var factory = new IntegrationApiFactory(database, "Development");
         using var client = factory.CreateHttpClient();
 
         Guid operadorId;
@@ -289,9 +287,7 @@ public sealed class ProcesarGeneracionSeguimientoTests(
             })
         };
 
-        request.Headers.Add(
-            "X-NexoRuta-Acceso",
-            accesoComercioId.ToString());
+        await client.SetBearerForAccessAsync(database, accesoComercioId);
 
         using var response = await client.SendAsync(request);
 
@@ -401,7 +397,7 @@ public sealed class ProcesarGeneracionSeguimientoTests(
     {
         var database = await postgres.CreateDatabaseAsync();
 
-        using var factory = database.CreateApiFactory();
+        using var factory = new IntegrationApiFactory(database, "Development");
         using var client = factory.CreateHttpClient();
 
         Guid operadorId;
@@ -436,9 +432,7 @@ public sealed class ProcesarGeneracionSeguimientoTests(
             })
         };
 
-        request.Headers.Add(
-            "X-NexoRuta-Acceso",
-            accesoComercioId.ToString());
+        await client.SetBearerForAccessAsync(database, accesoComercioId);
 
         using var response = await client.SendAsync(request);
 
@@ -536,7 +530,7 @@ public sealed class ProcesarGeneracionSeguimientoTests(
     {
         var database = await postgres.CreateDatabaseAsync();
 
-        using var factory = database.CreateApiFactory();
+        using var factory = new IntegrationApiFactory(database, "Development");
         using var client = factory.CreateHttpClient();
 
         Guid operadorId;
@@ -570,9 +564,7 @@ public sealed class ProcesarGeneracionSeguimientoTests(
             })
         };
 
-        request.Headers.Add(
-            "X-NexoRuta-Acceso",
-            accesoComercioId.ToString());
+        await client.SetBearerForAccessAsync(database, accesoComercioId);
 
         using var response = await client.SendAsync(request);
 

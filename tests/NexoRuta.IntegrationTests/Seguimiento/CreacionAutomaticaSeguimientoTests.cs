@@ -18,7 +18,7 @@ public sealed class CreacionAutomaticaSeguimientoTests(
         // ARRANGE: PostgreSQL aislado mediante Testcontainers.
         var database = await postgres.CreateDatabaseAsync();
 
-        using var factory = database.CreateApiFactory();
+        using var factory = new IntegrationApiFactory(database, "Development");
         using var client = factory.CreateHttpClient();
 
         Guid operadorId;
@@ -53,9 +53,7 @@ public sealed class CreacionAutomaticaSeguimientoTests(
             })
         };
 
-        request.Headers.Add(
-            "X-NexoRuta-Acceso",
-            accesoComercioId.ToString());
+        await client.SetBearerForAccessAsync(database, accesoComercioId);
 
         // ACT: Registrar el envío.
         using var response = await client.SendAsync(request);
@@ -132,7 +130,7 @@ public sealed class CreacionAutomaticaSeguimientoTests(
         // ARRANGE: PostgreSQL exclusivo de esta prueba.
         var database = await postgres.CreateDatabaseAsync();
 
-        using var factory = database.CreateApiFactory();
+        using var factory = new IntegrationApiFactory(database, "Development");
         using var client = factory.CreateHttpClient();
 
         Guid operadorId;
@@ -192,9 +190,7 @@ public sealed class CreacionAutomaticaSeguimientoTests(
             })
         };
 
-        request.Headers.Add(
-            "X-NexoRuta-Acceso",
-            accesoComercioId.ToString());
+        await client.SetBearerForAccessAsync(database, accesoComercioId);
 
         // ACT: el alta debe fallar debido al trigger.
         HttpStatusCode? codigo = null;

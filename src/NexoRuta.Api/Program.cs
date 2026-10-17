@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Authentication;
 using Microsoft.EntityFrameworkCore;
 using NexoRuta.Api.Core.Health;
 using NexoRuta.Api.Core.Security;
@@ -10,28 +9,116 @@ using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Microsoft.AspNetCore.RateLimiting;
 using System.Threading.RateLimiting;
-
-var builder = WebApplication.CreateBuilder(args);
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+using NexoRuta.Application.Administracion.Context;
+using NexoRuta.Application.Administracion.Repositories;
+using Microsoft.AspNetCore.Authorization;
+var platformCommand = args.FirstOrDefault() == "platform-admin";
+if (platformCommand && !args.SequenceEqual(["platform-admin", "create"]))
+{
+    Console.Error.WriteLine("Usage: platform-admin create (interactive credentials; no additional arguments).");
+    Environment.ExitCode = 2;
+    return;
+}
+var builder = WebApplication.CreateBuilder(platformCommand ? [] : args);
 
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 builder.Services.AddNexoRutaPersistence(builder.Configuration);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IUsuarioActual, UsuarioActualHttp>();
+if (platformCommand)
+{
+    await using var commandApp = builder.Build();
+    Environment.ExitCode = await NexoRuta.Api.Features.Plataforma.InicializarPlataformaCommand.EjecutarAsync(commandApp.Services);
+    return;
+}
 
-builder.Services.AddAuthentication(AccesoSeleccionado.Esquema)
-    .AddScheme<AuthenticationSchemeOptions, AccesoSeleccionadoHandler>(AccesoSeleccionado.Esquema, _ => { });
 
-builder.Services.AddAuthorization(options => options.AddPolicy(nameof(TipoAccesoUsuario.Comercio),
-    policy => policy.RequireAuthenticatedUser().RequireClaim(
-        AccesoSeleccionado.ClaimTipoAcceso, nameof(TipoAccesoUsuario.Comercio))));
+var jwt = new JwtConfiguracion(builder.Configuration);
+
+builder.Services.AddSingleton(jwt);
+builder.Services.AddSingleton<JwtTokenService>();
+builder.Services.AddScoped<JwtValidacionEventos>();
+builder.Services.AddScoped<IAuthorizationHandler,PermisoAuthorizationHandler>();
+builder.Services
+    .AddAuthentication(options =>
+    {
+        options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+        options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+        options.DefaultForbidScheme = JwtBearerDefaults.AuthenticationScheme;
+    })
+    .AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, options =>
+    {
+        options.MapInboundClaims = false;
+
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidIssuer = jwt.Issuer,
+
+            ValidateAudience = true,
+            ValidAudience = jwt.Audience,
+
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = jwt.SigningKey,
+
+            RequireSignedTokens = true,
+            ValidAlgorithms = [SecurityAlgorithms.HmacSha256],
+
+            RequireExpirationTime = true,
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.FromSeconds(30)
+        };
+
+        options.EventsType = typeof(JwtValidacionEventos);
+    });
+
 
 builder.Services.AddHealthChecks().AddCheck<PostgreSqlHealthCheck>("postgres");
 
-// ponytail: identity selection has no credentials; expose token recovery only
-// in Development until the existing identity mechanism is replaced with real authentication.
-builder.Services.AddAuthorization(options => options.AddPolicy("seguimiento-demo",
-    policy => policy.RequireAuthenticatedUser().RequireAssertion(_ => builder.Environment.IsDevelopment())));
+
+
+builder.Services.AddAuthorization(options =>
+{
+    options.DefaultPolicy = new AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser()
+        .RequireAssertion(context => !context.User.HasClaim(
+            AccesoSeleccionado.ClaimAmbito, AccesoSeleccionado.ClaimSesionSuspendida))
+        .Build();
+    options.AddPolicy("organizacion-suspendida", policy => policy.RequireAuthenticatedUser()
+        .RequireAssertion(context => context.Resource is HttpContext http &&
+            http.Items[typeof(ContextoOrganizacionSuspendida)] is ContextoOrganizacionSuspendida));
+    options.AddPolicy("organizacion", policy => policy.RequireAuthenticatedUser()
+        .RequireAssertion(context => context.Resource is HttpContext http && http.Items[typeof(ContextoUsuario)] is ContextoUsuario));
+    options.AddPolicy(RolPlataforma.GestionarOrganizaciones, policy => policy.RequireAuthenticatedUser()
+        .RequireAssertion(context => context.Resource is HttpContext http &&
+            http.Items[typeof(ContextoPlataforma)] is ContextoPlataforma { PuedeGestionarOrganizaciones: true }));
+    // Política existente para cuentas de comercio.
+    options.AddPolicy(nameof(TipoAccesoUsuario.Comercio), policy =>
+        policy.RequireAuthenticatedUser()
+            .RequireClaim(
+                AccesoSeleccionado.ClaimTipoAcceso,
+                nameof(TipoAccesoUsuario.Comercio)));
+
+    // Política demo existente.
+    options.AddPolicy("seguimiento-demo", policy =>
+        policy.RequireAuthenticatedUser()
+            .RequireAssertion(
+                _ => builder.Environment.IsDevelopment()));
+
+    // Políticas RBAC.
+    foreach (var permiso in CatalogoPermisos.Todos)
+    {
+        options.AddPolicy(permiso.Codigo, policy =>
+            policy.RequireAuthenticatedUser()
+                .AddRequirements(
+                    new PermisoRequirement(permiso.Codigo)));
+    }
+});
+
+
 
 if (builder.Configuration.GetValue<bool>("OpenTelemetry:Enabled"))
 {
@@ -67,7 +154,26 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit = 0,
                 AutoReplenishment = true
             }));
+
+
+    foreach (var policy in new[] { "auth-login", "auth-register" })
+    {
+        options.AddPolicy(policy, context =>
+            RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey:
+                    context.Connection.RemoteIpAddress?.ToString()
+                    ?? "sin-ip",
+                factory: _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 5,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                }));
+    }
+
 });
+
 
 
 var app = builder.Build();
@@ -78,6 +184,7 @@ var app = builder.Build();
         await scope.ServiceProvider.GetRequiredService<NexoRutaDbContext>().Database.MigrateAsync();
     if (app.Configuration.GetValue<bool>("DatabaseInitialization:SeedData"))
         await scope.ServiceProvider.GetRequiredService<DatosInicialesSeeder>().SeedAsync();
+    await scope.ServiceProvider.GetRequiredService<DatosInicialesSeeder>().SeedPlataformaAsync();
 }
 
 if (app.Environment.IsDevelopment())

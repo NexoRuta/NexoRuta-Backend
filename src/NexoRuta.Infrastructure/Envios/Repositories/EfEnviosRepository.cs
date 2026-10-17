@@ -6,6 +6,8 @@ using NexoRuta.Domain.Envios;
 using NexoRuta.Infrastructure.Persistence;
 using System.Text.Json;
 using NexoRuta.Infrastructure.Outbox;
+using NexoRuta.Application.Administracion.Exceptions;
+using NexoRuta.Domain.Administracion;
 
 namespace NexoRuta.Infrastructure.Envios.Repositories;
 
@@ -18,6 +20,20 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
         Bulto bulto,
         CancellationToken cancellationToken = default)
     {
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        // Lock both participating organizations in deterministic order so shipment creation
+        // serializes with platform suspension without changing existing shipment history.
+        var commerce = await db.Comercios.FromSqlInterpolated(
+            $"SELECT * FROM \"Comercios\" WHERE \"Id\" = {envio.ComercioId} FOR UPDATE")
+            .SingleOrDefaultAsync(cancellationToken);
+        var operatorEntity = await db.Operadores.FromSqlInterpolated(
+            $"SELECT * FROM \"Operadores\" WHERE \"Id\" = {envio.OperadorId} FOR UPDATE")
+            .SingleOrDefaultAsync(cancellationToken);
+        if (commerce is null || operatorEntity is null)
+            throw new OrganizacionSuspendidaException("No se puede crear el envío porque una organización ya no está disponible.");
+        if (commerce.Estado != EstadoOrganizacion.Activa || operatorEntity.Estado != EstadoOrganizacion.Activa)
+            throw new OrganizacionSuspendidaException("No se puede crear el envío mientras una organización esté suspendida.");
+
         // Trabajo asíncrono: generar el seguimiento.
         var trabajoSeguimiento = new OutboxMessage(
             operadorId: envio.OperadorId,
@@ -54,6 +70,7 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
             eventoEnvioCreado);
 
         await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     public async Task<IReadOnlyList<EnvioDetalle>> ListarAsync(

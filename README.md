@@ -1,8 +1,10 @@
 # NexoRuta Backend
 
+Platform organization administration: [authority, API and first-account procedure](docs/workflow/platform-administration.md). This is an additional backend slice, not completion of CU-01; Identity/OIDC and RLS remain pending; the separate Admin frontend is available in the frontend repository.
+
 Backend de la plataforma multioperador de distribución de última milla del Taller .NET 2026. Este repositorio usa .NET 10 y está organizado como base de un **monolito modular**, con un Worker independiente. La entrega de análisis y diseño del 04/10/2026 y el enunciado del laboratorio fundamentan las decisiones resumidas aquí.
 
-> **Estado actual:** están implementados los recortes del primer monitoreo: [CU-01 — datos iniciales y acceso directo](docs/cu/CU-01-comercios-usuarios.md), [CU-07 — alta individual de envíos](docs/cu/CU-07-alta-envios.md) y [CU-08 — bulto](docs/cu/CU-08-bultos.md), con EF Core/PostgreSQL. M05 incorpora seguimiento público, recuperación de enlaces y Outbox transaccional con procesos separados para RabbitMQ y Kafka. Autenticación por credenciales, CRUD de administración y RLS siguen pendientes.
+> **Estado actual:** están implementados los recortes del primer monitoreo: [CU-01 — autenticación y roles propios](docs/cu/CU-01-comercios-usuarios.md), [CU-07 — alta individual de envíos](docs/cu/CU-07-alta-envios.md) y [CU-08 — bulto](docs/cu/CU-08-bultos.md), con EF Core/PostgreSQL. M05 incorpora seguimiento público, recuperación de enlaces y Outbox transaccional con procesos separados para RabbitMQ y Kafka. CU-01 incorpora login JWT y administración de roles propios; RLS sigue pendiente.
 
 ## Estructura y estado verificado
 
@@ -33,7 +35,7 @@ Desde la raíz de este repositorio:
 ```bash
 dotnet restore NexoRuta.sln --nologo
 dotnet build NexoRuta.sln --no-restore --nologo
-# Antes de ejecutar la suite completa, configurar NEXORUTA_TEST_POSTGRES
+# La integración utiliza contenedores temporales propios; requiere Docker.
 # y verificar el aislamiento indicado en la sección siguiente.
 dotnet test NexoRuta.sln --no-build --no-restore --nologo
 ```
@@ -45,52 +47,25 @@ dotnet run --project src/NexoRuta.Api/NexoRuta.Api.csproj --launch-profile http
 dotnet run --project src/NexoRuta.Worker/NexoRuta.Worker.csproj
 ```
 
-El perfil `http` de la API usa `http://localhost:5041`; OpenAPI de desarrollo está en `http://localhost:5041/openapi/v1.json`. La API necesita PostgreSQL mediante `ConnectionStrings:Postgres`; aplica migraciones solo con `DatabaseInitialization:ApplyMigrations` e inicializa los datos de `AccesoInicial` solo con `DatabaseInitialization:SeedData`, ambos desactivados por defecto. `GET /api/accesos?tipo=Comercio|Operador` alimenta los selectores; `GET /api/operadores` (también disponible en `/api/comercio/operadores`), `GET /api/usuarios/actual` y `GET/POST /api/envios` requieren una selección válida mediante `X-NexoRuta-Acceso`. Se separan ámbitos de operador/comercio, sin perfiles laborales ni autenticación por credenciales en este recorte. Liveness/readiness están en `/health/live` y `/health/ready`. El Worker no abre un puerto HTTP.
+El perfil `http` de la API usa `http://localhost:5041`; OpenAPI está en `/openapi/v1.json` solo en Development. Login: `POST /api/auth/login` con JWT Bearer, hashing Identity y permisos efectivos consultados en PostgreSQL en cada petición. `X-NexoRuta-Acceso` es compatibilidad exclusiva de Development, nunca un mecanismo de producción.
 
-El arranque tiene un único bootstrap, sin modo Demo. Las cuatro propiedades de AccesoInicial son obligatorias y no pueden estar vacías: UsuarioEmail, OperadorUsuarioEmail, OperadorNombre y ComercioNombre; los valores se recortan y los dos emails deben identificar cuentas distintas. Para sobrescribirlas por entorno, usá AccesoInicial__UsuarioEmail, AccesoInicial__OperadorUsuarioEmail, AccesoInicial__OperadorNombre y AccesoInicial__ComercioNombre. Demo:Enabled / Demo__Enabled ya no se interpretan: retiralas de configuraciones externas. El seeder no crea envíos ficticios ni renombra datos históricos por sus nombres. Si cambiás las identidades configuradas, puede crear cuentas y organizaciones adicionales; no fusiona ni elimina las anteriores. El nombre histórico nexoruta-demo del despliegue no selecciona un modo de ejecución.
+El esquema (`DatabaseInitialization:ApplyMigrations`) y el bootstrap (`DatabaseInitialization:SeedData`) son operaciones independientes, desactivadas por defecto. Habilitarlas es una operación administrativa explícita sobre el destino confirmado. No ejecutar migraciones ni reinicializaciones de la base de desarrollo como parte de los tests.
 
-El Compose local vive en el repositorio principal y publica la API en `http://localhost:5000` (puerto 8080 del contenedor). La inicialización puede repetirse sin duplicar los registros iniciales. RabbitMQ procesa la generación del seguimiento; Kafka publica `EnvioCreado.v1` mediante su Worker independiente. Redis no participa del alta transaccional.
+Cuando se habilita el bootstrap, configurar `AccesoInicial:OperadorId` y `ComercioId` con UUID persistentes, sus nombres y emails, contraseñas por secretos de entorno y, opcionalmente, `OperadorRolCodigo` / `ComercioRolCodigo`. `Bootstrap:Roles` admite una lista arbitraria con `Codigo`, `Nombre`, **uno** de `OperadorId` / `ComercioId` y `Permisos` (códigos globales). No hay cuatro roles obligatorios ni UUID/contraseñas predeterminados. El bootstrap identifica organizaciones por UUID, crea roles/grants solo durante la primera inicialización por organización y conserva nombres editados, revocaciones, roles eliminados, asignaciones y hashes existentes. Reparar el acceso de un usuario existente no le asigna privilegios automáticamente.
+
+La gestión posterior usa `/api/roles`, `/api/roles/permisos`, `/api/roles/{id}/permisos` y `/api/roles/accesos/{accesoId}`. Las políticas de configuración/usuarios y la pertenencia de la cuenta delimitan cada operación. Los roles de comercio no dependen de ningún operador; el tenant operativo de envíos sigue siendo el operador.
 
 ## Pruebas PostgreSQL: destino aislado obligatorio
 
-> **Advertencia:** no ejecutar la suite PostgreSQL sin configurar y comprobar
-> `NEXORUTA_TEST_POSTGRES`. Si falta o está vacía, el código actual usa un fallback
-> hacia `127.0.0.1:5432` con credenciales locales de desarrollo. No detecta si ese
-> servidor es exclusivo de tests. En Windows ese endpoint puede corresponder a
-> otro PostgreSQL; esta confusión causó el error de autenticación `28P01`.
+Las fixtures crean contenedores **propios de PostgreSQL 18**, verifican identidad del contenedor, base, usuario y versión antes de migrar y crean bases por escenario. No existe fallback a desarrollo ni se interpreta `NEXORUTA_TEST_POSTGRES`. El borrado de contenedores temporales elimina sus bases; no se ejecuta SQL de borrado contra una base externa. Docker debe estar disponible. La suite completa también usa servicios temporales de mensajería.
 
-1. Usar PostgreSQL 18 en un contenedor temporal **exclusivo**, independiente de
-   Windows y de Compose compartido; publicar solo en loopback y un puerto libre
-   (en las validaciones se utilizó `127.0.0.1:55432`).
-2. Generar una credencial exclusiva, no versionarla ni imprimir la connection
-   string. El rol requiere permiso para crear y eliminar las bases de pruebas.
-   No reutilizar usuarios o bases de producción.
-3. Definir `NEXORUTA_TEST_POSTGRES` con ese destino únicamente en el proceso de
-   pruebas. Antes de ejecutar, comprobar autenticación, versión 18 e identidad
-   de la instancia; no basta con que el puerto responda.
-4. Ejecutar los comandos anteriores. `EnvioPostgresRoundTripTests` reemplaza el
-   nombre de base por `nexoruta_test_<UUIDv7>`, aplica migraciones y ejecuta
-   `EnsureDeletedAsync()` al terminar cada caso. Autorizar esa eliminación solo
-   para las bases temporales creadas dentro de la instancia aislada.
-5. Verificar que no quedaron bases temporales, restaurar la variable del proceso
-   y retirar solo el contenedor creado para esta ejecución. No eliminar volúmenes
-   ni modificar PostgreSQL de Windows o Compose compartido.
+```powershell
+dotnet restore NexoRuta.sln
+dotnet build NexoRuta.sln --no-restore
+dotnet test NexoRuta.sln --no-build --no-restore
+```
 
-### Baseline conservado de EST-04
-
-| Comprobación | Resultado local |
-| --- | --- |
-| Restore | Correcto |
-| Build | 0 errores, 0 advertencias |
-| Unitarias | 19/19 |
-| Arquitectura | 3/3 |
-| Integración | 42/42 |
-| Configuración y DI | 17/17, incluidas en las 42 de integración; también ejecutadas por separado |
-
-Son resultados de EST-04, no cantidades permanentes ni prueba de CI remota.
-EST-05 solo actualiza documentación: no reejecutó las suites técnicas ni creó
-otra instancia PostgreSQL. EST-02 a EST-04 validaron la integración con
-PostgreSQL 18 temporal exclusivo; no se utilizaron bases persistentes compartidas.
+CU-01 conserva pruebas de migración histórica/rollback, inicialización vacía, repetición del bootstrap, aislamiento de roles, revocación JWT y restricciones de pertenencia con SQL directo. Un rollback con códigos de rol repetidos entre organizaciones se rechaza transaccionalmente: requiere consolidación administrativa explícita, nunca fusiona permisos automáticamente.
 
 ## Alcance de la rama backend
 
@@ -104,8 +79,7 @@ la corrección cultural de límites decimales no implica OpenAPI idéntico.
 
 El [alcance del refactor](docs/workflow/refactor-envios.md) distingue estas unidades
 y sus límites. Los cambios de frontend se revisan en su propio repositorio y no
-se incorporan automáticamente al PR backend. No se implementaron autenticación
-real ni RLS, ni se modificaron entidades Domain o migraciones en este acumulado.
+se incorporan automáticamente al PR backend. Ese refactor histórico no incorporaba autenticación real ni RLS; CU-01 ahora agrega JWT, roles propios y sus migraciones. RLS sigue pendiente.
 
 ## Decisiones de arquitectura
 
@@ -144,3 +118,7 @@ Cada CU tiene un módulo principal. Las dependencias entre módulos se resuelven
 4. Cuando se usó IA, la entrada distingue finalidad y herramienta, decisiones del integrante y del asistente, qué se aceptó sin modificar, qué se cambió y por qué, qué se descartó y por qué, implementación, verificaciones y límites. La descripción de la PR enlaza tanto la especificación de cada CU como las bitácoras individuales de quienes participaron.
 
 La [bitácora individual de Zarsu - Franco](docs/bitacora-ia/zarsu-franco.md) muestra el formato acumulativo. El registro de uso de IA por componente responde al §9.5 de `Laboratorio__NET_2026.pdf`.
+
+Las organizaciones ya existentes al aplicar la normalización se marcan como inicializadas: su configuración posterior debe administrarse explícitamente, sin volver a ejecutar plantillas iniciales sobre decisiones históricas.
+
+Self-service registration (`POST /api/auth/register`) and authenticated organization onboarding (`POST /api/alta-propia/comercios`, `/api/alta-propia/operadores`) are the normal entry path. Platform Admin remains for support. See `../docs/registro-alta-propia.md` for session boundaries, compatibility and checks; CU-01 remains open.

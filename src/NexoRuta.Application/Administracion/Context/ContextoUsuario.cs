@@ -1,3 +1,4 @@
+
 using NexoRuta.Application.Administracion.Exceptions;
 using NexoRuta.Domain.Administracion;
 
@@ -11,17 +12,30 @@ public sealed record ContextoUsuario(
     string UsuarioEmail,
     string? OperadorNombre,
     string? ComercioNombre,
-    bool EsPropietario)
+    Guid RolId,
+    string RolCodigo,
+    [property: System.Text.Json.Serialization.JsonIgnore]
+    long VersionSesion = 0,
+    EstadoOrganizacion Estado = EstadoOrganizacion.Activa)
 {
+    public TipoAccesoUsuario TipoAcceso => ComercioId.HasValue
+        ? TipoAccesoUsuario.Comercio
+        : TipoAccesoUsuario.Operador;
+
     public string Tipo => ComercioId.HasValue
         ? nameof(TipoAccesoUsuario.Comercio)
         : nameof(TipoAccesoUsuario.Operador);
 
     public (Guid Id, string Nombre) RequerirComercio()
     {
-        var id = ComercioId ?? throw new AccesoNoPermitidoException();
-        if (id == Guid.Empty || string.IsNullOrWhiteSpace(ComercioNombre))
+        var id = ComercioId
+            ?? throw new AccesoNoPermitidoException();
+
+        if (id == Guid.Empty ||
+            string.IsNullOrWhiteSpace(ComercioNombre))
+        {
             throw new AccesoActualNoDisponibleException();
+        }
 
         return (id, ComercioNombre);
     }

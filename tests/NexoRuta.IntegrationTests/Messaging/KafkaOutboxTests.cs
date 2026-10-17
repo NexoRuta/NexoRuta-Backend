@@ -212,7 +212,7 @@ public sealed class KafkaOutboxTests(PostgresFixture postgres, KafkaFixture kafk
 
     private static async Task<OutboxMessage> CreateEventAsync(IntegrationDatabase database)
     {
-        using var factory = database.CreateApiFactory();
+        using var factory = new IntegrationApiFactory(database, "Development");
         using var client = factory.CreateHttpClient();
         await using var db = database.CreateDbContext();
         var operadorId = await db.Operadores.Select(x => x.Id).SingleAsync();
@@ -226,7 +226,7 @@ public sealed class KafkaOutboxTests(PostgresFixture postgres, KafkaFixture kafk
                 largoCentimetros = 25m, anchoCentimetros = 20m, altoCentimetros = 15m
             })
         };
-        request.Headers.Add("X-NexoRuta-Acceso", accesoId.ToString());
+        await client.SetBearerForAccessAsync(database, accesoId);
         using var response = await client.SendAsync(request);
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         return await db.OutboxMessages.AsNoTracking().SingleAsync(x => x.Destino == OutboxDestino.Kafka);

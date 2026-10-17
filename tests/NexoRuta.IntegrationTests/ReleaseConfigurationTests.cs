@@ -14,6 +14,24 @@ namespace NexoRuta.IntegrationTests;
 
 public sealed class ReleaseConfigurationTests
 {
+    [Fact]
+    public void DisabledBootstrapIgnoresMalformedAndMissingConfiguration()
+    {
+        var values = new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:Postgres"] = "Host=127.0.0.1;Port=1;Database=unused;Username=unused;Password=unused;Timeout=1;Pooling=false",
+            ["DatabaseInitialization:SeedData"] = "false",
+            ["DatabaseInitialization:ApplyMigrations"] = "false",
+            ["AccesoInicial:OperadorId"] = "not-a-guid",
+            ["AccesoInicial:ComercioId"] = "not-a-guid"
+        };
+        using var provider = Build(values);
+        var access = provider.GetRequiredService<AccesoInicial>();
+        Assert.Null(access.OperadorId);
+        Assert.Null(access.ComercioId);
+        Assert.Equal("", access.UsuarioEmail);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("false")]
@@ -46,7 +64,8 @@ public sealed class ReleaseConfigurationTests
     {
         var values = Values("true");
         values[$"AccesoInicial:{field}"] = value;
-        var exception = Assert.Throws<InvalidOperationException>(() => Build(values));
+        using var services = Build(values);
+        var exception = Assert.Throws<InvalidOperationException>(() => services.GetRequiredService<AccesoInicial>());
         Assert.Equal($"Falta AccesoInicial:{field} para el acceso inicial.", exception.Message);
     }
 
@@ -72,7 +91,13 @@ public sealed class ReleaseConfigurationTests
         using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
         using var scope = provider.CreateScope();
         var access = provider.GetRequiredService<AccesoInicial>();
-        Assert.Equal(new AccesoInicial("custom@example.test", "Custom Operator", "Custom Commerce", "operator@example.test"), access);
+        Assert.Equal(new AccesoInicial("custom@example.test", "Custom Operator", "Custom Commerce", "operator@example.test")
+        {
+            OperadorId = Guid.Parse(values["AccesoInicial:OperadorId"]!),
+            ComercioId = Guid.Parse(values["AccesoInicial:ComercioId"]!),
+            OperadorRolCodigo = values["AccesoInicial:OperadorRolCodigo"]!.Trim(),
+            ComercioRolCodigo = values["AccesoInicial:ComercioRolCodigo"]!.Trim()
+        }, access);
         Assert.IsType<UsuarioActualHttp>(scope.ServiceProvider.GetRequiredService<IUsuarioActual>());
         Assert.IsType<EfAccesosUsuarioRepository>(scope.ServiceProvider.GetRequiredService<IAccesosUsuarioRepository>());
         Assert.IsType<EfOperadoresRepository>(scope.ServiceProvider.GetRequiredService<IOperadoresRepository>());
@@ -82,15 +107,36 @@ public sealed class ReleaseConfigurationTests
             Assert.Same(scope.ServiceProvider.GetRequiredService(type), scope.ServiceProvider.GetRequiredService(type));
     }
 
+    [Theory]
+    [InlineData("OperadorId", null)]
+    [InlineData("OperadorId", "not-a-guid")]
+    [InlineData("OperadorId", "00000000-0000-0000-0000-000000000000")]
+    [InlineData("ComercioId", null)]
+    [InlineData("ComercioId", "not-a-guid")]
+    [InlineData("ComercioId", "00000000-0000-0000-0000-000000000000")]
+    public void EnabledBootstrapValidatesOrganizationIdsOnlyWhenResolved(string field, string? value)
+    {
+        var values = Values();
+        values[$"AccesoInicial:{field}"] = value;
+        using var services = Build(values); // Registration itself must never bind bootstrap configuration.
+        var error = Assert.Throws<InvalidOperationException>(() => services.GetRequiredService<AccesoInicial>());
+        Assert.Contains($"AccesoInicial:{field}", error.Message);
+    }
+
     private static Dictionary<string, string?> Values(string? legacySetting = null) => new()
     {
         ["ConnectionStrings:Postgres"] = "Host=localhost;Database=unused",
         // Regression input only: the retired setting must not alter bootstrap behavior.
         ["Demo:Enabled"] = legacySetting,
+        ["DatabaseInitialization:SeedData"] = "true",
+        ["AccesoInicial:OperadorId"] = Guid.NewGuid().ToString(),
+        ["AccesoInicial:ComercioId"] = Guid.NewGuid().ToString(),
         ["AccesoInicial:UsuarioEmail"] = "custom@example.test",
         ["AccesoInicial:ComercioNombre"] = "Custom Commerce",
         ["AccesoInicial:OperadorNombre"] = "Custom Operator",
-        ["AccesoInicial:OperadorUsuarioEmail"] = "operator@example.test"
+        ["AccesoInicial:OperadorUsuarioEmail"] = "operator@example.test",
+        ["AccesoInicial:OperadorRolCodigo"] = "owner-operator",
+        ["AccesoInicial:ComercioRolCodigo"] = "owner-commerce"
     };
 
     private static IConfiguration Configuration(Dictionary<string, string?> values)

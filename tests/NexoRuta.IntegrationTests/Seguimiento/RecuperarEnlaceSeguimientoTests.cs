@@ -58,7 +58,7 @@ public sealed class RecuperarEnlaceSeguimientoTests(PostgresFixture postgres) : 
         }
         for (var read = 0; read < 2; read++)
         {
-            using var request = Request(envio.Id, owner);
+            using var request = await RequestAsync(client, database, envio.Id, owner);
             using var response = await client.SendAsync(request);
             Assert.Equal(expected, response.StatusCode);
             Assert.True(response.Headers.CacheControl?.NoStore);
@@ -68,7 +68,7 @@ public sealed class RecuperarEnlaceSeguimientoTests(PostgresFixture postgres) : 
             {
                 Assert.Equal($"http://localhost/prefix/api/public/seguimiento/{original}", body.GetProperty("url").GetString());
                 Assert.True(body.GetProperty("expiraEnUtc").GetDateTimeOffset() > DateTimeOffset.UtcNow);
-                // Resolve the actual route in this isolated TestServer, without any identity header.
+                // Resolve the public route in this isolated TestServer without requiring a bearer token.
                 using var publicResponse = await client.GetAsync(new Uri(body.GetProperty("url").GetString()!).AbsolutePath["/prefix".Length..]);
                 Assert.Equal(HttpStatusCode.OK, publicResponse.StatusCode);
                 Assert.Equal("Admitido", (await publicResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("estado").GetString());
@@ -96,36 +96,42 @@ public sealed class RecuperarEnlaceSeguimientoTests(PostgresFixture postgres) : 
         var database = await postgres.CreateDatabaseAsync();
         using var factory = new IntegrationApiFactory(database, "Development", Settings());
         using var client = factory.CreateHttpClient();
+        using var anonymousClient = factory.CreateHttpClient();
         var (envio, owner, operatorAccess) = await CreateShipmentAsync(database);
         Guid otherOperator, otherCommerce;
         await using (var db = database.CreateDbContext())
         {
             var op = new Operador("Other operator");
             var commerce = new Comercio("Other commerce");
-            var operatorUser = new Usuario($"other-op-{Guid.NewGuid():N}@example.test");
-            var commerceUser = new Usuario($"other-commerce-{Guid.NewGuid():N}@example.test");
-            var opAccess = new AccesoUsuario(operatorUser.Id, op.Id, null);
-            var commerceAccess = new AccesoUsuario(commerceUser.Id, null, commerce.Id);
-            db.AddRange(op, commerce, operatorUser, commerceUser, opAccess, commerceAccess);
+            var operatorEmail = $"other-op-{Guid.NewGuid():N}@example.test";
+            var operatorUser = new Usuario(operatorEmail, AuthenticationTestData.Hash(operatorEmail));
+            var commerceEmail = $"other-commerce-{Guid.NewGuid():N}@example.test";
+            var commerceUser = new Usuario(commerceEmail, AuthenticationTestData.Hash(commerceEmail));
+            var opRole = new Rol("other_operator", "Other operator", op.Id, null);
+            var commerceRole = new Rol("other_commerce", "Other commerce", null, commerce.Id);
+            var opAccess = new AccesoUsuario(operatorUser.Id, op.Id, null, opRole);
+            var commerceAccess = new AccesoUsuario(commerceUser.Id, null, commerce.Id, commerceRole);
+            db.AddRange(op, commerce, operatorUser, commerceUser, opRole, commerceRole, opAccess, commerceAccess);
             await db.SaveChangesAsync();
             otherOperator = opAccess.Id; otherCommerce = commerceAccess.Id;
         }
         foreach (var access in new[] { otherOperator, otherCommerce })
         {
-            using var request = Request(envio.Id, access);
+            using var request = await RequestAsync(client, database, envio.Id, access);
             using var response = await client.SendAsync(request);
             Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         }
-        using var missing = Request(Guid.NewGuid(), owner);
+        using var missing = await RequestAsync(client, database, Guid.NewGuid(), owner);
         Assert.Equal(HttpStatusCode.NotFound, (await client.SendAsync(missing)).StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync($"/api/envios/{envio.Id}/seguimiento")).StatusCode);
-        using var invalid = Request(envio.Id, Guid.NewGuid());
-        Assert.Equal(HttpStatusCode.Unauthorized, (await client.SendAsync(invalid)).StatusCode);
-        using var allowed = Request(envio.Id, operatorAccess);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymousClient.GetAsync($"/api/envios/{envio.Id}/seguimiento")).StatusCode);
+        using var invalid = new HttpRequestMessage(HttpMethod.Get, $"/api/envios/{envio.Id}/seguimiento");
+        invalid.Headers.Add("X-NexoRuta-Acceso", Guid.NewGuid().ToString());
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymousClient.SendAsync(invalid)).StatusCode);
+        using var allowed = await RequestAsync(client, database, envio.Id, operatorAccess);
         Assert.Equal(HttpStatusCode.Accepted, (await client.SendAsync(allowed)).StatusCode);
         using var production = new IntegrationApiFactory(database, "Production", Settings());
         using var productionClient = production.CreateHttpClient();
-        using var forbidden = Request(envio.Id, owner);
+        using var forbidden = await RequestAsync(productionClient, database, envio.Id, owner);
         Assert.Equal(HttpStatusCode.Forbidden, (await productionClient.SendAsync(forbidden)).StatusCode);
     }
 
@@ -145,7 +151,7 @@ public sealed class RecuperarEnlaceSeguimientoTests(PostgresFixture postgres) : 
         var (envio, owner, _) = await CreateShipmentAsync(database);
         await using (var db = database.CreateDbContext())
             await Processor(db, settings).EjecutarAsync(Guid.NewGuid(), envio.OperadorId, envio.Id);
-        using var request = Request(envio.Id, owner);
+        using var request = await RequestAsync(client, database, envio.Id, owner);
         using var response = await client.SendAsync(request);
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         Assert.DoesNotContain("TokenCifrado", await response.Content.ReadAsStringAsync());
@@ -169,7 +175,7 @@ public sealed class RecuperarEnlaceSeguimientoTests(PostgresFixture postgres) : 
             await Processor(db, originalSettings).EjecutarAsync(Guid.NewGuid(), envio.OperadorId, envio.Id);
             original = Cipher(originalSettings).Descifrar(await db.EntregasSeguimiento.SingleAsync());
         }
-        using var request = Request(envio.Id, owner);
+        using var request = await RequestAsync(client, database, envio.Id, owner);
         using var response = await client.SendAsync(request);
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         Assert.DoesNotContain(original, await response.Content.ReadAsStringAsync());
@@ -191,11 +197,10 @@ public sealed class RecuperarEnlaceSeguimientoTests(PostgresFixture postgres) : 
         IDictionary<string, string?> settings) => new(db,
         new CrearEnlaceSeguimientoUseCase(new EfConsultaEstadoEnvio(db), new EfEnlacesSeguimientoRepository(db)), Cipher(settings));
 
-    private static HttpRequestMessage Request(Guid envio, Guid access)
+    private static async Task<HttpRequestMessage> RequestAsync(HttpClient client, IntegrationDatabase database, Guid envio, Guid access)
     {
-        var request = new HttpRequestMessage(HttpMethod.Get, $"/api/envios/{envio}/seguimiento");
-        request.Headers.Add("X-NexoRuta-Acceso", access.ToString());
-        return request;
+        await client.SetBearerForAccessAsync(database, access);
+        return new HttpRequestMessage(HttpMethod.Get, $"/api/envios/{envio}/seguimiento");
     }
 
     private static async Task<(Envio, Guid Owner, Guid Operator)> CreateShipmentAsync(IntegrationDatabase database)

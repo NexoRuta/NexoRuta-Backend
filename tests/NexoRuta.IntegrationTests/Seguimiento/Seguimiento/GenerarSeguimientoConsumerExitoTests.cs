@@ -42,7 +42,7 @@ public sealed class GenerarSeguimientoConsumerExitoTests(
         await rabbitMq.StartAsync();
 
         // Inicializar la API para disponer de los datos demo.
-        using var api = database.CreateApiFactory();
+        using var api = new IntegrationApiFactory(database, "Development");
         using var client = api.CreateHttpClient();
 
         Guid operadorId;
@@ -89,9 +89,7 @@ public sealed class GenerarSeguimientoConsumerExitoTests(
             })
         };
 
-        request.Headers.Add(
-            "X-NexoRuta-Acceso",
-            accesoComercioId.ToString());
+        await client.SetBearerForAccessAsync(database, accesoComercioId);
 
         using var response = await client.SendAsync(request);
 
