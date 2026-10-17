@@ -169,6 +169,11 @@ public sealed class UsuariosHttpTests(PostgresFixture postgres) : IClassFixture<
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
         await AssertOwnerMutationsRejectedAsync();
 
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", managerToken);
+        using (var ownAccessState = await PatchStateAsync(client, manager.Id, false))
+            Assert.Equal(HttpStatusCode.Forbidden, ownAccessState.StatusCode);
+        Assert.Equal((true, 0L), await ReadStateAsync(database, manager.Id));
+
         await using (var verification = database.CreateDbContext())
         {
             var actualOwner = await verification.Usuarios.AsNoTracking().SingleAsync(x => x.Id == owner.Id);
@@ -283,6 +288,42 @@ public sealed class UsuariosHttpTests(PostgresFixture postgres) : IClassFixture<
         var newToken = await LoginAsync(client, (await ReadUserAsync(database, userId)).Email, NewUserPassword);
         using var afterRelogin = await GetWithTokenAsync(client, "/api/envios", newToken);
         Assert.Equal(HttpStatusCode.OK, afterRelogin.StatusCode);
+    }
+
+    [Fact]
+    public async Task ActivatingTestGmailChangesOnlyThatAccess()
+    {
+        var database = await postgres.CreateDatabaseAsync();
+        using var factory = database.CreateApiFactory();
+        using var client = factory.CreateHttpClient();
+        await using var db = database.CreateDbContext();
+        var actor = await AuthenticateOperatorAdminAsync(db, client);
+        var targetId = await CreateOperatorUserAsync(client, db, actor, "test@gmail.com");
+
+        await using (var setup = database.CreateDbContext())
+        {
+            var target = await setup.AccesosUsuario.SingleAsync(x => x.UsuarioId == targetId);
+            target.CambiarEstado(false);
+            await setup.SaveChangesAsync();
+        }
+
+        async Task<Dictionary<Guid, (bool Activo, long VersionSesion)>> SnapshotAsync()
+        {
+            await using var snapshotDb = database.CreateDbContext();
+            return await snapshotDb.AccesosUsuario.AsNoTracking()
+                .Where(x => x.OperadorId == actor.OperadorId && x.ComercioId == actor.ComercioId)
+                .ToDictionaryAsync(x => x.UsuarioId, x => (x.Activo, x.VersionSesion));
+        }
+
+        var before = await SnapshotAsync();
+        Assert.False(before[targetId].Activo);
+        using var activation = await PatchStateAsync(client, targetId, true);
+        Assert.Equal(HttpStatusCode.NoContent, activation.StatusCode);
+        var after = await SnapshotAsync();
+
+        Assert.Equal(before.Keys.Order(), after.Keys.Order());
+        foreach (var (userId, state) in before)
+            Assert.Equal(userId == targetId ? (true, state.VersionSesion + 1) : state, after[userId]);
     }
 
     [Fact]
