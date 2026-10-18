@@ -21,8 +21,8 @@ internal static class PublishedTrackingJobTestData
         IntegrationDatabase database, Guid operatorId, Guid shipmentId)
     {
         await using var db = database.CreateDbContext();
-        var message = new OutboxMessage(operatorId, shipmentId, "GenerarSeguimiento", OutboxDestino.RabbitMq,
-            "{\"envioId\":\"test\"}");
+        var message = OutboxMessage.ForShipment(operatorId, shipmentId, OutboxMessageTypes.TrackingRequested,
+            OutboxDestino.RabbitMq, "{\"envioId\":\"test\"}");
         db.OutboxMessages.Add(message);
         await db.SaveChangesAsync();
         await PublishPendingAsync(db, message.Id);

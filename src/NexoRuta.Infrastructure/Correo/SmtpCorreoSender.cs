@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Mail;
+using System.Text;
 using Microsoft.Extensions.Options;
 using NexoRuta.Application.Administracion.Interfaces;
 
@@ -14,7 +15,9 @@ public sealed class SmtpCorreoSender(IOptions<ConfiguracionSmtp> options) : ICor
         {
             From = new MailAddress(config.FromAddress, config.FromName),
             Subject = asunto,
+            SubjectEncoding = Encoding.UTF8,
             Body = cuerpoTexto,
+            BodyEncoding = Encoding.UTF8,
             IsBodyHtml = false
         };
         message.To.Add(new MailAddress(destinatario));

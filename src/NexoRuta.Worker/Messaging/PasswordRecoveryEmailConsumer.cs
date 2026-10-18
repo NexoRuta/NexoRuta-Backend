@@ -1,4 +1,3 @@
-using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.DependencyInjection;
@@ -19,21 +18,8 @@ public sealed class PasswordRecoveryEmailConsumer(
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var username = configuration[WorkerConfigurationKeys.RabbitUsername];
-        var password = configuration[WorkerConfigurationKeys.RabbitPassword];
-        if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
-            throw new InvalidOperationException("RabbitMQ technical credentials are required.");
-
-        var factory = new ConnectionFactory
-        {
-            HostName = configuration[WorkerConfigurationKeys.RabbitHost] ?? "127.0.0.1",
-            Port = configuration.GetValue(WorkerConfigurationKeys.RabbitPort, 5672),
-            UserName = username,
-            Password = password,
-            AutomaticRecoveryEnabled = true,
-            ConsumerDispatchConcurrency = 1
-        };
-        await using var connection = await factory.CreateConnectionAsync(stoppingToken);
+        var factory = RabbitMqWorkerConnection.CreateFactory(configuration);
+        await using var connection = await RabbitMqWorkerConnection.ConnectWithRetryAsync(factory, logger, stoppingToken);
         await using var channel = await connection.CreateChannelAsync(cancellationToken: stoppingToken);
         await PasswordRecoveryEmailTopology.DeclareAsync(channel, stoppingToken);
         await channel.BasicQosAsync(0, 1, false, stoppingToken);
@@ -60,21 +46,22 @@ public sealed class PasswordRecoveryEmailConsumer(
         try
         {
             await using var scope = scopeFactory.CreateAsyncScope();
-            var outbox = scope.ServiceProvider.GetRequiredService<SecurityOutboxRepository>();
+            var outbox = scope.ServiceProvider.GetRequiredService<EfOutboxRepository>();
             var state = await outbox.GetEmailDeliveryStateAsync(messageId, ct);
-            if (state is PasswordRecoveryEmailDeliveryStates.Delivered or PasswordRecoveryEmailDeliveryStates.Expired or PasswordRecoveryEmailDeliveryStates.Failed)
+            if (state is nameof(OutboxEmailDeliveryState.Delivered) or nameof(OutboxEmailDeliveryState.Expired) or nameof(OutboxEmailDeliveryState.Failed))
             {
                 await channel.BasicAckAsync(delivery.DeliveryTag, false, ct);
                 return;
             }
-            if (state != PasswordRecoveryEmailDeliveryStates.Pending)
+            if (state != nameof(OutboxEmailDeliveryState.Pending))
                 throw new InvalidDataException("Password recovery delivery state is unavailable.");
-            if (delivery.BasicProperties.Type != SecurityOutboxMessageTypes.PasswordRecoveryEmail)
+            if (delivery.BasicProperties.Type != OutboxMessageTypes.PasswordRecoveryEmail)
                 throw new InvalidDataException("Unexpected password recovery command type.");
 
             stage = PasswordRecoveryEmailStage.Decryption;
-            var protectedPayload = Encoding.UTF8.GetString(delivery.Body.Span);
-            var plaintext = dataProtection.CreateProtector(PasswordRecoveryDataProtection.EmailCommandPurpose).Unprotect(protectedPayload);
+            var envelope = JsonSerializer.Deserialize<ProtectedPasswordRecoveryCommand>(delivery.Body.Span, PasswordRecoveryJson.Options)
+                ?? throw new InvalidDataException("Password recovery envelope is invalid.");
+            var plaintext = dataProtection.CreateProtector(PasswordRecoveryDataProtection.EmailCommandPurpose).Unprotect(envelope.ProtectedCommand);
             var command = JsonSerializer.Deserialize<PasswordRecoveryEmailCommand>(plaintext, PasswordRecoveryJson.Options)
                 ?? throw new InvalidDataException("Password recovery command payload is invalid.");
             stage = PasswordRecoveryEmailStage.CommandValidation;
@@ -85,8 +72,8 @@ public sealed class PasswordRecoveryEmailConsumer(
             if (command.ExpiresAtUtc <= DateTimeOffset.UtcNow)
             {
                 stage = PasswordRecoveryEmailStage.DeliveryStatePersistence;
-                var markedExpired = await outbox.MarkEmailDeliveryAsync(messageId, PasswordRecoveryEmailDeliveryState.Expired, ct);
-                if (!markedExpired && await outbox.GetEmailDeliveryStateAsync(messageId, ct) != PasswordRecoveryEmailDeliveryStates.Expired)
+                var markedExpired = await outbox.MarkEmailDeliveryAsync(messageId, OutboxEmailDeliveryState.Expired, ct);
+                if (!markedExpired && await outbox.GetEmailDeliveryStateAsync(messageId, ct) != nameof(OutboxEmailDeliveryState.Expired))
                     throw new InvalidOperationException("Expired recovery delivery state was not persisted.");
                 await channel.BasicAckAsync(delivery.DeliveryTag, false, ct);
                 logger.LogInformation("Password recovery email skipped because the link expired. MessageId: {MessageId}", messageId);
@@ -98,8 +85,8 @@ public sealed class PasswordRecoveryEmailConsumer(
             stage = PasswordRecoveryEmailStage.SmtpDelivery;
             await correo.EnviarAsync(command.Recipient, "Restablecer contraseña de NexoRuta", body, ct);
             stage = PasswordRecoveryEmailStage.DeliveryStatePersistence;
-            var markedDelivered = await outbox.MarkEmailDeliveryAsync(messageId, PasswordRecoveryEmailDeliveryState.Delivered, ct);
-            if (!markedDelivered && await outbox.GetEmailDeliveryStateAsync(messageId, ct) != PasswordRecoveryEmailDeliveryStates.Delivered)
+            var markedDelivered = await outbox.MarkEmailDeliveryAsync(messageId, OutboxEmailDeliveryState.Delivered, ct);
+            if (!markedDelivered && await outbox.GetEmailDeliveryStateAsync(messageId, ct) != nameof(OutboxEmailDeliveryState.Delivered))
                 throw new InvalidOperationException("Delivered recovery state was not persisted.");
             await channel.BasicAckAsync(delivery.DeliveryTag, false, ct);
             logger.LogInformation("Password recovery email processed. MessageId: {MessageId}", messageId);
@@ -137,3 +124,5 @@ public sealed class PasswordRecoveryEmailConsumer(
         DeliveryStatePersistence
     }
 }
+
+public sealed record ProtectedPasswordRecoveryCommand(string ProtectedCommand);

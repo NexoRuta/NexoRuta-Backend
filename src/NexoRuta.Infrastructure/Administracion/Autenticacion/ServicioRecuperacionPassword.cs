@@ -41,23 +41,11 @@ public sealed class ServicioRecuperacionPassword(
             var encryptedCommand = protector.Protect(JsonSerializer.Serialize(emailCommand));
             var requestedEvent = new PasswordRecoveryRequestedV1(requestedEventId, user.Id, occurredAt);
             var requestedPayload = JsonSerializer.Serialize(requestedEvent, PasswordRecoveryJson.Options);
-            var emailMessage = new SecurityOutboxMessage(
-                SecurityOutboxMessageTypes.PasswordRecoveryEmail,
-                SecurityOutboxDestination.RabbitMq,
-                encryptedCommand,
-                PasswordRecoveryEmailDeliveryState.Pending,
-                emailId);
-            var eventMessage = new SecurityOutboxMessage(
-                SecurityOutboxMessageTypes.PasswordRecoveryRequested,
-                SecurityOutboxDestination.Kafka,
-                requestedPayload,
-                id: requestedEventId);
-
             stage = PasswordRecoveryStage.OutboxPersistence;
-            await using var transaction = await db.Database.BeginTransactionAsync(ct);
-            db.SecurityOutboxMessages.AddRange(emailMessage, eventMessage);
-            await db.SaveChangesAsync(ct);
-            await transaction.CommitAsync(ct);
+            var emailPayload = JsonSerializer.Serialize(new { protectedCommand = encryptedCommand }, PasswordRecoveryJson.Options);
+            var inserted = await new EfOutboxRepository(db).EnqueuePasswordRecoveryAsync(
+                user.Id, emailId, requestedEventId, emailPayload, requestedPayload, ct);
+            if (!inserted) throw new InvalidOperationException("Password recovery outbox pair was not persisted.");
         }
         catch (Exception error) when (!ct.IsCancellationRequested && error is not OperationCanceledException)
         {

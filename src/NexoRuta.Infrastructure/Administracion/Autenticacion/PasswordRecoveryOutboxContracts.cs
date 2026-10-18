@@ -1,6 +1,7 @@
 namespace NexoRuta.Infrastructure.Administracion.Autenticacion;
 
 using System.Text.Json;
+using NexoRuta.Infrastructure.Outbox;
 
 public static class PasswordRecoveryDataProtection
 {
@@ -11,7 +12,7 @@ public static class PasswordRecoveryDataProtection
 
 public static class PasswordRecoveryEventVersion
 {
-    public const int Current = 1;
+    public const int Current = OutboxContractVersions.Current;
 }
 
 public static class PasswordRecoveryJson

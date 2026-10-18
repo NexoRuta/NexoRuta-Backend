@@ -76,7 +76,7 @@ public sealed class PasswordRecoveryMongoConsumer(
     PasswordRecoveryMongoStore store,
     ILogger<PasswordRecoveryMongoConsumer> logger) : BackgroundService
 {
-    public const string ConsumerGroupId = "nexoruta.password-recovery.mongo.v1";
+    public const string ConsumerGroupId = PasswordRecoveryMessaging.MongoConsumerGroup;
     private const int RetryDelaySeconds = 5;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -124,7 +124,7 @@ public sealed class PasswordRecoveryMongoConsumer(
                     ?? throw new InvalidDataException("Password recovery event payload is invalid.");
                 if (value.EventId == Guid.Empty || value.UsuarioId == Guid.Empty || value.OccurredAt == default ||
                     value.SchemaVersion != PasswordRecoveryEventVersion.Current ||
-                    !string.Equals(message.Message.Key, value.EventId.ToString("D"), StringComparison.OrdinalIgnoreCase))
+                    !string.Equals(message.Message.Key, value.UsuarioId.ToString("D"), StringComparison.OrdinalIgnoreCase))
                     throw new InvalidDataException("Password recovery event contract is invalid.");
 
                 await store.InsertIdempotentlyAsync(PasswordRecoveryRequestedDocument.From(value), stoppingToken);

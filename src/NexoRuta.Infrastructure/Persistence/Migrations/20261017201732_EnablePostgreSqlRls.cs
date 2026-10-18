@@ -61,11 +61,11 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                     nexoruta_auth_fn, nexoruta_public_fn, nexoruta_queue_fn, nexoruta_role_fn, nexoruta_org_fn, nexoruta_shipment_fn, nexoruta_job_fn;
 
                 CREATE OR REPLACE FUNCTION nexoruta_app.setting(p_name text)
-                RETURNS text LANGUAGE sql STABLE PARALLEL SAFE SET search_path = pg_catalog
+                RETURNS text LANGUAGE sql VOLATILE SET search_path = pg_catalog
                 AS $$ SELECT NULLIF(current_setting('nexoruta.' || p_name, true), '') $$;
 
                 CREATE OR REPLACE FUNCTION nexoruta_app.ctx_uuid(p_name text)
-                RETURNS uuid LANGUAGE plpgsql STABLE PARALLEL SAFE SET search_path = pg_catalog
+                RETURNS uuid LANGUAGE plpgsql VOLATILE SET search_path = pg_catalog
                 AS $$
                 BEGIN
                     RETURN NULLIF(current_setting('nexoruta.' || p_name, true), '')::uuid;
@@ -75,7 +75,7 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                 $$;
 
                 CREATE OR REPLACE FUNCTION nexoruta_app.ctx_bool(p_name text)
-                RETURNS boolean LANGUAGE plpgsql STABLE PARALLEL SAFE SET search_path = pg_catalog
+                RETURNS boolean LANGUAGE plpgsql VOLATILE SET search_path = pg_catalog
                 AS $$
                 BEGIN
                     RETURN COALESCE(NULLIF(current_setting('nexoruta.' || p_name, true), '')::boolean, false);
@@ -323,9 +323,56 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                 END
                 $create_shipment$;
 
+                CREATE OR REPLACE FUNCTION nexoruta_app.enqueue_password_recovery(
+                    p_user_id uuid, p_email_id uuid, p_event_id uuid, p_email_payload jsonb, p_event_payload jsonb)
+                RETURNS boolean
+                LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, nexoruta_app
+                AS $recovery_enqueue$
+                DECLARE v_now timestamptz := clock_timestamp();
+                BEGIN
+                    IF p_user_id IS NULL OR p_user_id = '00000000-0000-0000-0000-000000000000'::uuid
+                       OR p_email_id IS NULL OR p_event_id IS NULL OR p_email_id = p_event_id
+                       OR p_email_payload IS NULL OR jsonb_typeof(p_email_payload) <> 'object'
+                       OR p_email_payload <> jsonb_build_object('protectedCommand', p_email_payload -> 'protectedCommand')
+                       OR jsonb_typeof(p_email_payload -> 'protectedCommand') IS DISTINCT FROM 'string'
+                       OR COALESCE(p_email_payload ->> 'protectedCommand', '') = ''
+                       OR p_event_payload IS NULL OR jsonb_typeof(p_event_payload) <> 'object'
+                       OR p_event_payload <> jsonb_build_object(
+                            'eventId', p_event_payload -> 'eventId',
+                            'schemaVersion', p_event_payload -> 'schemaVersion',
+                            'usuarioId', p_event_payload -> 'usuarioId',
+                            'occurredAt', p_event_payload -> 'occurredAt')
+                       OR NOT (p_event_payload ?& ARRAY['eventId','schemaVersion','usuarioId','occurredAt'])
+                       OR p_event_payload ->> 'eventId' <> p_event_id::text
+                       OR jsonb_typeof(p_event_payload -> 'schemaVersion') <> 'number'
+                       OR p_event_payload ->> 'schemaVersion' <> '1'
+                       OR p_event_payload ->> 'usuarioId' <> p_user_id::text
+                       OR jsonb_typeof(p_event_payload -> 'occurredAt') <> 'string'
+                       OR COALESCE(p_event_payload ->> 'occurredAt', '') = '' THEN
+                        RAISE EXCEPTION 'Invalid password recovery outbox pair.' USING ERRCODE = '22023';
+                    END IF;
+                    IF NOT EXISTS (SELECT 1 FROM public."Usuarios" u WHERE u."Id" = p_user_id) THEN
+                        RETURN false;
+                    END IF;
+                    PERFORM set_config('nexoruta.queue_mode', 'enqueue_recovery', true);
+                    PERFORM set_config('nexoruta.recovery_user_id', p_user_id::text, true);
+                    INSERT INTO public."OutboxMessages" (
+                        "Id", "OperadorId", "EnvioId", "Ambito", "ClaveAmbito", "Tipo", "VersionContrato",
+                        "Destino", "Prioridad", "Estado", "Payload", "EstadoEntrega", "Intentos",
+                        "CreadoEnUtc", "ProximoIntentoEnUtc")
+                    VALUES
+                        (p_email_id, NULL, NULL, 'Identidad', p_user_id, 'PasswordRecoveryEmail', 1,
+                         'RabbitMq', 'Alta', 'Pendiente', p_email_payload, 'Pending', 0, v_now, v_now),
+                        (p_event_id, NULL, NULL, 'Identidad', p_user_id, 'PasswordRecoveryRequested', 1,
+                         'Kafka', 'Baja', 'Pendiente', p_event_payload, NULL, 0, v_now, v_now);
+                    RETURN true;
+                END
+                $recovery_enqueue$;
+
                 CREATE OR REPLACE FUNCTION nexoruta_app.claim_outbox(p_processor_id uuid, p_destination text)
-                RETURNS TABLE("Id" uuid, "OperadorId" uuid, "EnvioId" uuid, "Tipo" text,
-                              "Destino" text, "Payload" text, "Intentos" integer, "CreadoEnUtc" timestamptz)
+                RETURNS TABLE("Id" uuid, "OperadorId" uuid, "EnvioId" uuid, "Ambito" text, "ClaveAmbito" uuid,
+                              "Tipo" text, "VersionContrato" integer, "Destino" text, "Prioridad" text,
+                              "Payload" text, "EstadoEntrega" text, "Intentos" integer, "CreadoEnUtc" timestamptz)
                 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, nexoruta_app
                 AS $claim$
                 DECLARE v_id uuid; v_now timestamptz := clock_timestamp();
@@ -333,12 +380,21 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                     IF p_processor_id IS NULL OR p_processor_id = '00000000-0000-0000-0000-000000000000'::uuid
                        OR p_destination NOT IN ('RabbitMq', 'Kafka') THEN RAISE EXCEPTION 'Invalid outbox claim.'; END IF;
                     PERFORM set_config('nexoruta.queue_mode', 'claim', true);
+                    PERFORM set_config('nexoruta.queue_destination', p_destination, true);
                     PERFORM set_config('nexoruta.queue_processor_id', p_processor_id::text, true);
                     SELECT m."Id" INTO v_id FROM public."OutboxMessages" m
                      WHERE m."Destino" = p_destination AND (
                          (m."Estado" IN ('Pendiente', 'Error') AND m."ProximoIntentoEnUtc" <= v_now) OR
                          (m."Estado" = 'Procesando' AND m."ReservaHastaUtc" <= v_now))
-                     ORDER BY m."CreadoEnUtc" FOR UPDATE SKIP LOCKED LIMIT 1;
+                       AND (p_destination <> 'Kafka' OR NOT EXISTS (
+                           SELECT 1 FROM public."OutboxMessages" older
+                           WHERE older."Destino" = 'Kafka' AND older."Ambito" = m."Ambito"
+                             AND older."ClaveAmbito" = m."ClaveAmbito"
+                             AND (older."CreadoEnUtc", older."Id") < (m."CreadoEnUtc", m."Id")
+                             AND older."Estado" <> 'Publicado'))
+                     ORDER BY LEAST(2, CASE m."Prioridad" WHEN 'Alta' THEN 2 WHEN 'Normal' THEN 1 ELSE 0 END +
+                         floor(extract(epoch FROM (v_now - m."CreadoEnUtc")) / 300)::integer) DESC,
+                         m."CreadoEnUtc", m."Id" FOR UPDATE SKIP LOCKED LIMIT 1;
                     IF v_id IS NULL THEN RETURN; END IF;
                     PERFORM set_config('nexoruta.queue_message_id', v_id::text, true);
                     RETURN QUERY
@@ -346,8 +402,9 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                            "ReservaHastaUtc" = v_now + interval '2 minutes',
                            "Intentos" = CASE WHEN m."Intentos" < 2147483647 THEN m."Intentos" + 1 ELSE m."Intentos" END
                      WHERE m."Id" = v_id
-                    RETURNING m."Id", m."OperadorId", m."EnvioId", m."Tipo"::text, m."Destino"::text,
-                              m."Payload"::text, m."Intentos", m."CreadoEnUtc";
+                    RETURNING m."Id", m."OperadorId", m."EnvioId", m."Ambito"::text, m."ClaveAmbito",
+                              m."Tipo"::text, m."VersionContrato", m."Destino"::text, m."Prioridad"::text,
+                              m."Payload"::text, m."EstadoEntrega"::text, m."Intentos", m."CreadoEnUtc";
                 END
                 $claim$;
 
@@ -374,21 +431,54 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                 END
                 $finish$;
 
+                CREATE OR REPLACE FUNCTION nexoruta_app.mark_outbox_email_delivery(p_message_id uuid, p_state text)
+                RETURNS boolean
+                LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, nexoruta_app
+                AS $mark_email_delivery$
+                BEGIN
+                    IF p_message_id IS NULL OR p_state NOT IN ('Delivered', 'Expired', 'Failed') THEN RETURN false; END IF;
+                    PERFORM set_config('nexoruta.queue_mode', 'email_delivery', true);
+                    PERFORM set_config('nexoruta.queue_message_id', p_message_id::text, true);
+                    UPDATE public."OutboxMessages" m SET "EstadoEntrega" = p_state
+                     WHERE m."Id" = p_message_id AND m."Tipo" = 'PasswordRecoveryEmail'
+                       AND m."Destino" = 'RabbitMq' AND m."Ambito" = 'Identidad'
+                       AND (m."EstadoEntrega" = 'Pending' OR m."EstadoEntrega" = p_state);
+                    RETURN FOUND;
+                END
+                $mark_email_delivery$;
+
+                CREATE OR REPLACE FUNCTION nexoruta_app.get_outbox_email_delivery_state(p_message_id uuid)
+                RETURNS text
+                LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, nexoruta_app
+                AS $get_email_delivery$
+                DECLARE v_state text;
+                BEGIN
+                    IF p_message_id IS NULL THEN RETURN NULL; END IF;
+                    PERFORM set_config('nexoruta.queue_mode', 'email_delivery_read', true);
+                    PERFORM set_config('nexoruta.queue_message_id', p_message_id::text, true);
+                    SELECT m."EstadoEntrega" INTO v_state FROM public."OutboxMessages" m
+                     WHERE m."Id" = p_message_id AND m."Tipo" = 'PasswordRecoveryEmail'
+                       AND m."Destino" = 'RabbitMq' AND m."Ambito" = 'Identidad';
+                    RETURN v_state;
+                END
+                $get_email_delivery$;
+
                 CREATE OR REPLACE FUNCTION nexoruta_app.begin_tracking_job(
                     p_message_id uuid, p_operator_id uuid, p_shipment_id uuid)
                 RETURNS boolean
                 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, nexoruta_app
                 AS $tracking_job$
                 DECLARE v_operator_id uuid; v_shipment_id uuid; v_type text; v_destination text;
-                        v_state text; v_lease_until timestamptz;
+                        v_scope text; v_contract_version integer; v_state text; v_lease_until timestamptz;
                 BEGIN
                     IF p_message_id IS NULL OR p_operator_id IS NULL OR p_shipment_id IS NULL THEN RETURN false; END IF;
                     PERFORM set_config('nexoruta.job_message_id', p_message_id::text, true);
-                    SELECT o."OperadorId", o."EnvioId", o."Tipo", o."Destino", o."Estado", o."ReservaHastaUtc"
-                      INTO v_operator_id, v_shipment_id, v_type, v_destination, v_state, v_lease_until
+                    SELECT o."OperadorId", o."EnvioId", o."Tipo", o."Destino", o."Ambito", o."VersionContrato", o."Estado", o."ReservaHastaUtc"
+                      INTO v_operator_id, v_shipment_id, v_type, v_destination, v_scope, v_contract_version, v_state, v_lease_until
                       FROM public."OutboxMessages" o WHERE o."Id" = p_message_id;
                     IF NOT FOUND OR v_operator_id <> p_operator_id OR v_shipment_id <> p_shipment_id
                        OR v_type <> 'GenerarSeguimiento' OR v_destination <> 'RabbitMq'
+                       OR v_scope <> 'Envio' OR v_contract_version <> 1
                        OR (v_state <> 'Publicado' AND NOT (v_state = 'Procesando' AND v_lease_until > clock_timestamp())) THEN
                         RETURN false;
                     END IF;
@@ -498,8 +588,11 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                 ALTER FUNCTION nexoruta_app.lookup_unassigned_identity(uuid) OWNER TO nexoruta_auth_fn;
                 ALTER FUNCTION nexoruta_app.public_tracking(text) OWNER TO nexoruta_public_fn;
                 ALTER FUNCTION nexoruta_app.create_shipment(uuid, uuid, uuid, uuid, text, text, text, numeric, numeric, numeric, numeric) OWNER TO nexoruta_shipment_fn;
+                ALTER FUNCTION nexoruta_app.enqueue_password_recovery(uuid, uuid, uuid, jsonb, jsonb) OWNER TO nexoruta_auth_fn;
                 ALTER FUNCTION nexoruta_app.claim_outbox(uuid, text) OWNER TO nexoruta_queue_fn;
                 ALTER FUNCTION nexoruta_app.finish_outbox(uuid, uuid, boolean, text) OWNER TO nexoruta_queue_fn;
+                ALTER FUNCTION nexoruta_app.mark_outbox_email_delivery(uuid, text) OWNER TO nexoruta_queue_fn;
+                ALTER FUNCTION nexoruta_app.get_outbox_email_delivery_state(uuid) OWNER TO nexoruta_queue_fn;
                 ALTER FUNCTION nexoruta_app.begin_tracking_job(uuid, uuid, uuid) OWNER TO nexoruta_job_fn;
                 ALTER FUNCTION nexoruta_app.delete_unused_role(uuid) OWNER TO nexoruta_role_fn;
                 ALTER FUNCTION nexoruta_app.lock_owned_role(uuid) OWNER TO nexoruta_role_fn;
@@ -529,8 +622,11 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                     TO nexoruta_api;
                 GRANT EXECUTE ON FUNCTION nexoruta_app.public_tracking(text) TO nexoruta_api;
                 GRANT EXECUTE ON FUNCTION nexoruta_app.create_shipment(uuid, uuid, uuid, uuid, text, text, text, numeric, numeric, numeric, numeric) TO nexoruta_api;
+                GRANT EXECUTE ON FUNCTION nexoruta_app.enqueue_password_recovery(uuid, uuid, uuid, jsonb, jsonb) TO nexoruta_api;
                 GRANT EXECUTE ON FUNCTION nexoruta_app.claim_outbox(uuid, text),
-                    nexoruta_app.finish_outbox(uuid, uuid, boolean, text) TO nexoruta_worker;
+                    nexoruta_app.finish_outbox(uuid, uuid, boolean, text),
+                    nexoruta_app.mark_outbox_email_delivery(uuid, text),
+                    nexoruta_app.get_outbox_email_delivery_state(uuid) TO nexoruta_worker;
                 GRANT EXECUTE ON FUNCTION nexoruta_app.begin_tracking_job(uuid, uuid, uuid) TO nexoruta_worker;
                 GRANT EXECUTE ON FUNCTION nexoruta_app.delete_unused_role(uuid),
                     nexoruta_app.lock_owned_role(uuid), nexoruta_app.revoke_org_sessions(text, uuid) TO nexoruta_api;
@@ -561,18 +657,26 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
 
                 CREATE POLICY queue_fn_outbox_select ON public."OutboxMessages" FOR SELECT TO nexoruta_queue_fn
                     USING (
-                        "Id" = nexoruta_app.ctx_uuid('queue_message_id') OR
-                        (nexoruta_app.setting('queue_mode') = 'claim' AND
-                            (("Estado" IN ('Pendiente', 'Error') AND "ProximoIntentoEnUtc" <= now()) OR
+                        (nexoruta_app.setting('queue_mode') IN ('claim', 'finish', 'email_delivery', 'email_delivery_read')
+                            AND "Id" = nexoruta_app.ctx_uuid('queue_message_id'))
+                        OR (nexoruta_app.setting('queue_mode') = 'claim' AND
+                            "Destino" = nexoruta_app.setting('queue_destination') AND
+                            (nexoruta_app.setting('queue_destination') = 'Kafka' OR
+                             ("Estado" IN ('Pendiente', 'Error') AND "ProximoIntentoEnUtc" <= now()) OR
                              ("Estado" = 'Procesando' AND "ReservaHastaUtc" <= now())))
                         OR (nexoruta_app.setting('queue_mode') = 'finish' AND
                             "Id" = nexoruta_app.ctx_uuid('queue_message_id') AND
                             "ProcesadorId" = nexoruta_app.ctx_uuid('queue_processor_id') AND
                             "ReservaHastaUtc" > now())
+                        OR (nexoruta_app.setting('queue_mode') = 'email_delivery' AND
+                            "Id" = nexoruta_app.ctx_uuid('queue_message_id') AND "Tipo" = 'PasswordRecoveryEmail')
+                        OR (nexoruta_app.setting('queue_mode') = 'email_delivery_read' AND
+                            "Id" = nexoruta_app.ctx_uuid('queue_message_id') AND "Tipo" = 'PasswordRecoveryEmail')
                     );
                 CREATE POLICY queue_fn_outbox_update ON public."OutboxMessages" FOR UPDATE TO nexoruta_queue_fn
                     USING (
                         (nexoruta_app.setting('queue_mode') = 'claim' AND
+                            "Destino" = nexoruta_app.setting('queue_destination') AND
                             ((("Estado" IN ('Pendiente', 'Error') AND "ProximoIntentoEnUtc" <= now()) OR
                               ("Estado" = 'Procesando' AND "ReservaHastaUtc" <= now())) OR
                               "Id" = nexoruta_app.ctx_uuid('queue_message_id')))
@@ -580,8 +684,12 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                             "Id" = nexoruta_app.ctx_uuid('queue_message_id') AND
                             "ProcesadorId" = nexoruta_app.ctx_uuid('queue_processor_id') AND
                             "ReservaHastaUtc" > now())
+                        OR (nexoruta_app.setting('queue_mode') = 'email_delivery' AND
+                            "Id" = nexoruta_app.ctx_uuid('queue_message_id') AND "Tipo" = 'PasswordRecoveryEmail')
                     )
-                    WITH CHECK ("Id" = nexoruta_app.ctx_uuid('queue_message_id'));
+                    -- The SECURITY DEFINER functions constrain each UPDATE's target in USING/WHERE;
+                    -- table CHECK constraints enforce the scope and registered type/destination tuple.
+                    WITH CHECK (true);
                 GRANT SELECT, UPDATE ON public."OutboxMessages" TO nexoruta_queue_fn;
 
                 CREATE POLICY org_fn_select_access ON public."AccesosUsuario" FOR SELECT TO nexoruta_org_fn
@@ -906,32 +1014,47 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                     USING ("MessageId" = nexoruta_app.ctx_uuid('job_message_id') AND "Consumer" = nexoruta_app.setting('job_consumer')
                         AND EXISTS (SELECT 1 FROM public."OutboxMessages" o WHERE o."Id" = "MessageId"
                             AND o."OperadorId" = nexoruta_app.ctx_uuid('org_id') AND o."EnvioId" = nexoruta_app.ctx_uuid('job_shipment_id')
+                            AND o."Ambito" = 'Envio' AND o."VersionContrato" = 1
                             AND o."Tipo" = 'GenerarSeguimiento' AND o."Destino" = 'RabbitMq'));
                 CREATE POLICY processed_worker_insert ON public."ProcessedMessages" FOR INSERT TO nexoruta_worker
                     WITH CHECK ("MessageId" = nexoruta_app.ctx_uuid('job_message_id') AND "Consumer" = nexoruta_app.setting('job_consumer')
                         AND EXISTS (SELECT 1 FROM public."OutboxMessages" o WHERE o."Id" = "MessageId"
                             AND o."OperadorId" = nexoruta_app.ctx_uuid('org_id') AND o."EnvioId" = nexoruta_app.ctx_uuid('job_shipment_id')
+                            AND o."Ambito" = 'Envio' AND o."VersionContrato" = 1
                             AND o."Tipo" = 'GenerarSeguimiento' AND o."Destino" = 'RabbitMq'));
                 CREATE POLICY worker_outbox_message_select ON public."OutboxMessages" FOR SELECT TO nexoruta_worker
                     USING ("Id" = nexoruta_app.ctx_uuid('job_message_id') AND "OperadorId" = nexoruta_app.ctx_uuid('org_id')
-                        AND "EnvioId" = nexoruta_app.ctx_uuid('job_shipment_id') AND "Tipo" = 'GenerarSeguimiento' AND "Destino" = 'RabbitMq');
+                        AND "EnvioId" = nexoruta_app.ctx_uuid('job_shipment_id') AND "Ambito" = 'Envio' AND "VersionContrato" = 1
+                        AND "Tipo" = 'GenerarSeguimiento' AND "Destino" = 'RabbitMq');
                 CREATE POLICY job_fn_outbox_select ON public."OutboxMessages" FOR SELECT TO nexoruta_job_fn
-                    USING ("Id" = nexoruta_app.ctx_uuid('job_message_id') AND "Tipo" = 'GenerarSeguimiento' AND "Destino" = 'RabbitMq');
+                    USING ("Id" = nexoruta_app.ctx_uuid('job_message_id') AND "Ambito" = 'Envio'
+                        AND "VersionContrato" = 1 AND "Tipo" = 'GenerarSeguimiento' AND "Destino" = 'RabbitMq');
                 GRANT SELECT ON public."OutboxMessages" TO nexoruta_worker, nexoruta_job_fn;
 
                 GRANT INSERT ON public."OutboxMessages" TO nexoruta_api;
                 CREATE POLICY outbox_api_insert ON public."OutboxMessages" FOR INSERT TO nexoruta_api
                     WITH CHECK (nexoruta_app.setting('actor_kind') = 'comercio'
+                        AND "Ambito" = 'Envio' AND "ClaveAmbito" = "EnvioId"
                         AND "OperadorId" = nexoruta_app.ctx_uuid('selected_operator_id')
                         AND "EnvioId" = nexoruta_app.ctx_uuid('shipment_id')
                         AND "Estado" = 'Pendiente' AND "Intentos" = 0
                         AND "ProcesadorId" IS NULL AND "ReservaHastaUtc" IS NULL
-                        AND "PublicadoEnUtc" IS NULL AND "UltimoError" IS NULL
-                        AND (("Tipo" = 'GenerarSeguimiento' AND "Destino" = 'RabbitMq')
-                          OR ("Tipo" = 'EnvioCreado' AND "Destino" = 'Kafka'))
+                        AND "PublicadoEnUtc" IS NULL AND "UltimoError" IS NULL AND "EstadoEntrega" IS NULL
+                        AND (("Tipo" = 'GenerarSeguimiento' AND "VersionContrato" = 1 AND "Destino" = 'RabbitMq' AND "Prioridad" = 'Alta')
+                          OR ("Tipo" = 'EnvioCreado' AND "VersionContrato" = 1 AND "Destino" = 'Kafka' AND "Prioridad" = 'Normal'))
                         AND EXISTS (SELECT 1 FROM public."Envios" e WHERE e."Id" = "OutboxMessages"."EnvioId"
                             AND e."OperadorId" = "OutboxMessages"."OperadorId"
                             AND e."ComercioId" = nexoruta_app.ctx_uuid('org_id')));
+                GRANT INSERT ON public."OutboxMessages" TO nexoruta_auth_fn;
+                CREATE POLICY auth_fn_recovery_outbox_insert ON public."OutboxMessages" FOR INSERT TO nexoruta_auth_fn
+                    WITH CHECK (nexoruta_app.setting('queue_mode') = 'enqueue_recovery'
+                        AND "Ambito" = 'Identidad' AND "ClaveAmbito" = nexoruta_app.ctx_uuid('recovery_user_id')
+                        AND "OperadorId" IS NULL AND "EnvioId" IS NULL
+                        AND "Estado" = 'Pendiente' AND "Intentos" = 0
+                        AND "ProcesadorId" IS NULL AND "ReservaHastaUtc" IS NULL
+                        AND "PublicadoEnUtc" IS NULL AND "UltimoError" IS NULL
+                        AND (("Tipo" = 'PasswordRecoveryEmail' AND "VersionContrato" = 1 AND "Destino" = 'RabbitMq' AND "Prioridad" = 'Alta' AND "EstadoEntrega" = 'Pending')
+                          OR ("Tipo" = 'PasswordRecoveryRequested' AND "VersionContrato" = 1 AND "Destino" = 'Kafka' AND "Prioridad" = 'Baja' AND "EstadoEntrega" IS NULL)));
 
                 CREATE POLICY public_fn_link_lookup ON public."EnlacesSeguimiento" FOR SELECT TO nexoruta_public_fn
                     USING ("TokenHash" = nexoruta_app.setting('public_token_hash') AND "RevocadoEnUtc" IS NULL AND "ExpiraEnUtc" > now());

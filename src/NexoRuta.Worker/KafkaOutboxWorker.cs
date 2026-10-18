@@ -6,7 +6,7 @@ namespace NexoRuta.Worker;
 
 public sealed class KafkaOutboxWorker(
     IServiceScopeFactory scopeFactory,
-    KafkaEnvioCreadoPublisher publisher,
+    OutboxHandlerRegistry handlers,
     ILogger<KafkaOutboxWorker> logger) : BackgroundService
 {
     private readonly Guid procesadorId = Guid.NewGuid();
@@ -19,8 +19,8 @@ public sealed class KafkaOutboxWorker(
             {
                 await using var scope = scopeFactory.CreateAsyncScope();
                 var repository = scope.ServiceProvider.GetRequiredService<EfOutboxRepository>();
-                var evento = await repository.ReservarSiguienteAsync(procesadorId, OutboxDestino.Kafka, stoppingToken);
-                if (evento is null)
+                var message = await repository.ReservarSiguienteAsync(procesadorId, OutboxDestino.Kafka, stoppingToken);
+                if (message is null)
                 {
                     await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
                     continue;
@@ -28,7 +28,7 @@ public sealed class KafkaOutboxWorker(
 
                 try
                 {
-                    await publisher.PublicarAsync(evento, stoppingToken);
+                    await handlers.HandleAsync(message, stoppingToken);
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
@@ -38,18 +38,18 @@ public sealed class KafkaOutboxWorker(
                 catch (Exception error)
                 {
                     var code = error is KafkaException kafka ? $"Kafka:{kafka.Error.Code}" : error.GetType().Name;
-                    var recorded = await repository.MarcarErrorAsync(evento.Id, procesadorId, code, stoppingToken);
+                    var recorded = await repository.MarcarErrorAsync(message.Id, procesadorId, code, stoppingToken);
                     logger.LogWarning(
                         "Kafka outbox delivery failed. EventId: {EventId}, ErrorCode: {ErrorCode}, Attempt: {Attempt}, ErrorRecorded: {Recorded}",
-                        evento.Id, code, evento.Intentos, recorded);
+                        message.Id, code, message.Intentos, recorded);
                     continue;
                 }
 
-                var completed = await repository.MarcarPublicadoAsync(evento.Id, procesadorId, stoppingToken);
+                var completed = await repository.MarcarPublicadoAsync(message.Id, procesadorId, stoppingToken);
                 if (completed)
-                    logger.LogInformation("Kafka outbox published. EventId: {EventId}", evento.Id);
+                    logger.LogInformation("Kafka outbox published. EventId: {EventId}", message.Id);
                 else
-                    logger.LogWarning("Kafka confirmed {EventId}, but lease completion failed; replay may duplicate the event.", evento.Id);
+                    logger.LogWarning("Kafka confirmed {EventId}, but lease completion failed; replay may duplicate the event.", message.Id);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

@@ -11,11 +11,11 @@ namespace NexoRuta.UnitTests.Messaging;
 
 public sealed class KafkaEnvioCreadoPublisherTests
 {
-    private static OutboxMessage Event(OutboxDestino destino = OutboxDestino.Kafka, string tipo = "EnvioCreado")
+    private static OutboxMessage Event(OutboxDestino destino = OutboxDestino.Kafka, string tipo = OutboxMessageTypes.ShipmentCreated)
     {
         var envioId = Guid.NewGuid();
         var operadorId = Guid.NewGuid();
-        return new OutboxMessage(operadorId, envioId, tipo, destino, JsonSerializer.Serialize(new
+        return OutboxMessage.ForShipment(operadorId, envioId, tipo, destino, JsonSerializer.Serialize(new
         {
             envioId, operadorId, comercioId = Guid.NewGuid(), estado = "Admitido"
         }));
@@ -28,13 +28,13 @@ public sealed class KafkaEnvioCreadoPublisherTests
         var primero = KafkaEnvioCreadoPublisher.CrearMensaje(evento);
         var segundo = KafkaEnvioCreadoPublisher.CrearMensaje(evento);
         Assert.Equal("nexoruta.envios.creados.v1", KafkaEnvioCreadoPublisher.Topic);
-        Assert.Equal(evento.EnvioId.ToString("D"), primero.Key);
+        Assert.Equal(evento.EnvioId!.Value.ToString("D"), primero.Key);
         Assert.Equal(evento.Payload, primero.Value);
         var esperado = new Dictionary<string, string>
         {
-            ["eventId"] = evento.Id.ToString("D"), ["eventType"] = "EnvioCreado", ["eventVersion"] = "1",
+            ["eventId"] = evento.Id.ToString("D"), ["eventType"] = OutboxMessageTypes.ShipmentCreated, ["eventVersion"] = "1",
             ["occurredAt"] = evento.CreadoEnUtc.ToString("O", CultureInfo.InvariantCulture),
-            ["operadorId"] = evento.OperadorId.ToString("D"), ["contentType"] = "application/json"
+            ["operadorId"] = evento.OperadorId!.Value.ToString("D"), ["contentType"] = "application/json"
         };
         Assert.Equal(esperado.Count, primero.Headers.Count);
         foreach (var (nombre, valor) in esperado)

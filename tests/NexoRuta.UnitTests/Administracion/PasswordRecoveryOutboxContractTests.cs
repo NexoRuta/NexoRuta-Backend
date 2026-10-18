@@ -35,15 +35,42 @@ public sealed class PasswordRecoveryOutboxContractTests
     }
 
     [Fact]
-    public void SecurityOutboxDoesNotInventShipmentOwnershipForGlobalIdentityEvents()
+    public void UnifiedOutboxDoesNotInventShipmentOwnershipForGlobalIdentityEvents()
     {
-        var message = new SecurityOutboxMessage(
-            SecurityOutboxMessageTypes.PasswordRecoveryRequested,
-            SecurityOutboxDestination.Kafka,
-            "{}", id: Guid.CreateVersion7());
+        var userId = Guid.CreateVersion7();
+        var eventId = Guid.CreateVersion7();
+        var message = OutboxMessage.ForIdentity(userId, OutboxMessageTypes.PasswordRecoveryRequested,
+            OutboxDestino.Kafka, $$"""{"eventId":"{{eventId:D}}","schemaVersion":1,"usuarioId":"{{userId:D}}","occurredAt":"2026-10-18T00:00:00Z"}""",
+            id: eventId);
 
-        Assert.DoesNotContain(typeof(SecurityOutboxMessage).GetProperties(), property => property.Name is "OperadorId" or "EnvioId");
-        Assert.Equal(SecurityOutboxState.Pending, message.State);
-        Assert.Equal(SecurityOutboxDestination.Kafka, message.Destination);
+        Assert.Null(message.OperadorId);
+        Assert.Null(message.EnvioId);
+        Assert.Equal(OutboxScope.Identidad, message.Ambito);
+        Assert.Equal(userId, message.ClaveAmbito);
+        Assert.Equal(OutboxEstado.Pendiente, message.Estado);
+        Assert.Equal(OutboxDestino.Kafka, message.Destino);
+        Assert.Equal(OutboxPriority.Baja, message.Prioridad);
+    }
+
+    [Fact]
+    public void RegisteredOutboxContractsChoosePrioritiesWithoutRequestInput()
+    {
+        var userId = Guid.CreateVersion7();
+        var eventId = Guid.CreateVersion7();
+        var recoveryEvent = JsonSerializer.Serialize(
+            new PasswordRecoveryRequestedV1(eventId, userId, DateTimeOffset.UtcNow), PasswordRecoveryJson.Options);
+        Assert.Equal(OutboxPriority.Alta,
+            OutboxMessage.ForShipment(Guid.CreateVersion7(), Guid.CreateVersion7(), OutboxMessageTypes.TrackingRequested,
+                OutboxDestino.RabbitMq, "{}").Prioridad);
+        Assert.Equal(OutboxPriority.Normal,
+            OutboxMessage.ForShipment(Guid.CreateVersion7(), Guid.CreateVersion7(), OutboxMessageTypes.ShipmentCreated,
+                OutboxDestino.Kafka, "{}").Prioridad);
+        Assert.Equal(OutboxPriority.Alta,
+            OutboxMessage.ForIdentity(userId, OutboxMessageTypes.PasswordRecoveryEmail, OutboxDestino.RabbitMq,
+                "{\"protectedCommand\":\"opaque\"}").Prioridad);
+        Assert.Equal(OutboxPriority.Baja,
+            OutboxMessage.ForIdentity(userId, OutboxMessageTypes.PasswordRecoveryRequested, OutboxDestino.Kafka,
+                recoveryEvent, id: eventId).Prioridad);
+        Assert.Throws<ArgumentException>(() => OutboxMessage.ForIdentity(userId, "ArbitraryType", OutboxDestino.Kafka, "{}"));
     }
 }

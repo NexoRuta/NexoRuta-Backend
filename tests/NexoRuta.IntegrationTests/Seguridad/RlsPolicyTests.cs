@@ -9,6 +9,7 @@ using NexoRuta.Domain.Envios;
 using NexoRuta.Domain.Seguimiento;
 using NexoRuta.IntegrationTests.Fixtures;
 using NexoRuta.Infrastructure.Outbox;
+using NexoRuta.Infrastructure.Administracion.Autenticacion;
 using NexoRuta.Infrastructure.Administracion;
 using NexoRuta.Infrastructure.Persistence;
 using NexoRuta.Application.Seguimiento.Services;
@@ -542,9 +543,9 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
             Assert.Equal(shipmentId, (Guid)(await create.ExecuteScalarAsync())!);
         }
         await using (var outbox = new NpgsqlCommand("""
-            INSERT INTO "OutboxMessages" ("Id", "OperadorId", "EnvioId", "Tipo", "Destino", "Estado", "Payload", "Intentos", "CreadoEnUtc", "ProximoIntentoEnUtc")
-            VALUES (@id, @operator, @shipment, 'GenerarSeguimiento', 'RabbitMq', 'Pendiente', '{}'::jsonb, 0, now(), now()),
-                   (@event_id, @operator, @shipment, 'EnvioCreado', 'Kafka', 'Pendiente', '{}'::jsonb, 0, now(), now())
+            INSERT INTO "OutboxMessages" ("Id", "OperadorId", "EnvioId", "Ambito", "ClaveAmbito", "Tipo", "VersionContrato", "Destino", "Prioridad", "Estado", "Payload", "EstadoEntrega", "Intentos", "CreadoEnUtc", "ProximoIntentoEnUtc")
+            VALUES (@id, @operator, @shipment, 'Envio', @shipment, 'GenerarSeguimiento', 1, 'RabbitMq', 'Alta', 'Pendiente', '{}'::jsonb, NULL, 0, now(), now()),
+                   (@event_id, @operator, @shipment, 'Envio', @shipment, 'EnvioCreado', 1, 'Kafka', 'Normal', 'Pendiente', '{}'::jsonb, NULL, 0, now(), now())
             """, connection, transaction))
         {
             outbox.Parameters.AddWithValue("id", Guid.NewGuid());
@@ -553,9 +554,9 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
             outbox.Parameters.AddWithValue("shipment", shipmentId);
             await outbox.ExecuteNonQueryAsync();
         }
-        await AssertDeniedAsync(connection, transaction, $"""
-            INSERT INTO "OutboxMessages" ("Id", "OperadorId", "EnvioId", "Tipo", "Destino", "Estado", "Payload", "Intentos", "CreadoEnUtc", "ProximoIntentoEnUtc")
-            VALUES ('{Guid.NewGuid():D}', '{rows.OperatorB:D}', '{shipmentId:D}', 'OtherEvent', 'Kafka', 'Pendiente', jsonb_build_object(), 0, now(), now())
+        await AssertDeniedAsync(connection, transaction, $$"""
+            INSERT INTO "OutboxMessages" ("Id", "OperadorId", "EnvioId", "Ambito", "ClaveAmbito", "Tipo", "VersionContrato", "Destino", "Prioridad", "Estado", "Payload", "EstadoEntrega", "Intentos", "CreadoEnUtc", "ProximoIntentoEnUtc")
+            VALUES ('{{Guid.NewGuid():D}}', '{{rows.OperatorB:D}}', '{{shipmentId:D}}', 'Envio', '{{shipmentId:D}}', 'OtherEvent', 1, 'Kafka', 'Normal', 'Pendiente', '{}'::jsonb, NULL, 0, now(), now())
             """);
         Assert.Equal(3L, await CountAsync(connection, transaction, "Envios"));
         Assert.Equal(3L, await CountAsync(connection, transaction, "Destinatarios"));
@@ -581,7 +582,8 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
         await using (var owner = database.CreateDbContext())
         {
             owner.EnlacesSeguimiento.Add(link);
-            owner.OutboxMessages.Add(new OutboxMessage(rows.OperatorA, rows.ShipmentA1, "GenerarSeguimiento", OutboxDestino.RabbitMq, "{}"));
+            owner.OutboxMessages.Add(OutboxMessage.ForShipment(rows.OperatorA, rows.ShipmentA1,
+                OutboxMessageTypes.TrackingRequested, OutboxDestino.RabbitMq, "{}"));
             await owner.SaveChangesAsync();
             jobId = await owner.OutboxMessages.AsNoTracking().Where(x => x.EnvioId == rows.ShipmentA1).Select(x => x.Id).SingleAsync();
         }
@@ -617,7 +619,7 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
             claim.Parameters.AddWithValue("processor", processorId);
             await using var reader = await claim.ExecuteReaderAsync();
             Assert.True(await reader.ReadAsync());
-            Assert.Equal(new[] { "Id", "OperadorId", "EnvioId", "Tipo", "Destino", "Payload", "Intentos", "CreadoEnUtc" },
+            Assert.Equal(new[] { "Id", "OperadorId", "EnvioId", "Ambito", "ClaveAmbito", "Tipo", "VersionContrato", "Destino", "Prioridad", "Payload", "EstadoEntrega", "Intentos", "CreadoEnUtc" },
                 Enumerable.Range(0, reader.FieldCount).Select(reader.GetName));
             jobId = reader.GetGuid(reader.GetOrdinal("Id"));
             Assert.Equal(rows.OperatorA, reader.GetGuid(reader.GetOrdinal("OperadorId")));
@@ -657,8 +659,8 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
     {
         var database = await postgres.CreateDatabaseAsync();
         var rows = await SeedTenantGraphAsync(database);
-        var message = new OutboxMessage(rows.OperatorB, rows.ShipmentA2,
-            "GenerarSeguimiento", OutboxDestino.RabbitMq, "{}");
+        var message = OutboxMessage.ForShipment(rows.OperatorB, rows.ShipmentA2,
+            OutboxMessageTypes.TrackingRequested, OutboxDestino.RabbitMq, "{}");
         await using (var seed = database.CreateDbContext())
         {
             seed.OutboxMessages.Add(message);
@@ -688,12 +690,78 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
     }
 
     [Fact]
+    public async Task RecoveryPairUsesNarrowApiFunctionAndWorkersHaveNoGeneralOutboxRead()
+    {
+        var database = await postgres.CreateDatabaseAsync();
+        var rows = await SeedTenantGraphAsync(database);
+        var emailId = Guid.CreateVersion7();
+        var eventId = Guid.CreateVersion7();
+        var occurredAt = DateTimeOffset.UtcNow;
+        var eventPayload = JsonSerializer.Serialize(
+            new PasswordRecoveryRequestedV1(eventId, rows.UserA, occurredAt), PasswordRecoveryJson.Options);
+        var emailPayload = JsonSerializer.Serialize(new { protectedCommand = "opaque-protected-command" }, PasswordRecoveryJson.Options);
+
+        var api = await CreateRestrictedConnectionAsync(database, "nexoruta_api");
+        await using (var connection = api.Connection)
+        {
+            await connection.OpenAsync();
+            await using var enqueue = new NpgsqlCommand(
+                "SELECT nexoruta_app.enqueue_password_recovery(@user, @email, @event, @email_payload, @event_payload)", connection);
+            enqueue.Parameters.AddWithValue("user", rows.UserA);
+            enqueue.Parameters.AddWithValue("email", emailId);
+            enqueue.Parameters.AddWithValue("event", eventId);
+            enqueue.Parameters.AddWithValue("email_payload", NpgsqlTypes.NpgsqlDbType.Jsonb, emailPayload);
+            enqueue.Parameters.AddWithValue("event_payload", NpgsqlTypes.NpgsqlDbType.Jsonb, eventPayload);
+            Assert.True((bool)(await enqueue.ExecuteScalarAsync())!);
+
+            await using var read = new NpgsqlCommand("SELECT count(*) FROM \"OutboxMessages\"", connection);
+            var deniedRead = await Assert.ThrowsAsync<PostgresException>(() => read.ExecuteScalarAsync());
+            Assert.Equal("42501", deniedRead.SqlState);
+        }
+
+        var worker = await CreateRestrictedConnectionAsync(database, "nexoruta_worker");
+        await using var workerConnection = worker.Connection;
+        await workerConnection.OpenAsync();
+        await using (var directRead = new NpgsqlCommand("SELECT count(*) FROM \"OutboxMessages\"", workerConnection))
+            Assert.Equal(0L, (long)(await directRead.ExecuteScalarAsync())!);
+
+        var processor = Guid.CreateVersion7();
+        foreach (var destination in new[] { "Kafka", "RabbitMq" })
+        {
+            await using var claim = new NpgsqlCommand("SELECT \"Id\", \"Tipo\", \"Ambito\", \"ClaveAmbito\", \"Payload\" FROM nexoruta_app.claim_outbox(@processor, @destination)", workerConnection);
+            claim.Parameters.AddWithValue("processor", processor);
+            claim.Parameters.AddWithValue("destination", destination);
+            await using var reader = await claim.ExecuteReaderAsync();
+            Assert.True(await reader.ReadAsync());
+            var type = reader.GetString(reader.GetOrdinal("Tipo"));
+            Assert.Equal(destination == "Kafka" ? OutboxMessageTypes.PasswordRecoveryRequested : OutboxMessageTypes.PasswordRecoveryEmail, type);
+            Assert.Equal(nameof(OutboxScope.Identidad), reader.GetString(reader.GetOrdinal("Ambito")));
+            Assert.Equal(rows.UserA, reader.GetGuid(reader.GetOrdinal("ClaveAmbito")));
+            var id = reader.GetGuid(reader.GetOrdinal("Id"));
+            await reader.DisposeAsync();
+            await using var finish = new NpgsqlCommand("SELECT nexoruta_app.finish_outbox(@message, @processor, true, NULL)", workerConnection);
+            finish.Parameters.AddWithValue("message", id);
+            finish.Parameters.AddWithValue("processor", processor);
+            Assert.True((bool)(await finish.ExecuteScalarAsync())!);
+        }
+
+        await using var verify = database.CreateDbContext();
+        Assert.Equal(2, await verify.OutboxMessages.CountAsync());
+        Assert.All(await verify.OutboxMessages.ToListAsync(), message =>
+        {
+            Assert.Null(message.OperadorId);
+            Assert.Null(message.EnvioId);
+            Assert.Equal(rows.UserA, message.ClaveAmbito);
+        });
+    }
+
+    [Fact]
     public async Task RestrictedWorkerProcessesConcurrentDuplicateDeliveryIdempotently()
     {
         var database = await postgres.CreateDatabaseAsync();
         var rows = await SeedTenantGraphAsync(database);
-        var message = new OutboxMessage(rows.OperatorA, rows.ShipmentA1,
-            "GenerarSeguimiento", OutboxDestino.RabbitMq, "{}");
+        var message = OutboxMessage.ForShipment(rows.OperatorA, rows.ShipmentA1,
+            OutboxMessageTypes.TrackingRequested, OutboxDestino.RabbitMq, "{}");
         await using (var seed = database.CreateDbContext())
         {
             seed.OutboxMessages.Add(message);

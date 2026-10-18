@@ -2,10 +2,9 @@ namespace NexoRuta.Infrastructure.Persistence;
 
 public static class RlsSqlFunctionContract
 {
-    public const string ClaimSecurityOutbox = "nexoruta_app.claim_security_outbox";
-    public const string FinishSecurityOutbox = "nexoruta_app.finish_security_outbox";
-    public const string MarkPasswordRecoveryDelivery = "nexoruta_app.mark_password_recovery_delivery";
-    public const string GetPasswordRecoveryDeliveryState = "nexoruta_app.get_password_recovery_delivery_state";
+    public const string EnqueuePasswordRecovery = "nexoruta_app.enqueue_password_recovery";
+    public const string MarkEmailDelivery = "nexoruta_app.mark_outbox_email_delivery";
+    public const string GetEmailDeliveryState = "nexoruta_app.get_outbox_email_delivery_state";
     public const string LoginLookup = "nexoruta_app.login_lookup";
     public const string LookupAccess = "nexoruta_app.lookup_access";
     public const string LookupPlatformAccess = "nexoruta_app.lookup_platform_access";
@@ -33,13 +32,11 @@ public static class RlsSqlFunctionContract
             (PublicTracking, "text", "TABLE(\"Estado\" text)", "nexoruta_api"),
             (CreateShipment, "uuid, uuid, uuid, uuid, text, text, text, numeric, numeric, numeric, numeric", "uuid", "nexoruta_api"),
             (ClaimOutbox, "uuid, text",
-                "TABLE(\"Id\" uuid, \"OperadorId\" uuid, \"EnvioId\" uuid, \"Tipo\" text, \"Destino\" text, \"Payload\" text, \"Intentos\" integer, \"CreadoEnUtc\" timestamp with time zone)", "nexoruta_worker"),
+                "TABLE(\"Id\" uuid, \"OperadorId\" uuid, \"EnvioId\" uuid, \"Ambito\" text, \"ClaveAmbito\" uuid, \"Tipo\" text, \"VersionContrato\" integer, \"Destino\" text, \"Prioridad\" text, \"Payload\" text, \"EstadoEntrega\" text, \"Intentos\" integer, \"CreadoEnUtc\" timestamp with time zone)", "nexoruta_worker"),
             (FinishOutbox, "uuid, uuid, boolean, text", "boolean", "nexoruta_worker"),
-            (ClaimSecurityOutbox, "uuid, text",
-                "TABLE(\"Id\" uuid, \"Type\" text, \"Destination\" text, \"Payload\" text, \"Attempts\" integer, \"CreatedAtUtc\" timestamp with time zone)", "nexoruta_worker"),
-            (FinishSecurityOutbox, "uuid, uuid, boolean, text", "boolean", "nexoruta_worker"),
-            (MarkPasswordRecoveryDelivery, "uuid, text", "boolean", "nexoruta_worker"),
-            (GetPasswordRecoveryDeliveryState, "uuid", "text", "nexoruta_worker"),
+            (EnqueuePasswordRecovery, "uuid, uuid, uuid, jsonb, jsonb", "boolean", "nexoruta_api"),
+            (MarkEmailDelivery, "uuid, text", "boolean", "nexoruta_worker"),
+            (GetEmailDeliveryState, "uuid", "text", "nexoruta_worker"),
             (BeginTrackingJob, "uuid, uuid, uuid", "boolean", "nexoruta_worker"),
             (DeleteUnusedRole, "uuid", "boolean", "nexoruta_api"),
             (LockOwnedRole, "uuid", "boolean", "nexoruta_api"),

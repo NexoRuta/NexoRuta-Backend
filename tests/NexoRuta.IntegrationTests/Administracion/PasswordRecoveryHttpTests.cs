@@ -14,6 +14,7 @@ using NexoRuta.Infrastructure.Administracion.Autenticacion;
 using NexoRuta.Infrastructure.Outbox;
 using NexoRuta.Infrastructure.Persistence;
 using NexoRuta.IntegrationTests.Fixtures;
+using NexoRuta.Worker.Messaging;
 
 namespace NexoRuta.IntegrationTests.Administracion;
 
@@ -101,7 +102,7 @@ public sealed class PasswordRecoveryHttpTests(PostgresFixture postgres) : IClass
         Assert.Equal(HttpStatusCode.OK, unknown.StatusCode);
         var publicMessage = await known.Content.ReadAsStringAsync();
         Assert.Equal(publicMessage, await unknown.Content.ReadAsStringAsync());
-        Assert.Equal(2, await db.SecurityOutboxMessages.CountAsync());
+        Assert.Equal(2, await db.OutboxMessages.CountAsync());
         Assert.DoesNotContain(owner.Email!, publicMessage, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -346,8 +347,12 @@ public sealed class PasswordRecoveryHttpTests(PostgresFixture postgres) : IClass
     private static async Task<(Guid UserId, string Token)> ReadLinkFromOutboxAsync(
         IServiceProvider services, NexoRutaDbContext db, string recipient)
     {
-        var emailMessage = await db.SecurityOutboxMessages.SingleAsync(x => x.Type == SecurityOutboxMessageTypes.PasswordRecoveryEmail);
-        var eventMessage = await db.SecurityOutboxMessages.SingleAsync(x => x.Type == SecurityOutboxMessageTypes.PasswordRecoveryRequested);
+        var emailMessage = await db.OutboxMessages.SingleAsync(x => x.Tipo == OutboxMessageTypes.PasswordRecoveryEmail);
+        var eventMessage = await db.OutboxMessages.SingleAsync(x => x.Tipo == OutboxMessageTypes.PasswordRecoveryRequested);
+        Assert.Equal(OutboxScope.Identidad, emailMessage.Ambito);
+        Assert.Null(emailMessage.OperadorId);
+        Assert.Null(emailMessage.EnvioId);
+        Assert.Equal(emailMessage.ClaveAmbito, eventMessage.ClaveAmbito);
         Assert.DoesNotContain(recipient, emailMessage.Payload, StringComparison.Ordinal);
         using var eventJson = JsonDocument.Parse(eventMessage.Payload);
         var eventFields = eventJson.RootElement.EnumerateObject().Select(property => property.Name).Order().ToArray();
@@ -356,7 +361,9 @@ public sealed class PasswordRecoveryHttpTests(PostgresFixture postgres) : IClass
 
         var protector = services.GetRequiredService<IDataProtectionProvider>()
             .CreateProtector(PasswordRecoveryDataProtection.EmailCommandPurpose);
-        var plaintext = protector.Unprotect(emailMessage.Payload);
+        var protectedCommand = JsonSerializer.Deserialize<ProtectedPasswordRecoveryCommand>(emailMessage.Payload, PasswordRecoveryJson.Options);
+        Assert.NotNull(protectedCommand);
+        var plaintext = protector.Unprotect(protectedCommand.ProtectedCommand);
         var command = JsonSerializer.Deserialize<PasswordRecoveryEmailCommand>(plaintext, PasswordRecoveryJson.Options);
         Assert.NotNull(command);
         Assert.Equal(recipient, command.Recipient);
