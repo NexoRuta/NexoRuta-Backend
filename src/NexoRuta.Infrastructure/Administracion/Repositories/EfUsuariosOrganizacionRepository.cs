@@ -73,12 +73,7 @@ public sealed class EfUsuariosOrganizacionRepository(
         try
         {
             var result = await identityUsers.CreateAsync(usuario, password);
-            if (!result.Succeeded)
-            {
-                if (result.Errors.Any(x => x.Code is "DuplicateEmail" or "DuplicateUserName"))
-                    throw new CorreoYaRegistradoException();
-                throw new ArgumentException("La cuenta no cumple las reglas de Identity.", nameof(password));
-            }
+            IdentityErrorContract.ExigirCreacionValida(result, identityUsers.ErrorDescriber);
             db.AccesosUsuario.Add(acceso);
             await db.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
@@ -178,10 +173,10 @@ public sealed class EfUsuariosOrganizacionRepository(
         return true;
     }
 
-    private static void EnsureIdentityEmailUpdate(IdentityResult result)
+    private void EnsureIdentityEmailUpdate(IdentityResult result)
     {
         if (result.Succeeded) return;
-        if (result.Errors.Any(x => x.Code is "DuplicateEmail" or "DuplicateUserName"))
+        if (IdentityErrorContract.EsDuplicado(result, identityUsers.ErrorDescriber))
             throw new CorreoYaRegistradoException();
         if (result.Errors.Any(x => x.Code == "ConcurrencyFailure"))
             throw new DbUpdateConcurrencyException("The account changed during the email update; reload and retry.");

@@ -1,6 +1,6 @@
 # Provision organizations through platform administration
 
-This backend/API slice adds independent platform authority and atomic operator/commerce provisioning. It does **not** complete CU-01. The separate Admin frontend is documented in `frontend/docs/admin.md` in the combined checkout.
+This guide documents the platform-support slice: independent platform authority and atomic operator/commerce provisioning. The current CU-01 status and adopted self-service model are documented in `backend/docs/cu/CU-01-comercios-usuarios.md`; Admin does not replace Commerce's own organization/user administration. The separate Admin frontend is documented in `frontend/docs/admin.md` in the combined checkout.
 
 ## Authority boundary
 
@@ -121,7 +121,7 @@ git diff --check
 
 The independent Admin frontend now consumes the administrative routes and the existing self-context/self-permissions reads. Those two reads expose `tipo: "Plataforma"`, null organizational/role fields and the current platform capability without creating an organizational `ContextoUsuario`. Existing organization responses retain their values; their portals reject the platform type at login. Operational endpoints remain forbidden to platform tokens. Admin cannot bootstrap through HTTP. OpenAPI is published through the existing Development endpoint and mirrored in `frontend/contracts/nexoruta.openapi.json`; see `frontend/docs/admin.md` in the combined checkout.
 
-Still pending: complete Identity/OIDC migration; RLS as an additional tenant boundary; organization deletion, impersonation, password recovery/reset, additional platform accounts and global user management. Commerce continues selecting an available operator per shipment, with no prior commerce/operator management relationship.
+Identity's EF Core store and PostgreSQL RLS are now part of the current migration history. This guide does not add platform-wide user directory or impersonation features. Physical organization deletion and password recovery/reset are not claimed as CU-01 requirements. Commerce continues selecting an available operator per shipment, with no prior commerce/operator management relationship. See the [current CU-01 matrix](../cu/CU-01-comercios-usuarios.md).
 
 ## Diagnosing an outdated command image
 

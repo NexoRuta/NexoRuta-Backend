@@ -14,7 +14,7 @@ public sealed class ProcesarGeneracionSeguimiento(
     CrearEnlaceSeguimientoUseCase crearEnlace,
     CifradorTokenSeguimiento cifrador)
 {
-    public const string NombreConsumidor = "GenerarSeguimiento";
+    public const string NombreConsumidor = OutboxMessageTypes.TrackingRequested;
 
     public async Task EjecutarAsync(
         Guid messageId,
@@ -33,9 +33,10 @@ public sealed class ProcesarGeneracionSeguimiento(
         await using var transaccion =
             await db.BeginOrJoinAsync(cancellationToken);
 
-        var verifiedJob = await db.Database.SqlQuery<bool>($"""
-            SELECT nexoruta_app.begin_tracking_job({messageId}, {operadorId}, {envioId}) AS "Value"
-            """).SingleAsync(cancellationToken);
+        var verifiedJob = await db.Database.SqlQueryRaw<bool>(
+            "SELECT " + RlsSqlFunctionContract.BeginTrackingJob + "({0}, {1}, {2}) AS \"Value\"",
+            messageId, operadorId, envioId)
+            .SingleAsync(cancellationToken);
         if (!verifiedJob)
             throw new InvalidOperationException("The persisted tracking job does not match this message.");
         await db.ApplyAsync(RlsActorContext.Worker(operadorId, messageId, envioId), cancellationToken);

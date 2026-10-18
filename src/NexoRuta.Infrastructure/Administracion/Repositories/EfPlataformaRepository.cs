@@ -15,9 +15,9 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, UserManager<Usu
 {
     public async Task<ContextoPlataforma?> ObtenerAccesoAsync(Guid accesoId, CancellationToken ct)
     {
-        var row = await db.Database.SqlQuery<PlatformAccessLookupRow>($"""
-            SELECT * FROM nexoruta_app.lookup_platform_access({accesoId})
-            """).SingleOrDefaultAsync(ct);
+        var row = await db.Database.SqlQueryRaw<PlatformAccessLookupRow>(
+            "SELECT * FROM " + RlsSqlFunctionContract.LookupPlatformAccess + "({0})", accesoId)
+            .SingleOrDefaultAsync(ct);
         return row is null ? null : new(row.UsuarioId, row.AccesoId, row.VersionSesion,
             row.PuedeGestionarOrganizaciones, row.UsuarioEmail);
     }
@@ -55,12 +55,7 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, UserManager<Usu
         {
             var user = new Usuario(normalized);
             var userResult = await identityUsers.CreateAsync(user, password);
-            if (!userResult.Succeeded)
-            {
-                if (userResult.Errors.Any(x => x.Code is "DuplicateEmail" or "DuplicateUserName"))
-                    throw new CorreoYaRegistradoException();
-                throw new ArgumentException("La cuenta no cumple las reglas de Identity.", nameof(password));
-            }
+            IdentityErrorContract.ExigirCreacionValida(userResult, identityUsers.ErrorDescriber);
             var role = new RolPlataforma();
             db.AddRange(role, new AccesoPlataforma(user, role));
             foreach (var definition in CatalogoPermisos.Plataforma)
@@ -147,12 +142,7 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, UserManager<Usu
             if (nuevaIdentidad)
             {
                 var userResult = await identityUsers.CreateAsync(user, password!);
-                if (!userResult.Succeeded)
-                {
-                    if (userResult.Errors.Any(x => x.Code is "DuplicateEmail" or "DuplicateUserName"))
-                        throw new CorreoYaRegistradoException();
-                    throw new ArgumentException("La cuenta no cumple las reglas de Identity.", nameof(password));
-                }
+                IdentityErrorContract.ExigirCreacionValida(userResult, identityUsers.ErrorDescriber);
             }
             db.AddRange(permissions.Select(p => new RolPermiso(role.Id, p.Id)));
             await db.SaveChangesAsync(ct);

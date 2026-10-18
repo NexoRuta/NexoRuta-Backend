@@ -49,9 +49,9 @@ public sealed class EfAccesosUsuarioRepository(NexoRutaDbContext db) : IAccesosU
 
     public async Task<ContextoUsuario?> ObtenerAsync(Guid accesoId, CancellationToken cancellationToken = default)
     {
-        var row = await db.Database.SqlQuery<AccesoLookupRow>($"""
-            SELECT * FROM nexoruta_app.lookup_access({accesoId})
-            """).SingleOrDefaultAsync(cancellationToken);
+        var row = await db.Database.SqlQueryRaw<AccesoLookupRow>(
+            "SELECT * FROM " + RlsSqlFunctionContract.LookupAccess + "({0})", accesoId)
+            .SingleOrDefaultAsync(cancellationToken);
         if (row is null || !Enum.TryParse<EstadoOrganizacion>(row.Estado, out var estado)) return null;
         return new(row.AccesoId, row.UsuarioId, row.OperadorId, row.ComercioId, row.UsuarioEmail,
             row.OperadorNombre, row.ComercioNombre, row.RolId, row.RolCodigo, row.VersionSesion, estado);

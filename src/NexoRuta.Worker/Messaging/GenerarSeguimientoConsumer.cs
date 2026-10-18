@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
+using NexoRuta.Infrastructure.Outbox;
 using NexoRuta.Infrastructure.Seguimiento.Processing;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
@@ -134,8 +135,7 @@ public sealed class GenerarSeguimientoConsumer(
                             "MessageId inválido.");
                     }
 
-                    if (entrega.BasicProperties.Type !=
-                        "GenerarSeguimiento")
+                    if (entrega.BasicProperties.Type != OutboxMessageTypes.TrackingRequested)
                     {
                         throw new InvalidDataException(
                             "Tipo de mensaje incorrecto.");

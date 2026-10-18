@@ -55,13 +55,8 @@ public sealed class UsuariosController(
                 StatusCodes.Status201Created,
                 creado);
         }
-        catch (CorreoYaRegistradoException)
-        {
-            return Conflict(new
-            {
-                message = "El correo ya está registrado."
-            });
-        }
+        catch (Exception error) when (error is CorreoYaRegistradoException or CredencialesInvalidasException)
+        { return ErrorCuentaHttp.Traducir(error); }
         catch (AccesoNoPermitidoException)
         {
             return Forbid();
@@ -126,7 +121,7 @@ public sealed class UsuariosController(
                 usuarioId, request.Email, request.Version!.Value, ct);
             return actualizado ? NoContent() : NotFound();
         }
-        catch (CorreoYaRegistradoException) { return Conflict(new { message = "El correo ya está registrado." }); }
+        catch (CorreoYaRegistradoException error) { return ErrorCuentaHttp.Traducir(error); }
         catch (DbUpdateConcurrencyException) { return Conflict(new { message = "La identidad cambió. Recargá e intentá nuevamente." }); }
         catch (AccesoNoPermitidoException) { return Forbid(); }
         catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }

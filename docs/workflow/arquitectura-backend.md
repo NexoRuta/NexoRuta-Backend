@@ -86,13 +86,13 @@ El mecanismo concreto de contexto RLS, sus migraciones y las pruebas todavía de
 
 | Tema | Estado de la decisión |
 | --- | --- |
-| PostgreSQL + EF Core/migraciones + RLS | EF Core, PostgreSQL y migraciones implementados para el recorte actual. RLS, su contexto y pruebas con rol restringido permanecen pendientes; el filtrado actual no acredita RLS. |
+| PostgreSQL + EF Core/migraciones + RLS | PostgreSQL RLS está implementado para las tablas de negocio, con contexto transaccional validado y pruebas con los roles restringidos de runtime; el límite de los GUC mutables se documenta en docs/rls/AUDITORIA.md. |
 | Cola de trabajo y Worker independiente | RabbitMQ publica y consume mensajes de seguimiento, con reintentos y Outbox; Kafka usa un proceso Worker independiente para `EnvioCreado.v1`. |
 | Caché distribuida | Obligatoria en dos perfiles de acceso, con invalidación y métricas; Redis está propuesto. |
 | SignalR, Serilog y OpenTelemetry | La API exporta OpenTelemetry al Dashboard local; tiempo real, Serilog y correlación con mensajes siguen pendientes. |
 | Kafka y NoSQL | Opcionales seleccionados en la entrega; no sustituyen la cola ni la base transaccional obligatorias. |
 | Dos instancias API, Docker Compose, CI/CD, nube e IaC | Compose y workflows de CI/CD presentes; compilación y servicios locales verificados. Dos instancias, CI remota, despliegue e IaC no se verificaron en esta revisión. |
-| Proveedor de identidad, modo de Blazor, conflicto offline, invalidación de caché, estrategia concreta de outbox, herramienta IaC y tablero técnico | Pendientes de decisión documentada antes de su implementación. |
+| Identidad, modo de Blazor, conflicto offline, invalidación de caché, estrategia concreta de outbox, herramienta IaC y tablero técnico | Identity con almacén EF Core y JWT actual fue elegido para las cuentas; OIDC no se afirma como implementado. Las demás decisiones de arquitectura conservan su estado específico. |
 
 Las pruebas unitarias de dominio, de integración de un flujo crítico, de arquitectura y de aislamiento deben ejecutarse en CI. El alcance y criterio verificable de cada CU se documentan siguiendo [Implementar un CU](implementar-cu.md) y su [plantilla](../cu/_plantilla.md).
 

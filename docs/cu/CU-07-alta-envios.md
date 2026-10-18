@@ -1,24 +1,29 @@
 # CU-07 — Alta individual de envíos: primer monitoreo
 
-- **Estado:** implementado para el recorte del 08/10/2026.
+- **Estado:** implementado; el comercio elige un operador disponible para cada envío.
 - **Módulo:** M02 — Envíos y depósito.
-- **Fuente:** `Monitoreo_2026-10-08_CU.xlsx`, CU-07 y T-02.
+- **Fuente:** Monitoreo_2026-10-08_CU.xlsx, CU-07 y T-02.
 
 ## Actor, entrada y resultado
 
-El usuario del comercio elige el operador para cada envío e ingresa nombre del destinatario, dirección y un bulto. El servidor obtiene el usuario y comercio desde la cuenta de [CU-01](CU-01-comercios-usuarios.md), y comprueba que el operador seleccionado exista mediante `IOperadoresRepository`. Cualquier operador registrado puede recibir envíos del comercio, sin relación previa. El formulario no acepta un comercio o usuario creador enviados por el cliente.
+El usuario autenticado del comercio crea un envío y elige un operador disponible para ese envío. El servidor obtiene el usuario y ComercioId del JWT validado y del acceso persistido; el cliente no elige el comercio. OperadorId se valida y queda guardado en el envío. No hay relación previa ni permanente comercio–operador y no se crea una tabla de clientes del operador.
 
-`CrearEnvioUseCase` construye destinatario, dirección, envío en estado `Admitido` y bulto. `EfEnviosRepository` guarda los cuatro registros en un único `SaveChangesAsync`, con la transacción de EF Core. Devuelve el identificador del envío y sus propietarios. Backoffice consulta la API y muestra el mismo registro y los datos del bulto tras recargar.
+CrearEnvioUseCase valida actor, destinatario, dirección y bulto. La escritura pasa por la operación acotada de base de datos que guarda el envío y sus datos hijos en una transacción; el outbox publica los eventos posteriores. El operador consulta ese envío mediante su propio contexto si es el OperadorId elegido. Ninguno obtiene envíos de otro actor. La API niega creación para un operador, aunque envíe campos manipulados.
 
 ## Contrato y reglas
 
-- `GET /api/operadores`: todos los operadores registrados, disponibles para la cuenta del comercio.
-- `POST /api/envios`: `operadorId`, destinatario/dirección y código, peso y dimensiones del bulto; 201 con `EnvioCreado`. Un operador inexistente devuelve 400 sin persistir. El envío y las respuestas de alta/listado conservan `operadorId` y `comercioId` directamente.
-- `GET /api/envios`: 200 con todos los envíos del comercio de la cuenta, aunque usen distintos operadores, o los del operador para su usuario interno. La cuenta se identifica con `X-NexoRuta-Acceso` y se comprueba en PostgreSQL.
-- Nombre, dirección y código son obligatorios y tienen máximos de 160, 240 y 80 caracteres. Peso y dimensiones admiten `0.01`–`999999999`; el dominio exige valores positivos. Entrada inválida: 400. Selección ausente o inválida: 401. Alta con acceso interno del operador: 403, sin guardar el envío.
+- GET /api/comercio/operadores: catálogo de operadores disponibles para elegir; alias compatible GET /api/operadores.
+- POST /api/envios: requiere Bearer de una cuenta comercio y OperadorId, destinatario/dirección y un bulto. El contexto ComercioId proviene de la sesión. La selección del operador se valida y guarda en ese envío, no en una membresía.
+- GET /api/envios: consulta los envíos del comercio autenticado o del operador autenticado para sus asignaciones.
+- El operador puede ser distinto en cada envío. Para los hijos de un envío el aislamiento sigue el vínculo del envío.
+- Nombre, dirección y código son obligatorios; los límites de texto y dimensiones siguen el contrato OpenAPI.
+- La cabecera X-NexoRuta-Acceso no autentica ni selecciona al actor. Las rutas de envío requieren JWT Bearer.
 
-## Verificación y límites
+## Pruebas/evidencia
 
-Pruebas unitarias: asignación de propietarios desde el usuario actual, rechazo de peso inválido y ausencia de acceso antes de guardar, y filtros de consulta. La integración guarda y lee el envío y bulto desde otra conexión PostgreSQL y comprueba que otro acceso no recibe ese registro. La comprobación funcional usa el formulario Blazor y encuentra el ID confirmado en Backoffice.
+- backend/tests/NexoRuta.UnitTests/Envios/CrearEnvioUseCaseTests.cs: el comercio usa la cuenta propia y el operador elegido; un acceso operador no crea envíos.
+- backend/tests/NexoRuta.IntegrationTests/Envios/EnvioPostgresRoundTripTests.cs: round-trip en PostgreSQL temporal, cuenta comercio, múltiples operadores por envío e integridad del bulto.
+- backend/tests/NexoRuta.IntegrationTests/Administracion/PlataformaHttpTests.cs: CreatedCommerceCanSelectDifferentOperatorsWhileEachActorSeesOnlyItsShipments.
+- backend/tests/NexoRuta.IntegrationTests/Seguridad/RlsPolicyTests.cs y RlsRestrictedHttpFlowTests.cs: roles restringidos, visibilidad de ambas partes, filas hijas y operaciones directas limitadas por privilegios/RLS.
 
-Este corte comprende el alta individual. Importación masiva, idempotencia masiva, tarifas y máquina de estados completa quedan para los siguientes casos/hitos. Redis, RabbitMQ y Worker todavía no participan del alta. La CI de backend/frontend compila y ejecuta sus pruebas; una comprobación local no acredita una ejecución remota vinculada a estos cambios.
+Importación masiva, tarifas y máquina de estados completa pertenecen a otros casos/hitos.

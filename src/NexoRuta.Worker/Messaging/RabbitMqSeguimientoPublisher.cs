@@ -2,6 +2,7 @@
 using System.Text;
 using Microsoft.Extensions.Configuration;
 using NexoRuta.Infrastructure.Outbox;
+using NexoRuta.Infrastructure.Seguimiento.Processing;
 using RabbitMQ.Client;
 
 namespace NexoRuta.Worker.Messaging;
@@ -17,7 +18,7 @@ public sealed class RabbitMqSeguimientoPublisher(
         CancellationToken cancellationToken = default)
     {
         if (mensaje.Destino != nameof(OutboxDestino.RabbitMq) ||
-            mensaje.Tipo != "GenerarSeguimiento")
+            mensaje.Tipo != OutboxMessageTypes.TrackingRequested)
         {
             throw new ArgumentException(
                 "El mensaje no corresponde a la cola de seguimiento.",

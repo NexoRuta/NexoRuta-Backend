@@ -59,9 +59,9 @@ public sealed class EfRolesRepository(NexoRutaDbContext db) : IRolesRepository
             throw new InvalidOperationException("An assigned role cannot be deleted.");
         db.RolesPermisos.RemoveRange(await db.RolesPermisos.Where(x => x.RolId == id).ToListAsync(ct));
         await db.SaveChangesAsync(ct);
-        var deleted = await db.Database.SqlQuery<bool>($"""
-            SELECT nexoruta_app.delete_unused_role({id}) AS "Value"
-            """).SingleAsync(ct);
+        var deleted = await db.Database.SqlQueryRaw<bool>(
+            "SELECT " + RlsSqlFunctionContract.DeleteUnusedRole + "({0}) AS \"Value\"", id)
+            .SingleAsync(ct);
         if (!deleted)
             throw new InvalidOperationException("The role is protected, assigned, or no longer available.");
         await transaction.CommitAsync(ct);
@@ -128,9 +128,9 @@ public sealed class EfRolesRepository(NexoRutaDbContext db) : IRolesRepository
 
     private async Task<Rol?> LockOwnedRoleAsync(ContextoUsuario actor, Guid id, CancellationToken ct)
     {
-        var locked = await db.Database.SqlQuery<bool>($"""
-            SELECT nexoruta_app.lock_owned_role({id}) AS "Value"
-            """).SingleAsync(ct);
+        var locked = await db.Database.SqlQueryRaw<bool>(
+            "SELECT " + RlsSqlFunctionContract.LockOwnedRole + "({0}) AS \"Value\"", id)
+            .SingleAsync(ct);
         if (!locked) return null;
 
         var role = await db.Roles.SingleOrDefaultAsync(x => x.Id == id

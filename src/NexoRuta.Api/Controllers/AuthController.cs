@@ -26,7 +26,8 @@ public sealed class AuthController(
     public async Task<IActionResult> Registrar(RegistroRequest request, CancellationToken ct)
     {
         try { return Created("/api/usuarios/actual", await registro.RegistrarAsync(request.Email, request.Password, ct)); }
-        catch (CorreoYaRegistradoException error) { return Conflict(new { message = error.Message }); }
+        catch (Exception error) when (error is CorreoYaRegistradoException or CredencialesInvalidasException)
+        { return ErrorCuentaHttp.Traducir(error); }
         catch (ArgumentException error) { return BadRequest(new { message = error.Message }); }
     }
 

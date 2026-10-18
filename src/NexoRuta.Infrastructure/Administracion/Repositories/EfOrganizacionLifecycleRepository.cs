@@ -265,9 +265,10 @@ public sealed class EfOrganizacionLifecycleRepository(NexoRutaDbContext db) : IO
     {
         try
         {
-            var row = await db.Database.SqlQuery<OrganizationStateChangeRow>($"""
-                SELECT * FROM nexoruta_app.set_organization_state({tipo.ToString()}, {organizacionId}, {estado.ToString()}, {version})
-                """).SingleOrDefaultAsync(ct);
+            var row = await db.Database.SqlQueryRaw<OrganizationStateChangeRow>(
+                "SELECT * FROM " + RlsSqlFunctionContract.SetOrganizationState + "({0}, {1}, {2}, {3})",
+                tipo.ToString(), organizacionId, estado.ToString(), version!)
+                .SingleOrDefaultAsync(ct);
             if (row is null || !Enum.TryParse<EstadoOrganizacion>(row.EstadoAnterior, out var previous) ||
                 !Enum.TryParse<EstadoOrganizacion>(row.EstadoNuevo, out var current))
                 return null;
@@ -295,9 +296,9 @@ public sealed class EfOrganizacionLifecycleRepository(NexoRutaDbContext db) : IO
                 : throw new ArgumentOutOfRangeException(nameof(tipo));
 
     private async Task<int> RevocarSesionesOrganizacionAsync(TipoAccesoUsuario tipo, Guid id, CancellationToken ct)
-        => await db.Database.SqlQuery<int>($"""
-            SELECT nexoruta_app.revoke_org_sessions({tipo.ToString()}, {id}) AS "Value"
-            """).SingleAsync(ct);
+        => await db.Database.SqlQueryRaw<int>(
+            "SELECT " + RlsSqlFunctionContract.RevokeOrgSessions + "({0}, {1}) AS \"Value\"", tipo.ToString(), id)
+            .SingleAsync(ct);
 
     private sealed record OrganizationStateChangeRow(string EstadoAnterior, string EstadoNuevo);
 

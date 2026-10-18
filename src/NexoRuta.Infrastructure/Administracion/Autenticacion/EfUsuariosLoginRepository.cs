@@ -15,9 +15,9 @@ public sealed class EfUsuariosLoginRepository(
         CancellationToken cancellationToken = default)
     {
         var emailNormalizado = email.Trim().ToLowerInvariant();
-        var row = await db.Database.SqlQuery<LoginLookupRow>($"""
-            SELECT * FROM nexoruta_app.login_lookup({emailNormalizado})
-            """).SingleOrDefaultAsync(cancellationToken);
+        var row = await db.Database.SqlQueryRaw<LoginLookupRow>(
+            "SELECT * FROM " + RlsSqlFunctionContract.LoginLookup + "({0})", emailNormalizado)
+            .SingleOrDefaultAsync(cancellationToken);
         if (row is null) return null;
         return new UsuarioLogin(
             row.UsuarioId,

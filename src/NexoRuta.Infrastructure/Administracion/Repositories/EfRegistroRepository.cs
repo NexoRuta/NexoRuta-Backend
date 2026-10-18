@@ -22,12 +22,7 @@ public sealed class EfRegistroRepository(NexoRutaDbContext db, UserManager<Usuar
         try
         {
             var result = await identityUsers.CreateAsync(user, password);
-            if (!result.Succeeded)
-            {
-                if (result.Errors.Any(x => x.Code is "DuplicateEmail" or "DuplicateUserName"))
-                    throw new CorreoYaRegistradoException();
-                throw new ArgumentException("La cuenta no cumple las reglas de Identity.", nameof(password));
-            }
+            IdentityErrorContract.ExigirCreacionValida(result, identityUsers.ErrorDescriber);
         }
         catch (DbUpdateException error) when (error.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
         { throw new CorreoYaRegistradoException(); }
@@ -36,9 +31,9 @@ public sealed class EfRegistroRepository(NexoRutaDbContext db, UserManager<Usuar
 
     public async Task<IdentidadSinOrganizacion?> ObtenerSinOrganizacionAsync(Guid usuarioId, CancellationToken ct)
     {
-        var row = await db.Database.SqlQuery<UnassignedIdentityRow>($"""
-            SELECT * FROM nexoruta_app.lookup_unassigned_identity({usuarioId})
-            """).SingleOrDefaultAsync(ct);
+        var row = await db.Database.SqlQueryRaw<UnassignedIdentityRow>(
+            "SELECT * FROM " + RlsSqlFunctionContract.LookupUnassignedIdentity + "({0})", usuarioId)
+            .SingleOrDefaultAsync(ct);
         return row is null ? null : new(row.UsuarioId, row.Email);
     }
 

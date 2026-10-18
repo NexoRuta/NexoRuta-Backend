@@ -1,5 +1,11 @@
 namespace NexoRuta.Infrastructure.Outbox;
 
+public static class OutboxMessageTypes
+{
+    public const string TrackingRequested = "GenerarSeguimiento";
+    public const string ShipmentCreated = "EnvioCreado";
+}
+
 public enum OutboxDestino
 {
     RabbitMq,

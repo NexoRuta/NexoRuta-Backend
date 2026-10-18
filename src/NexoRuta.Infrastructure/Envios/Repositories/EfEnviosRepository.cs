@@ -4,6 +4,7 @@ using NexoRuta.Application.Envios.Repositories;
 using NexoRuta.Application.Envios.Results;
 using NexoRuta.Domain.Envios;
 using NexoRuta.Infrastructure.Persistence;
+using NexoRuta.Infrastructure.Seguimiento.Processing;
 using System.Text.Json;
 using NexoRuta.Infrastructure.Outbox;
 using NexoRuta.Application.Administracion.Exceptions;
@@ -42,7 +43,7 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
         var trabajoSeguimiento = new OutboxMessage(
             operadorId: envio.OperadorId,
             envioId: envio.Id,
-            tipo: "GenerarSeguimiento",
+            tipo: OutboxMessageTypes.TrackingRequested,
             destino: OutboxDestino.RabbitMq,
             payload: JsonSerializer.Serialize(new
             {
@@ -54,7 +55,7 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
         var eventoEnvioCreado = new OutboxMessage(
             operadorId: envio.OperadorId,
             envioId: envio.Id,
-            tipo: "EnvioCreado",
+            tipo: OutboxMessageTypes.ShipmentCreated,
             destino: OutboxDestino.Kafka,
             payload: JsonSerializer.Serialize(new
             {
@@ -68,12 +69,13 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
         Guid createdId;
         try
         {
-            createdId = await db.Database.SqlQuery<Guid>($"""
-                SELECT nexoruta_app.create_shipment(
-                    {envio.Id}, {destinatario.Id}, {direccion.Id}, {bulto.Id},
-                    {destinatario.Nombre}, {direccion.Descripcion}, {bulto.Codigo},
-                    {bulto.PesoGramos}, {bulto.LargoCentimetros}, {bulto.AnchoCentimetros}, {bulto.AltoCentimetros}) AS "Value"
-                """).SingleAsync(cancellationToken);
+            createdId = await db.Database.SqlQueryRaw<Guid>(
+                "SELECT " + RlsSqlFunctionContract.CreateShipment +
+                "({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}) AS \"Value\"",
+                envio.Id, destinatario.Id, direccion.Id, bulto.Id,
+                destinatario.Nombre, direccion.Descripcion, bulto.Codigo,
+                bulto.PesoGramos, bulto.LargoCentimetros, bulto.AnchoCentimetros, bulto.AltoCentimetros)
+                .SingleAsync(cancellationToken);
         }
         catch (PostgresException error) when (error.SqlState == "NXR01")
         {

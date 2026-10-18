@@ -4,58 +4,55 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using NexoRuta.Application.Administracion.Context;
 using NexoRuta.Domain.Administracion;
+using NexoRuta.Infrastructure.Outbox;
 
 namespace NexoRuta.Infrastructure.Persistence;
 
-public sealed record RlsActorContext(
-    string ActorKind,
+public record RlsActorContext(
+    RlsActorKind ActorKind,
     Guid? UserId = null,
     Guid? AccessId = null,
     Guid? OrganizationId = null,
     bool CanManageOrganizations = false,
-    Guid? BootstrapOperatorId = null,
-    Guid? BootstrapCommerceId = null,
-    string? OrganizationType = null)
+    TipoAccesoUsuario? OrganizationType = null)
 {
     public static RlsActorContext From(ContextoUsuario context) => new(
-        context.TipoAcceso == TipoAccesoUsuario.Comercio ? "comercio" : "operador",
+        context.TipoAcceso switch
+        {
+            TipoAccesoUsuario.Comercio => RlsActorKind.Comercio,
+            TipoAccesoUsuario.Operador => RlsActorKind.Operador,
+            _ => throw new ArgumentOutOfRangeException(nameof(context), "Unknown access kind.")
+        },
         context.UsuarioId, context.AccesoId,
         context.ComercioId ?? context.OperadorId,
-        OrganizationType: context.Tipo);
+        OrganizationType: context.TipoAcceso);
 
     public static RlsActorContext From(ContextoPlataforma context) => new(
-        "plataforma", context.UsuarioId, context.AccesoId,
+        RlsActorKind.Plataforma, context.UsuarioId, context.AccesoId,
         CanManageOrganizations: context.PuedeGestionarOrganizaciones);
 
     public static RlsActorContext From(IdentidadSinOrganizacion context) => new(
-        "identidad", context.UsuarioId);
+        RlsActorKind.Identidad, context.UsuarioId);
 
-    public static RlsActorContext From(ContextoOrganizacionSuspendida context) => new(
-        "suspendida", context.UsuarioId, context.AccesoId, context.OrganizacionId,
-        OrganizationType: context.TipoOrganizacion.ToString());
-
-    public static RlsActorContext Bootstrap(Guid? operatorId, Guid? commerceId) => new(
-        "bootstrap", BootstrapOperatorId: operatorId, BootstrapCommerceId: commerceId);
-
-    public static RlsActorContext Worker(Guid operatorId, Guid messageId, Guid shipmentId, Guid? processorId = null) => new(
-        "worker", OrganizationId: operatorId)
+    public static RlsActorContext From(ContextoOrganizacionSuspendida context)
     {
-        JobMessageId = messageId,
-        JobShipmentId = shipmentId,
-        JobConsumer = "GenerarSeguimiento",
-        ProcessorId = processorId
-    };
+        if (!Enum.IsDefined(context.TipoOrganizacion))
+            throw new ArgumentOutOfRangeException(nameof(context), "Unknown organization kind.");
+        return new(RlsActorKind.Suspendida, context.UsuarioId, context.AccesoId, context.OrganizacionId,
+            OrganizationType: context.TipoOrganizacion);
+    }
 
-    public Guid? SelectedOperatorId { get; init; }
-    public Guid? ShipmentId { get; init; }
-    public Guid? JobMessageId { get; init; }
-    public Guid? JobShipmentId { get; init; }
-    public Guid? ProcessorId { get; init; }
-    public Guid? SelectedOrganizationId { get; init; }
-    public Guid? TargetUserId { get; init; }
-    public Guid? TargetRoleId { get; init; }
-    public string? JobConsumer { get; init; }
+    public static RlsBootstrapContext Bootstrap(Guid? operatorId, Guid? commerceId) => new(operatorId, commerceId);
+
+    public static RlsWorkerContext Worker(Guid operatorId, Guid messageId, Guid shipmentId, Guid? processorId = null)
+        => new(operatorId, messageId, shipmentId, processorId);
 }
+
+public sealed record RlsBootstrapContext(Guid? OperatorId, Guid? CommerceId)
+    : RlsActorContext(RlsActorKind.Bootstrap);
+
+public sealed record RlsWorkerContext(Guid OperatorId, Guid MessageId, Guid ShipmentId, Guid? ProcessorId)
+    : RlsActorContext(RlsActorKind.Worker, OrganizationId: OperatorId);
 
 public static class RlsTransaction
 {
@@ -75,7 +72,7 @@ public static class RlsTransaction
     {
         if (db.Database.CurrentTransaction is null)
             throw new InvalidOperationException("RLS context must be set inside an active database transaction.");
-        if ((context.ActorKind is "comercio" or "operador" or "suspendida") && context.OrganizationId is null)
+        if ((context.ActorKind is RlsActorKind.Comercio or RlsActorKind.Operador or RlsActorKind.Suspendida) && context.OrganizationId is null)
             throw new ArgumentException("An organization context requires a persisted organization id.", nameof(context));
 
         return ExecuteSettingsAsync(db, context, cancellationToken);
@@ -94,11 +91,11 @@ public static class RlsTransaction
             addressId == Guid.Empty || parcelId == Guid.Empty || db.Database.CurrentTransaction is null)
             throw new InvalidOperationException("Shipment context requires valid ids and an active transaction.");
         return ExecuteSettingsAsync(db, null, cancellationToken,
-            ("nexoruta.selected_operator_id", operatorId.ToString("D")),
-            ("nexoruta.shipment_id", shipmentId.ToString("D")),
-            ("nexoruta.recipient_id", recipientId.ToString("D")),
-            ("nexoruta.address_id", addressId.ToString("D")),
-            ("nexoruta.parcel_id", parcelId.ToString("D")));
+            (RlsContextContract.SelectedOperatorId, operatorId.ToString("D")),
+            (RlsContextContract.ShipmentId, shipmentId.ToString("D")),
+            (RlsContextContract.RecipientId, recipientId.ToString("D")),
+            (RlsContextContract.AddressId, addressId.ToString("D")),
+            (RlsContextContract.ParcelId, parcelId.ToString("D")));
     }
 
     public static Task SetOrganizationCreationAsync(
@@ -112,9 +109,9 @@ public static class RlsTransaction
             db.Database.CurrentTransaction is null)
             throw new InvalidOperationException("Organization creation context requires valid ids and an active transaction.");
         return ExecuteSettingsAsync(db, null, cancellationToken,
-            ("nexoruta.selected_org_id", organizationId.ToString("D")),
-            ("nexoruta.target_user_id", userId.ToString("D")),
-            ("nexoruta.target_role_id", roleId.ToString("D")));
+            (RlsContextContract.SelectedOrganizationId, organizationId.ToString("D")),
+            (RlsContextContract.TargetUserId, userId.ToString("D")),
+            (RlsContextContract.TargetRoleId, roleId.ToString("D")));
     }
 
     public static Task SetBootstrapUserAsync(
@@ -125,7 +122,7 @@ public static class RlsTransaction
         if (userId == Guid.Empty || db.Database.CurrentTransaction is null)
             throw new InvalidOperationException("Bootstrap user context requires a valid id and an active transaction.");
         return ExecuteSettingsAsync(db, null, cancellationToken,
-            ("nexoruta.user_id", userId.ToString("D")));
+            (RlsContextContract.UserId, userId.ToString("D")));
     }
 
     private static async Task ExecuteSettingsAsync(
@@ -137,29 +134,31 @@ public static class RlsTransaction
         var settings = new List<(string Name, string Value)>();
         if (context is not null)
         {
+            var bootstrap = context as RlsBootstrapContext;
+            var worker = context as RlsWorkerContext;
             settings.AddRange(
             [
-                ("nexoruta.actor_kind", context.ActorKind),
-                ("nexoruta.user_id", Value(context.UserId)),
-                ("nexoruta.access_id", Value(context.AccessId)),
-                ("nexoruta.org_id", Value(context.OrganizationId)),
-                ("nexoruta.platform_manage_organizations", context.CanManageOrganizations ? "true" : "false"),
-                ("nexoruta.bootstrap_operator_id", Value(context.BootstrapOperatorId)),
-                ("nexoruta.bootstrap_commerce_id", Value(context.BootstrapCommerceId)),
-                ("nexoruta.target_org_type", context.OrganizationType ?? ""),
-                ("nexoruta.job_message_id", Value(context.JobMessageId)),
-                ("nexoruta.job_consumer", context.JobConsumer ?? ""),
-                ("nexoruta.job_shipment_id", Value(context.JobShipmentId)),
-                ("nexoruta.processor_id", Value(context.ProcessorId)),
-                ("nexoruta.selected_operator_id", Value(context.SelectedOperatorId)),
-                ("nexoruta.shipment_id", Value(context.ShipmentId)),
-                ("nexoruta.selected_org_id", Value(context.SelectedOrganizationId)),
-                ("nexoruta.target_user_id", Value(context.TargetUserId)),
-                ("nexoruta.target_role_id", Value(context.TargetRoleId)),
-                ("nexoruta.auth_access_id", ""),
-                ("nexoruta.auth_user_id", ""),
-                ("nexoruta.auth_org_id", ""),
-                ("nexoruta.auth_role_id", "")
+                (RlsContextContract.ActorKind, RlsContextContract.ActorSqlValue(context.ActorKind)),
+                (RlsContextContract.UserId, Value(context.UserId)),
+                (RlsContextContract.AccessId, Value(context.AccessId)),
+                (RlsContextContract.OrganizationId, Value(context.OrganizationId)),
+                (RlsContextContract.CanManageOrganizations, context.CanManageOrganizations ? "true" : "false"),
+                (RlsContextContract.BootstrapOperatorId, Value(bootstrap?.OperatorId)),
+                (RlsContextContract.BootstrapCommerceId, Value(bootstrap?.CommerceId)),
+                (RlsContextContract.OrganizationType, context.OrganizationType is { } organizationType ? RlsContextContract.OrganizationSqlValue(organizationType) : ""),
+                (RlsContextContract.JobMessageId, Value(worker?.MessageId)),
+                (RlsContextContract.JobConsumer, worker is not null ? OutboxMessageTypes.TrackingRequested : ""),
+                (RlsContextContract.JobShipmentId, Value(worker?.ShipmentId)),
+                (RlsContextContract.ProcessorId, Value(worker?.ProcessorId)),
+                (RlsContextContract.SelectedOperatorId, ""),
+                (RlsContextContract.ShipmentId, ""),
+                (RlsContextContract.SelectedOrganizationId, ""),
+                (RlsContextContract.TargetUserId, ""),
+                (RlsContextContract.TargetRoleId, ""),
+                (RlsContextContract.AuthAccessId, ""),
+                (RlsContextContract.AuthUserId, ""),
+                (RlsContextContract.AuthOrganizationId, ""),
+                (RlsContextContract.AuthRoleId, "")
             ]);
         }
         settings.AddRange(extra);

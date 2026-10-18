@@ -15,9 +15,9 @@ public sealed class EfOutboxRepository(NexoRutaDbContext db)
         if (!Enum.IsDefined(destino))
             throw new ArgumentOutOfRangeException(nameof(destino));
 
-        return await db.Database.SqlQuery<OutboxClaim>($"""
-            SELECT * FROM nexoruta_app.claim_outbox({procesadorId}, {destino.ToString()})
-            """).AsNoTracking().SingleOrDefaultAsync(cancellationToken);
+        return await db.Database.SqlQueryRaw<OutboxClaim>(
+            "SELECT * FROM " + RlsSqlFunctionContract.ClaimOutbox + "({0}, {1})", procesadorId, destino.ToString())
+            .AsNoTracking().SingleOrDefaultAsync(cancellationToken);
     }
 
     public Task<bool> MarcarPublicadoAsync(
@@ -45,8 +45,9 @@ public sealed class EfOutboxRepository(NexoRutaDbContext db)
     {
         if (mensajeId == Guid.Empty || procesadorId == Guid.Empty)
             return false;
-        return await db.Database.SqlQuery<bool>($"""
-            SELECT nexoruta_app.finish_outbox({mensajeId}, {procesadorId}, {correcto}, {error}) AS "Value"
-            """).SingleAsync(cancellationToken);
+        return await db.Database.SqlQueryRaw<bool>(
+            "SELECT " + RlsSqlFunctionContract.FinishOutbox + "({0}, {1}, {2}, {3}) AS \"Value\"",
+            mensajeId, procesadorId, correcto, error!)
+            .SingleAsync(cancellationToken);
     }
 }
