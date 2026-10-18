@@ -33,7 +33,9 @@ public sealed class RecuperarEnlaceSeguimientoTests(PostgresFixture postgres) : 
         using var client = factory.CreateHttpClient();
         var (envio, owner, _) = await CreateShipmentAsync(database);
         string? original = null;
-        Guid messageId = Guid.NewGuid();
+        var messageId = state == "vigente"
+            ? await PublishedTrackingJobTestData.CreatePublishedTrackingJobAsync(database, envio.OperadorId, envio.Id)
+            : Guid.Empty;
         await using (var db = database.CreateDbContext())
         {
             if (state == "vigente")
@@ -83,7 +85,8 @@ public sealed class RecuperarEnlaceSeguimientoTests(PostgresFixture postgres) : 
         {
             // Replay the same Rabbit processing operation and a different MessageId for the same shipment.
             await Processor(verification, settings).EjecutarAsync(messageId, envio.OperadorId, envio.Id);
-            await Processor(verification, settings).EjecutarAsync(Guid.NewGuid(), envio.OperadorId, envio.Id);
+            var secondMessageId = await PublishedTrackingJobTestData.CreatePublishedTrackingJobAsync(database, envio.OperadorId, envio.Id);
+            await Processor(verification, settings).EjecutarAsync(secondMessageId, envio.OperadorId, envio.Id);
             Assert.Equal(1, await verification.EnlacesSeguimiento.CountAsync());
             Assert.Equal(1, await verification.EntregasSeguimiento.CountAsync());
             Assert.Equal(original, Cipher(settings).Descifrar(await verification.EntregasSeguimiento.AsNoTracking().SingleAsync()));
@@ -149,8 +152,9 @@ public sealed class RecuperarEnlaceSeguimientoTests(PostgresFixture postgres) : 
         using var factory = new IntegrationApiFactory(database, "Development", settings);
         using var client = factory.CreateHttpClient();
         var (envio, owner, _) = await CreateShipmentAsync(database);
+        var messageId = await PublishedTrackingJobTestData.CreatePublishedTrackingJobAsync(database, envio.OperadorId, envio.Id);
         await using (var db = database.CreateDbContext())
-            await Processor(db, settings).EjecutarAsync(Guid.NewGuid(), envio.OperadorId, envio.Id);
+            await Processor(db, settings).EjecutarAsync(messageId, envio.OperadorId, envio.Id);
         using var request = await RequestAsync(client, database, envio.Id, owner);
         using var response = await client.SendAsync(request);
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
@@ -172,7 +176,8 @@ public sealed class RecuperarEnlaceSeguimientoTests(PostgresFixture postgres) : 
         string original;
         await using (var db = database.CreateDbContext())
         {
-            await Processor(db, originalSettings).EjecutarAsync(Guid.NewGuid(), envio.OperadorId, envio.Id);
+            var messageId = await PublishedTrackingJobTestData.CreatePublishedTrackingJobAsync(database, envio.OperadorId, envio.Id);
+            await Processor(db, originalSettings).EjecutarAsync(messageId, envio.OperadorId, envio.Id);
             original = Cipher(originalSettings).Descifrar(await db.EntregasSeguimiento.SingleAsync());
         }
         using var request = await RequestAsync(client, database, envio.Id, owner);

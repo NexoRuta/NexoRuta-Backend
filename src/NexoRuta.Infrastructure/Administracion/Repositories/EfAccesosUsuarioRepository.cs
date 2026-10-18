@@ -47,11 +47,22 @@ public sealed class EfAccesosUsuarioRepository(NexoRutaDbContext db) : IAccesosU
                 : x.ComercioId != null))
             .ToListAsync(cancellationToken);
 
-    public Task<ContextoUsuario?> ObtenerAsync(Guid accesoId, CancellationToken cancellationToken = default)
-        => Consulta(db.AccesosUsuario.Where(x => x.Id == accesoId)).SingleOrDefaultAsync(cancellationToken);
+    public async Task<ContextoUsuario?> ObtenerAsync(Guid accesoId, CancellationToken cancellationToken = default)
+    {
+        var row = await db.Database.SqlQuery<AccesoLookupRow>($"""
+            SELECT * FROM nexoruta_app.lookup_access({accesoId})
+            """).SingleOrDefaultAsync(cancellationToken);
+        if (row is null || !Enum.TryParse<EstadoOrganizacion>(row.Estado, out var estado)) return null;
+        return new(row.AccesoId, row.UsuarioId, row.OperadorId, row.ComercioId, row.UsuarioEmail,
+            row.OperadorNombre, row.ComercioNombre, row.RolId, row.RolCodigo, row.VersionSesion, estado);
+    }
 
     public Task<bool> EsPropietarioAsync(Guid usuarioId, Guid accesoId, CancellationToken cancellationToken = default)
         => db.AccesosUsuario.AsNoTracking().AnyAsync(
             x => x.UsuarioId == usuarioId && x.Id == accesoId && x.EsPropietario,
             cancellationToken);
+
+    private sealed record AccesoLookupRow(Guid AccesoId, Guid UsuarioId, Guid? OperadorId, Guid? ComercioId,
+        string UsuarioEmail, string? OperadorNombre, string? ComercioNombre, Guid RolId, string RolCodigo,
+        long VersionSesion, string Estado);
 }

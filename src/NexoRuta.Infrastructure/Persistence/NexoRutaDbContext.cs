@@ -40,6 +40,7 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+        modelBuilder.HasAnnotation("NexoRuta:RlsVersion", 1);
         modelBuilder.Entity<RolPlataformaPermiso>(entity =>
         {
             entity.ToTable("RolesPlataformaPermisos");

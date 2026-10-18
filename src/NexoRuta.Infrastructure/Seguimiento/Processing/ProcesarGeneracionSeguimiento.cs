@@ -31,21 +31,25 @@ public sealed class ProcesarGeneracionSeguimiento(
         }
 
         await using var transaccion =
-            await db.Database.BeginTransactionAsync(cancellationToken);
+            await db.BeginOrJoinAsync(cancellationToken);
 
-        // 1. Serializar el procesamiento por envío.
-        // PostgreSQL mantiene el bloqueo hasta COMMIT o ROLLBACK.
-        var envios = await db.Database.SqlQuery<Guid>(
-            $"""
-            SELECT "Id" AS "Value"
-            FROM "Envios"
-            WHERE "Id" = {envioId}
-              AND "OperadorId" = {operadorId}
-            FOR UPDATE
-            """)
-            .ToListAsync(cancellationToken);
+        var verifiedJob = await db.Database.SqlQuery<bool>($"""
+            SELECT nexoruta_app.begin_tracking_job({messageId}, {operadorId}, {envioId}) AS "Value"
+            """).SingleAsync(cancellationToken);
+        if (!verifiedJob)
+            throw new InvalidOperationException("The persisted tracking job does not match this message.");
+        await db.ApplyAsync(RlsActorContext.Worker(operadorId, messageId, envioId), cancellationToken);
 
-        if (envios.Count != 1)
+        // ponytail: a 64-bit hash collision only serializes unrelated shipments; it never grants row visibility.
+        var lockKey = $"{operadorId:N}:{envioId:N}";
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT pg_advisory_xact_lock(hashtextextended({lockKey}, 0))",
+            cancellationToken);
+
+        // 1. Validate the exact shipment through its RLS-scoped SELECT policy.
+        if (!await db.Envios.AsNoTracking().AnyAsync(
+                x => x.Id == envioId && x.OperadorId == operadorId,
+                cancellationToken))
         {
             throw new InvalidOperationException(
                 "No existe el envío para el operador indicado.");

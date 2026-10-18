@@ -34,9 +34,13 @@ public sealed class EfRegistroRepository(NexoRutaDbContext db, UserManager<Usuar
         return new(user.Id, user.Email!);
     }
 
-    public Task<IdentidadSinOrganizacion?> ObtenerSinOrganizacionAsync(Guid usuarioId, CancellationToken ct)
-        => db.Usuarios.AsNoTracking()
-            .Where(x => x.Id == usuarioId && x.PasswordHash != null && x.PasswordHash != "" &&
-                !db.AccesosUsuario.Any(a => a.UsuarioId == x.Id) && !db.AccesosPlataforma.Any(a => a.UsuarioId == x.Id))
-            .Select(x => new IdentidadSinOrganizacion(x.Id, x.Email!)).SingleOrDefaultAsync(ct);
+    public async Task<IdentidadSinOrganizacion?> ObtenerSinOrganizacionAsync(Guid usuarioId, CancellationToken ct)
+    {
+        var row = await db.Database.SqlQuery<UnassignedIdentityRow>($"""
+            SELECT * FROM nexoruta_app.lookup_unassigned_identity({usuarioId})
+            """).SingleOrDefaultAsync(ct);
+        return row is null ? null : new(row.UsuarioId, row.Email);
+    }
+
+    private sealed record UnassignedIdentityRow(Guid UsuarioId, string Email);
 }

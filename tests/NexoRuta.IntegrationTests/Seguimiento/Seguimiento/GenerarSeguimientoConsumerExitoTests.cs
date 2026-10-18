@@ -119,6 +119,7 @@ public sealed class GenerarSeguimientoConsumerExitoTests(
             tipo = mensaje.Tipo;
             contenido = Encoding.UTF8.GetBytes(mensaje.Payload);
         }
+        await PublishedTrackingJobTestData.PublishPendingAsync(database, messageId);
 
         var uri = new Uri(rabbitMq.GetConnectionString());
         var credenciales = uri.UserInfo.Split(':', 2);

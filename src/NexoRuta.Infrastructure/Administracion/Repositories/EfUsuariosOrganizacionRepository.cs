@@ -69,7 +69,7 @@ public sealed class EfUsuariosOrganizacionRepository(
         AccesoUsuario acceso,
         CancellationToken cancellationToken = default)
     {
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await db.BeginOrJoinAsync(cancellationToken);
         try
         {
             var result = await identityUsers.CreateAsync(usuario, password);
@@ -140,7 +140,7 @@ public sealed class EfUsuariosOrganizacionRepository(
         if (actor.OperadorId.HasValue == actor.ComercioId.HasValue)
             throw new AccesoNoPermitidoException();
 
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await db.BeginOrJoinAsync(cancellationToken);
         var acceso = await db.AccesosUsuario.FromSqlInterpolated($"""
             SELECT * FROM "AccesosUsuario"
             WHERE "UsuarioId" = {usuarioId}

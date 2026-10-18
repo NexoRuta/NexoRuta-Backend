@@ -37,7 +37,7 @@ public sealed class EfRolesRepository(NexoRutaDbContext db) : IRolesRepository
 
     public async Task<bool> RenombrarAsync(ContextoUsuario actor, Guid id, string nombre, CancellationToken ct)
     {
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await using var transaction = await db.BeginOrJoinAsync(ct);
         var actorAccesses = await LockActorAccessesAsync(actor.UsuarioId, ct);
         var role = await LockOwnedRoleAsync(actor, id, ct);
         if (role is null) return false;
@@ -50,7 +50,7 @@ public sealed class EfRolesRepository(NexoRutaDbContext db) : IRolesRepository
 
     public async Task<bool> EliminarAsync(ContextoUsuario actor, Guid id, CancellationToken ct)
     {
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await using var transaction = await db.BeginOrJoinAsync(ct);
         var actorAccesses = await LockActorAccessesAsync(actor.UsuarioId, ct);
         var role = await LockOwnedRoleAsync(actor, id, ct);
         if (role is null) return false;
@@ -58,15 +58,19 @@ public sealed class EfRolesRepository(NexoRutaDbContext db) : IRolesRepository
         if (await db.AccesosUsuario.AnyAsync(x => x.RolId == id, ct))
             throw new InvalidOperationException("An assigned role cannot be deleted.");
         db.RolesPermisos.RemoveRange(await db.RolesPermisos.Where(x => x.RolId == id).ToListAsync(ct));
-        db.Remove(role);
         await db.SaveChangesAsync(ct);
+        var deleted = await db.Database.SqlQuery<bool>($"""
+            SELECT nexoruta_app.delete_unused_role({id}) AS "Value"
+            """).SingleAsync(ct);
+        if (!deleted)
+            throw new InvalidOperationException("The role is protected, assigned, or no longer available.");
         await transaction.CommitAsync(ct);
         return true;
     }
 
     public async Task<bool> ActualizarPermisosAsync(ContextoUsuario actor, Guid id, IReadOnlyList<string> codigos, CancellationToken ct)
     {
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await using var transaction = await db.BeginOrJoinAsync(ct);
         var actorAccesses = await LockActorAccessesAsync(actor.UsuarioId, ct);
         var role = await LockOwnedRoleAsync(actor, id, ct);
         if (role is null) return false;
@@ -89,7 +93,7 @@ public sealed class EfRolesRepository(NexoRutaDbContext db) : IRolesRepository
 
     public async Task<bool> AsignarAsync(ContextoUsuario actor, Guid accesoId, Guid? rolId, bool puedeAsignarRolProtegido, CancellationToken ct)
     {
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await using var transaction = await db.BeginOrJoinAsync(ct);
         var access = await LockOwnedAccessAsync(actor, accesoId, ct);
         if (access is null) return false;
         if (await db.AccesosUsuario.AsNoTracking().AnyAsync(x => x.Id == access.Id && x.EsPropietario, ct) ||
@@ -124,13 +128,13 @@ public sealed class EfRolesRepository(NexoRutaDbContext db) : IRolesRepository
 
     private async Task<Rol?> LockOwnedRoleAsync(ContextoUsuario actor, Guid id, CancellationToken ct)
     {
-        var role = await db.Roles.FromSqlInterpolated($"""
-            SELECT * FROM "Roles"
-            WHERE "Id" = {id}
-              AND "OperadorId" IS NOT DISTINCT FROM {actor.OperadorId}
-              AND "ComercioId" IS NOT DISTINCT FROM {actor.ComercioId}
-            FOR UPDATE
-            """).SingleOrDefaultAsync(ct);
+        var locked = await db.Database.SqlQuery<bool>($"""
+            SELECT nexoruta_app.lock_owned_role({id}) AS "Value"
+            """).SingleAsync(ct);
+        if (!locked) return null;
+
+        var role = await db.Roles.SingleOrDefaultAsync(x => x.Id == id
+            && x.OperadorId == actor.OperadorId && x.ComercioId == actor.ComercioId, ct);
         if (role is not null)
             await db.Entry(role).ReloadAsync(ct);
         return role;

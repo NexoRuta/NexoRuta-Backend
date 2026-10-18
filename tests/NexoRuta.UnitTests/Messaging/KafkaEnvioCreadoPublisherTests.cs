@@ -83,7 +83,7 @@ public sealed class KafkaEnvioCreadoPublisherTests
     {
         using var publisher = new KafkaEnvioCreadoPublisher(new ConfigurationBuilder().Build(),
             NullLogger<KafkaEnvioCreadoPublisher>.Instance);
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => publisher.PublicarAsync(Event(), new CancellationToken(true)));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => publisher.PublicarAsync(OutboxClaim.From(Event()), new CancellationToken(true)));
     }
 
     [Fact]

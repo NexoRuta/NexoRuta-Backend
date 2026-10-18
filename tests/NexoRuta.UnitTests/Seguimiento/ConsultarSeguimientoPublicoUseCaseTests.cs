@@ -28,20 +28,15 @@ public sealed class ConsultarSeguimientoPublicoUseCaseTests
             ahora.AddHours(1));
 
         var repositorio = new RepositorioFake(enlace);
-        var consulta = new ConsultaEstadoFake();
-
-        var casoDeUso = new ConsultarSeguimientoPublicoUseCase(
-            repositorio,
-            consulta);
+        var casoDeUso = new ConsultarSeguimientoPublicoUseCase(repositorio);
 
         // Act
         var resultado = await casoDeUso.EjecutarAsync(token);
 
         // Assert
         Assert.Equal(EstadoEnvio.Admitido, resultado);
-        Assert.Equal(1, consulta.CantidadConsultas);
-        Assert.Equal(operadorId, consulta.OperadorConsultado);
-        Assert.Equal(envioId, consulta.EnvioConsultado);
+        Assert.Equal(1, repositorio.CantidadConsultasPublicas);
+        Assert.Equal(token, repositorio.TokenConsultado);
     }
 
     [Fact]
@@ -64,24 +59,23 @@ public sealed class ConsultarSeguimientoPublicoUseCaseTests
             ahora.AddHours(-2));
 
         var repositorio = new RepositorioFake(enlace);
-        var consulta = new ConsultaEstadoFake();
-
-        var casoDeUso = new ConsultarSeguimientoPublicoUseCase(
-            repositorio,
-            consulta);
+        var casoDeUso = new ConsultarSeguimientoPublicoUseCase(repositorio);
 
         // Act
         var resultado = await casoDeUso.EjecutarAsync(token);
 
         // Assert
         Assert.Null(resultado);
-        Assert.Equal(0, consulta.CantidadConsultas);
+        Assert.Equal(1, repositorio.CantidadConsultasPublicas);
     }
 
     private sealed class RepositorioFake(
      EnlaceSeguimiento? enlace
  ) : IEnlacesSeguimientoRepository
     {
+        public int CantidadConsultasPublicas { get; private set; }
+        public string? TokenConsultado { get; private set; }
+
         public Task GuardarAsync(
             EnlaceSeguimiento nuevoEnlace,
             CancellationToken cancellationToken = default)
@@ -99,6 +93,15 @@ public sealed class ConsultarSeguimientoPublicoUseCaseTests
                     : null;
 
             return Task.FromResult(resultado);
+        }
+
+        public Task<EstadoEnvio?> ObtenerEstadoPublicoAsync(string token, CancellationToken cancellationToken = default)
+        {
+            CantidadConsultasPublicas++;
+            TokenConsultado = token;
+            var valid = enlace?.TokenHash == GeneradorTokenSeguimiento.CalcularHash(token) &&
+                enlace.EstaVigente(DateTimeOffset.UtcNow);
+            return Task.FromResult<EstadoEnvio?>(valid ? EstadoEnvio.Admitido : null);
         }
     }
     [Fact]
@@ -121,39 +124,13 @@ public sealed class ConsultarSeguimientoPublicoUseCaseTests
         enlace.Revocar(ahora);
 
         var repositorio = new RepositorioFake(enlace);
-        var consulta = new ConsultaEstadoFake();
-
-        var casoDeUso = new ConsultarSeguimientoPublicoUseCase(
-            repositorio,
-            consulta);
+        var casoDeUso = new ConsultarSeguimientoPublicoUseCase(repositorio);
 
         // Act
         var resultado = await casoDeUso.EjecutarAsync(token);
 
         // Assert
         Assert.Null(resultado);
-        Assert.Equal(0, consulta.CantidadConsultas);
-    }
-    private sealed class ConsultaEstadoFake : IConsultaEstadoEnvio
-    {
-        public int CantidadConsultas { get; private set; }
-
-        public Guid? OperadorConsultado { get; private set; }
-
-        public Guid? EnvioConsultado { get; private set; }
-
-        public Task<EstadoEnvio?> ObtenerEstadoAsync(
-            Guid operadorId,
-            Guid envioId,
-            CancellationToken cancellationToken = default)
-        {
-            CantidadConsultas++;
-
-            OperadorConsultado = operadorId;
-            EnvioConsultado = envioId;
-
-            return Task.FromResult<EstadoEnvio?>(
-                EstadoEnvio.Admitido);
-        }
+        Assert.Equal(1, repositorio.CantidadConsultasPublicas);
     }
 }

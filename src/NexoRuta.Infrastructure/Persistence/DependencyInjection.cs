@@ -22,10 +22,11 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddNexoRutaPersistence(
         this IServiceCollection services,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        string connectionStringName = "Postgres")
     {
-        var connectionString = configuration.GetConnectionString("Postgres")
-            ?? throw new InvalidOperationException("Falta ConnectionStrings:Postgres.");
+        var connectionString = configuration.GetConnectionString(connectionStringName)
+            ?? throw new InvalidOperationException($"Falta ConnectionStrings:{connectionStringName}.");
 
         services.AddDbContext<NexoRutaDbContext>(options => options.UseNpgsql(connectionString));
         services.AddIdentityCore<Usuario>(options =>

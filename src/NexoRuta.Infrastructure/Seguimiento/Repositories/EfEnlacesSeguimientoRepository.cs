@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 
 using NexoRuta.Application.Seguimiento.Interfaces;
+using NexoRuta.Domain.Envios;
 using NexoRuta.Domain.Seguimiento;
 using NexoRuta.Infrastructure.Persistence;
 namespace NexoRuta.Infrastructure.Seguimiento.Repositories;
@@ -29,4 +30,16 @@ public sealed class EfEnlacesSeguimientoRepository(
                 enlace => enlace.TokenHash == tokenHash,
                 cancellationToken);
     }
+
+    public async Task<EstadoEnvio?> ObtenerEstadoPublicoAsync(
+        string token,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await db.Database.SqlQuery<PublicTrackingState>($"""
+            SELECT * FROM nexoruta_app.public_tracking({token})
+            """).SingleOrDefaultAsync(cancellationToken);
+        return result is not null && Enum.TryParse<EstadoEnvio>(result.Estado, out var state) ? state : null;
+    }
+
+    private sealed record PublicTrackingState(string Estado);
 }

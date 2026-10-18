@@ -13,24 +13,23 @@ namespace NexoRuta.Infrastructure.Administracion.Repositories;
 
 public sealed class EfPlataformaRepository(NexoRutaDbContext db, UserManager<Usuario> identityUsers) : IPlataformaRepository, IAltaPropiaRepository
 {
-    public Task<ContextoPlataforma?> ObtenerAccesoAsync(Guid accesoId, CancellationToken ct)
-        => (from access in db.AccesosPlataforma.AsNoTracking()
-            join user in db.Usuarios on access.UsuarioId equals user.Id
-            join role in db.RolesPlataforma on access.RolId equals role.Id
-            where access.AccesoId == accesoId && access.Activo && user.PasswordHash != null && user.PasswordHash != ""
-            select new ContextoPlataforma(user.Id, access.AccesoId, access.VersionSesion,
-                role.PuedeGestionarOrganizaciones &&
-                    (from grant in db.RolesPlataformaPermisos join permission in db.Permisos on grant.PermisoId equals permission.Id
-                     where grant.RolId == role.Id && permission.Codigo == RolPlataforma.GestionarOrganizaciones select grant).Any(),
-                user.Email!)).SingleOrDefaultAsync(ct);
+    public async Task<ContextoPlataforma?> ObtenerAccesoAsync(Guid accesoId, CancellationToken ct)
+    {
+        var row = await db.Database.SqlQuery<PlatformAccessLookupRow>($"""
+            SELECT * FROM nexoruta_app.lookup_platform_access({accesoId})
+            """).SingleOrDefaultAsync(ct);
+        return row is null ? null : new(row.UsuarioId, row.AccesoId, row.VersionSesion,
+            row.PuedeGestionarOrganizaciones, row.UsuarioEmail);
+    }
 
     public async Task InicializarAsync(string email, string password, CancellationToken ct = default, bool permitirExistente = false)
     {
         var normalized = ValidacionCredenciales.Validar(email, password);
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
-        // ponytail: one initial account is supported; a transaction-scoped table lock serializes bootstrap only.
+        await using var transaction = await db.BeginOrJoinAsync(ct);
+        await db.ApplyAsync(RlsActorContext.Bootstrap(null, null), ct);
+        // ponytail: one initial account is supported; a transaction advisory lock serializes bootstrap only.
         // Multi-account provisioning needs a scoped lock and an explicit administration workflow.
-        await db.Database.ExecuteSqlRawAsync("LOCK TABLE \"AccesosPlataforma\" IN SHARE ROW EXCLUSIVE MODE", ct);
+        await db.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock(hashtextextended('nexoruta:platform-bootstrap', 0))", ct);
         var existing = await (from access in db.AccesosPlataforma.AsNoTracking()
                               join account in db.Usuarios on access.UsuarioId equals account.Id
                               join platformRole in db.RolesPlataforma on access.RolId equals platformRole.Id
@@ -102,7 +101,7 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, UserManager<Usu
             throw new ArgumentException("Invalid organization type.", nameof(tipo));
         if (string.IsNullOrWhiteSpace(nombre) || nombre.Trim().Length > 160)
             throw new ArgumentException("An organization name of at most 160 characters is required.", nameof(nombre));
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await using var transaction = await db.BeginOrJoinAsync(ct);
         if (nuevaIdentidad)
         {
             if (await EmailExists(user.Email!, ct)) throw new CorreoYaRegistradoException();
@@ -117,6 +116,7 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, UserManager<Usu
         var role = new Rol(nuevaIdentidad ? "administrador" : "dueno", nuevaIdentidad ? "Administrator" : "Owner", operatorEntity?.Id, commerceEntity?.Id);
         role.ProtegerComoRolSistema();
         var access = new AccesoUsuario(user.Id, operatorEntity?.Id, commerceEntity?.Id, role, esPropietario: true);
+        await db.SetOrganizationCreationAsync(id, user.Id, role.Id, ct);
         try
         {
             // Catalog upserts and every organization row belong to the same transaction.
@@ -131,7 +131,19 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, UserManager<Usu
             }
             var codes = CatalogoPermisos.Para(tipo).Select(x => x.Codigo).ToArray();
             var permissions = await db.Permisos.Where(x => codes.Contains(x.Codigo)).ToListAsync(ct);
-            db.AddRange(organization, role, access);
+            db.Entry(organization).Property("BootstrapCompletado").CurrentValue = true;
+            if (operatorEntity is not null)
+                await db.Database.ExecuteSqlInterpolatedAsync($"""
+                    INSERT INTO "Operadores" ("Id", "Nombre", "Estado", "Version", "BootstrapCompletado")
+                    VALUES ({operatorEntity.Id}, {operatorEntity.Nombre}, 'Activa', 0, true)
+                    """, ct);
+            else
+                await db.Database.ExecuteSqlInterpolatedAsync($"""
+                    INSERT INTO "Comercios" ("Id", "Nombre", "Estado", "Version", "BootstrapCompletado")
+                    VALUES ({commerceEntity!.Id}, {commerceEntity.Nombre}, 'Activa', 0, true)
+                    """, ct);
+            db.Entry(organization).State = EntityState.Unchanged;
+            db.AddRange(role, access);
             if (nuevaIdentidad)
             {
                 var userResult = await identityUsers.CreateAsync(user, password!);
@@ -142,7 +154,6 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, UserManager<Usu
                     throw new ArgumentException("La cuenta no cumple las reglas de Identity.", nameof(password));
                 }
             }
-            db.Entry(organization).Property("BootstrapCompletado").CurrentValue = true;
             db.AddRange(permissions.Select(p => new RolPermiso(role.Id, p.Id)));
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
@@ -178,6 +189,9 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, UserManager<Usu
 
     private Task<bool> EmailExists(string email, CancellationToken ct)
         => db.Usuarios.AnyAsync(x => x.Email!.Trim().ToLower() == email, ct);
+
+    private sealed record PlatformAccessLookupRow(Guid UsuarioId, Guid AccesoId, long VersionSesion,
+        bool PuedeGestionarOrganizaciones, string UsuarioEmail);
 
     private static bool IsUniqueViolation(DbUpdateException error)
         => error.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation };

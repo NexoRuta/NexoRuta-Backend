@@ -8,6 +8,7 @@ using System.Text.Json;
 using NexoRuta.Infrastructure.Outbox;
 using NexoRuta.Application.Administracion.Exceptions;
 using NexoRuta.Domain.Administracion;
+using Npgsql;
 
 namespace NexoRuta.Infrastructure.Envios.Repositories;
 
@@ -20,19 +21,22 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
         Bulto bulto,
         CancellationToken cancellationToken = default)
     {
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        // Lock both participating organizations in deterministic order so shipment creation
-        // serializes with platform suspension without changing existing shipment history.
+        if (destinatario.OperadorId != envio.OperadorId || direccion.OperadorId != envio.OperadorId ||
+            bulto.OperadorId != envio.OperadorId || bulto.EnvioId != envio.Id)
+            throw new ArgumentException("Shipment aggregate tenant keys must refer to the same shipment and operator.");
+        await using var transaction = await db.BeginOrJoinAsync(cancellationToken);
+        // Keep the commerce lock on the API path; the scoped SECURITY DEFINER insert locks only the
+        // chosen operator because commerce SELECT cannot lock inactive operators under RLS.
         var commerce = await db.Comercios.FromSqlInterpolated(
             $"SELECT * FROM \"Comercios\" WHERE \"Id\" = {envio.ComercioId} FOR UPDATE")
             .SingleOrDefaultAsync(cancellationToken);
-        var operatorEntity = await db.Operadores.FromSqlInterpolated(
-            $"SELECT * FROM \"Operadores\" WHERE \"Id\" = {envio.OperadorId} FOR UPDATE")
-            .SingleOrDefaultAsync(cancellationToken);
+        var operatorEntity = await db.Operadores.SingleOrDefaultAsync(x => x.Id == envio.OperadorId, cancellationToken);
         if (commerce is null || operatorEntity is null)
             throw new OrganizacionSuspendidaException("No se puede crear el envío porque una organización ya no está disponible.");
         if (commerce.Estado != EstadoOrganizacion.Activa || operatorEntity.Estado != EstadoOrganizacion.Activa)
             throw new OrganizacionSuspendidaException("No se puede crear el envío mientras una organización esté suspendida.");
+
+        await db.SetShipmentAsync(envio.OperadorId, envio.Id, destinatario.Id, direccion.Id, bulto.Id, cancellationToken);
 
         // Trabajo asíncrono: generar el seguimiento.
         var trabajoSeguimiento = new OutboxMessage(
@@ -61,13 +65,24 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
             }));
 
         // EF Core guarda todo en la misma operación.
-        db.AddRange(
-            destinatario,
-            direccion,
-            envio,
-            bulto,
-            trabajoSeguimiento,
-            eventoEnvioCreado);
+        Guid createdId;
+        try
+        {
+            createdId = await db.Database.SqlQuery<Guid>($"""
+                SELECT nexoruta_app.create_shipment(
+                    {envio.Id}, {destinatario.Id}, {direccion.Id}, {bulto.Id},
+                    {destinatario.Nombre}, {direccion.Descripcion}, {bulto.Codigo},
+                    {bulto.PesoGramos}, {bulto.LargoCentimetros}, {bulto.AnchoCentimetros}, {bulto.AltoCentimetros}) AS "Value"
+                """).SingleAsync(cancellationToken);
+        }
+        catch (PostgresException error) when (error.SqlState == "NXR01")
+        {
+            throw new OrganizacionSuspendidaException("No se puede crear el envío mientras el operador seleccionado está suspendido.");
+        }
+        if (createdId != envio.Id)
+            throw new InvalidOperationException("The database did not create the requested shipment.");
+
+        db.AddRange(trabajoSeguimiento, eventoEnvioCreado);
 
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
@@ -81,7 +96,7 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
         var shipments = await (
             from envio in db.Envios
             join comercio in db.Comercios on envio.ComercioId equals comercio.Id
-            join operador in db.Operadores on envio.OperadorId equals operador.Id
+            join selectedOperator in db.Operadores on envio.OperadorId equals selectedOperator.Id
             join usuario in db.Usuarios on envio.CreadoPorUsuarioId equals usuario.Id
             join destinatario in db.Destinatarios on envio.DestinatarioId equals destinatario.Id
             join direccion in db.Direcciones on envio.DireccionId equals direccion.Id
@@ -95,7 +110,7 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
                 envio.ComercioId,
                 envio.CreadoPorUsuarioId,
                 UsuarioEmail = usuario.Email,
-                OperadorNombre = operador.Nombre,
+                OperadorNombre = selectedOperator.Nombre,
                 ComercioNombre = comercio.Nombre,
                 DestinatarioNombre = destinatario.Nombre,
                 Direccion = direccion.Descripcion,

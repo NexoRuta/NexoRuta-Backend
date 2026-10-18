@@ -13,10 +13,10 @@ public sealed class RabbitMqSeguimientoPublisher(
         "nexoruta.seguimiento.generar";
 
     public async Task PublicarAsync(
-        OutboxMessage mensaje,
+        OutboxClaim mensaje,
         CancellationToken cancellationToken = default)
     {
-        if (mensaje.Destino != OutboxDestino.RabbitMq ||
+        if (mensaje.Destino != nameof(OutboxDestino.RabbitMq) ||
             mensaje.Tipo != "GenerarSeguimiento")
         {
             throw new ArgumentException(

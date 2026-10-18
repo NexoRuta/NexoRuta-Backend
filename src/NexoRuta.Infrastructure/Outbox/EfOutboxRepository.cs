@@ -5,159 +5,48 @@ namespace NexoRuta.Infrastructure.Outbox;
 
 public sealed class EfOutboxRepository(NexoRutaDbContext db)
 {
-    public async Task<OutboxMessage?> ReservarSiguienteAsync(
+    public async Task<OutboxClaim?> ReservarSiguienteAsync(
         Guid procesadorId,
         OutboxDestino destino,
         CancellationToken cancellationToken = default)
     {
         if (procesadorId == Guid.Empty)
-            throw new ArgumentException(
-                "El identificador del procesador es obligatorio.",
-                nameof(procesadorId));
-
+            throw new ArgumentException("El identificador del procesador es obligatorio.", nameof(procesadorId));
         if (!Enum.IsDefined(destino))
             throw new ArgumentOutOfRangeException(nameof(destino));
 
-        var ahora = DateTimeOffset.UtcNow;
-        var reservaHasta = ahora.AddMinutes(2);
-
-        // Each dispatcher only leases messages for its own transport.
-        var candidatos = await db.OutboxMessages
-            .AsNoTracking()
-            .Where(x =>
-                x.Destino == destino &&
-                (
-                    (
-                        (x.Estado == OutboxEstado.Pendiente ||
-                         x.Estado == OutboxEstado.Error) &&
-                        x.ProximoIntentoEnUtc <= ahora
-                    ) ||
-                    (
-                        x.Estado == OutboxEstado.Procesando &&
-                        x.ReservaHastaUtc <= ahora
-                    )
-                ))
-            .OrderBy(x => x.CreadoEnUtc)
-            .Select(x => x.Id)
-            .Take(10)
-            .ToListAsync(cancellationToken);
-
-        foreach (var id in candidatos)
-        {
-            // UPDATE condicional: solo uno de los Workers gana.
-            var actualizados = await db.OutboxMessages
-                .Where(x =>
-                    x.Id == id &&
-                    x.Destino == destino &&
-                    (
-                        (
-                            (x.Estado == OutboxEstado.Pendiente ||
-                             x.Estado == OutboxEstado.Error) &&
-                            x.ProximoIntentoEnUtc <= ahora
-                        ) ||
-                        (
-                            x.Estado == OutboxEstado.Procesando &&
-                            x.ReservaHastaUtc <= ahora
-                        )
-                    ))
-                .ExecuteUpdateAsync(setters => setters
-                    .SetProperty(
-                        x => x.Estado,
-                        OutboxEstado.Procesando)
-                    .SetProperty(
-                        x => x.ProcesadorId,
-                        (Guid?)procesadorId)
-                    .SetProperty(
-                        x => x.ReservaHastaUtc,
-                        (DateTimeOffset?)reservaHasta)
-                    .SetProperty(
-                        x => x.Intentos,
-                        x => x.Intentos < int.MaxValue ? x.Intentos + 1 : x.Intentos),
-                    cancellationToken);
-
-            if (actualizados == 1)
-            {
-                return await db.OutboxMessages
-                    .AsNoTracking()
-                    .SingleAsync(
-                        x => x.Id == id,
-                        cancellationToken);
-            }
-        }
-
-        return null;
+        return await db.Database.SqlQuery<OutboxClaim>($"""
+            SELECT * FROM nexoruta_app.claim_outbox({procesadorId}, {destino.ToString()})
+            """).AsNoTracking().SingleOrDefaultAsync(cancellationToken);
     }
-    public async Task<bool> MarcarPublicadoAsync(
-    Guid mensajeId,
-    Guid procesadorId,
-    CancellationToken cancellationToken = default)
+
+    public Task<bool> MarcarPublicadoAsync(
+        Guid mensajeId,
+        Guid procesadorId,
+        CancellationToken cancellationToken = default)
+        => EjecutarFinalizacionAsync(mensajeId, procesadorId, true, null, cancellationToken);
+
+    public Task<bool> MarcarErrorAsync(
+        Guid mensajeId,
+        Guid procesadorId,
+        string error,
+        CancellationToken cancellationToken = default)
     {
-        var ahora = DateTimeOffset.UtcNow;
-
-        var actualizados = await db.OutboxMessages
-            .Where(x =>
-                x.Id == mensajeId &&
-                x.Estado == OutboxEstado.Procesando &&
-                x.ProcesadorId == procesadorId &&
-                x.ReservaHastaUtc > ahora)
-            .ExecuteUpdateAsync(setters => setters
-                .SetProperty(
-                    x => x.Estado,
-                    OutboxEstado.Publicado)
-                .SetProperty(
-                    x => x.PublicadoEnUtc,
-                    (DateTimeOffset?)ahora)
-                .SetProperty(
-                    x => x.ProcesadorId,
-                    (Guid?)null)
-                .SetProperty(
-                    x => x.ReservaHastaUtc,
-                    (DateTimeOffset?)null)
-                .SetProperty(
-                    x => x.UltimoError,
-                    (string?)null),
-                cancellationToken);
-
-
-        return actualizados == 1;
+        var safeError = string.IsNullOrWhiteSpace(error) ? "Error de publicación" : error[..Math.Min(error.Length, 2000)];
+        return EjecutarFinalizacionAsync(mensajeId, procesadorId, false, safeError, cancellationToken);
     }
-    public async Task<bool> MarcarErrorAsync(
-    Guid mensajeId,
-    Guid procesadorId,
-    string error,
-    CancellationToken cancellationToken = default)
+
+    private async Task<bool> EjecutarFinalizacionAsync(
+        Guid mensajeId,
+        Guid procesadorId,
+        bool correcto,
+        string? error,
+        CancellationToken cancellationToken)
     {
-        var ahora = DateTimeOffset.UtcNow;
-        var proximoIntento = ahora.AddSeconds(30);
-
-        var mensajeError = string.IsNullOrWhiteSpace(error)
-            ? "Error de publicación"
-            : error[..Math.Min(error.Length, 2000)];
-
-        var actualizados = await db.OutboxMessages
-            .Where(x =>
-                x.Id == mensajeId &&
-                x.Estado == OutboxEstado.Procesando &&
-                x.ProcesadorId == procesadorId &&
-                x.ReservaHastaUtc > ahora)
-            .ExecuteUpdateAsync(setters => setters
-                .SetProperty(
-                    x => x.Estado,
-                    OutboxEstado.Error)
-                .SetProperty(
-                    x => x.ProximoIntentoEnUtc,
-                    proximoIntento)
-                .SetProperty(
-                    x => x.UltimoError,
-                    mensajeError)
-                .SetProperty(
-                    x => x.ProcesadorId,
-                    (Guid?)null)
-                .SetProperty(
-                    x => x.ReservaHastaUtc,
-                    (DateTimeOffset?)null),
-                cancellationToken);
-
-        return actualizados == 1;
+        if (mensajeId == Guid.Empty || procesadorId == Guid.Empty)
+            return false;
+        return await db.Database.SqlQuery<bool>($"""
+            SELECT nexoruta_app.finish_outbox({mensajeId}, {procesadorId}, {correcto}, {error}) AS "Value"
+            """).SingleAsync(cancellationToken);
     }
 }

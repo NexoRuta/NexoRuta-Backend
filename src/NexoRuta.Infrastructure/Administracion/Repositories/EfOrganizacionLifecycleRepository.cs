@@ -21,7 +21,7 @@ public sealed class EfOrganizacionLifecycleRepository(NexoRutaDbContext db) : IO
         TipoAccesoUsuario tipo, Guid organizacionId, Guid accesoId, Guid solicitanteUsuarioId,
         string motivo, DateTimeOffset solicitadoEnUtc, CancellationToken ct)
     {
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await using var transaction = await db.BeginOrJoinAsync(ct);
         await BloquearOrganizacionAsync(tipo, organizacionId, ct);
         var organization = await ObtenerEstadoOrganizacionAsync(tipo, organizacionId, ct);
         if (organization is null) throw new OrganizacionActualNoEncontradaException();
@@ -68,7 +68,7 @@ public sealed class EfOrganizacionLifecycleRepository(NexoRutaDbContext db) : IO
         Guid id, Guid actorId, EstadoSolicitudReactivacion decision, string motivo,
         long version, DateTimeOffset fechaUtc, CancellationToken ct)
     {
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await using var transaction = await db.BeginOrJoinAsync(ct);
         try
         {
             var request = await db.SolicitudesReactivacionOrganizacion.SingleOrDefaultAsync(x => x.Id == id, ct);
@@ -169,7 +169,7 @@ public sealed class EfOrganizacionLifecycleRepository(NexoRutaDbContext db) : IO
         Guid solicitudId, Guid actorUsuarioId, EstadoSolicitudBaja decision,
         string motivo, long version, DateTimeOffset resueltaEnUtc, CancellationToken ct)
     {
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await using var transaction = await db.BeginOrJoinAsync(ct);
         try
         {
             var solicitud = await db.SolicitudesBajaOrganizacion.SingleOrDefaultAsync(x => x.Id == solicitudId, ct);
@@ -222,7 +222,7 @@ public sealed class EfOrganizacionLifecycleRepository(NexoRutaDbContext db) : IO
         EstadoOrganizacion estado, string motivo, long version,
         DateTimeOffset ocurridoEnUtc, CancellationToken ct)
     {
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await using var transaction = await db.BeginOrJoinAsync(ct);
         try
         {
             await BloquearOrganizacionAsync(tipo, organizacionId, ct);
@@ -263,31 +263,20 @@ public sealed class EfOrganizacionLifecycleRepository(NexoRutaDbContext db) : IO
     private async Task<(EstadoOrganizacion Previous, EstadoOrganizacion Current)?> CambiarEstadoTrackedAsync(
         TipoAccesoUsuario tipo, Guid organizacionId, EstadoOrganizacion estado, long? version, CancellationToken ct)
     {
-        if (tipo == TipoAccesoUsuario.Comercio)
+        try
         {
-            var commerce = await db.Comercios.SingleOrDefaultAsync(x => x.Id == organizacionId, ct);
-            if (commerce is null) return null;
-            if (commerce.Estado == estado) return (estado, estado);
-            if (version is not null && commerce.Version != version)
-                throw new ConflictoEstadoOrganizacionException("La organización cambió desde la última consulta. Volvé a cargar los datos.");
-            var previous = commerce.Estado;
-            db.Entry(commerce).Property(x => x.Version).OriginalValue = version ?? commerce.Version;
-            commerce.CambiarEstado(estado);
-            return (previous, commerce.Estado);
+            var row = await db.Database.SqlQuery<OrganizationStateChangeRow>($"""
+                SELECT * FROM nexoruta_app.set_organization_state({tipo.ToString()}, {organizacionId}, {estado.ToString()}, {version})
+                """).SingleOrDefaultAsync(ct);
+            if (row is null || !Enum.TryParse<EstadoOrganizacion>(row.EstadoAnterior, out var previous) ||
+                !Enum.TryParse<EstadoOrganizacion>(row.EstadoNuevo, out var current))
+                return null;
+            return (previous, current);
         }
-        if (tipo == TipoAccesoUsuario.Operador)
+        catch (PostgresException exception) when (exception.SqlState == "P0001")
         {
-            var operatorEntity = await db.Operadores.SingleOrDefaultAsync(x => x.Id == organizacionId, ct);
-            if (operatorEntity is null) return null;
-            if (operatorEntity.Estado == estado) return (estado, estado);
-            if (version is not null && operatorEntity.Version != version)
-                throw new ConflictoEstadoOrganizacionException("La organización cambió desde la última consulta. Volvé a cargar los datos.");
-            var previous = operatorEntity.Estado;
-            db.Entry(operatorEntity).Property(x => x.Version).OriginalValue = version ?? operatorEntity.Version;
-            operatorEntity.CambiarEstado(estado);
-            return (previous, operatorEntity.Estado);
+            throw new DbUpdateConcurrencyException("The organization version is stale.", exception);
         }
-        throw new ArgumentOutOfRangeException(nameof(tipo));
     }
 
     private Task<EstadoOrganizacionAdministrativa?> ObtenerEstadoOrganizacionAsync(
@@ -305,8 +294,12 @@ public sealed class EfOrganizacionLifecycleRepository(NexoRutaDbContext db) : IO
                 ? db.Comercios.AsNoTracking().Where(x => x.Id == id).Select(x => x.Nombre).SingleOrDefaultAsync(ct)
                 : throw new ArgumentOutOfRangeException(nameof(tipo));
 
-    private Task<int> RevocarSesionesOrganizacionAsync(TipoAccesoUsuario tipo, Guid id, CancellationToken ct)
-        => db.Database.ExecuteSqlInterpolatedAsync($"UPDATE \"AccesosUsuario\" SET \"VersionSesion\" = \"VersionSesion\" + 1 WHERE \"TipoOrganizacion\" = {tipo.ToString()} AND \"OrganizacionId\" = {id}", ct);
+    private async Task<int> RevocarSesionesOrganizacionAsync(TipoAccesoUsuario tipo, Guid id, CancellationToken ct)
+        => await db.Database.SqlQuery<int>($"""
+            SELECT nexoruta_app.revoke_org_sessions({tipo.ToString()}, {id}) AS "Value"
+            """).SingleAsync(ct);
+
+    private sealed record OrganizationStateChangeRow(string EstadoAnterior, string EstadoNuevo);
 
     private static bool EsConflictoSolicitudPendiente(DbUpdateException error)
         => error.InnerException is PostgresException

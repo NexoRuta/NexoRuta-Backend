@@ -38,7 +38,8 @@ public sealed class DatosInicialesSeeder(NexoRutaDbContext db, AccesoInicial ini
             throw new InvalidOperationException("Bootstrap requires persistent organization IDs.");
         if (string.Equals(initial.UsuarioEmail, initial.OperadorUsuarioEmail, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Bootstrap accounts must be distinct.");
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await db.BeginOrJoinAsync(cancellationToken);
+        await db.ApplyAsync(RlsActorContext.Bootstrap(initial.OperadorId, initial.ComercioId), cancellationToken);
         if (!await db.Operadores.AnyAsync(x => x.Id == initial.OperadorId, cancellationToken))
             db.Add(new Operador(initial.OperadorNombre, initial.OperadorId));
         if (!await db.Comercios.AnyAsync(x => x.Id == initial.ComercioId, cancellationToken))
@@ -152,6 +153,7 @@ public sealed class DatosInicialesSeeder(NexoRutaDbContext db, AccesoInicial ini
             if (!result.Succeeded)
                 throw new InvalidOperationException("The configured bootstrap identity was rejected by Identity.");
         }
+        await db.SetBootstrapUserAsync(user!.Id, ct);
         if (await db.AccesosUsuario.AnyAsync(x => x.UsuarioId == user!.Id, ct)) return;
         // ponytail: bootstrap grants are create-only; repair of an existing user requires explicit administrative assignment.
         var role = isNew && !string.IsNullOrWhiteSpace(code)

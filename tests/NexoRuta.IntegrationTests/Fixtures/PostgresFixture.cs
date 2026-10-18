@@ -31,7 +31,7 @@ public sealed class PostgresFixture : IAsyncLifetime
         }
     }
 
-    public async Task<IntegrationDatabase> CreateDatabaseAsync()
+    public async Task<IntegrationDatabase> CreateDatabaseAsync(string? targetMigration = null)
     {
         Assert.False(string.IsNullOrWhiteSpace(container.Id));
         Assert.Equal("Running", container.State.ToString());
@@ -68,7 +68,7 @@ public sealed class PostgresFixture : IAsyncLifetime
         }
         var database = new IntegrationDatabase(connection.ConnectionString);
         await using var db = database.CreateDbContext();
-        await db.Database.MigrateAsync();
+        await db.Database.MigrateAsync(targetMigration);
         return database;
     }
 

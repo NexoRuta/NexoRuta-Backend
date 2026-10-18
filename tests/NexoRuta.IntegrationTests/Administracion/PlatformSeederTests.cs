@@ -16,7 +16,7 @@ namespace NexoRuta.IntegrationTests.Administracion;
 public sealed class PlatformSeederTests(PostgresFixture postgres) : IClassFixture<PostgresFixture>
 {
     [Fact]
-    public async Task ConfiguredPlatformStartsWithoutGeneralDemoSeeding()
+    public async Task NormalApiStartupDoesNotRunTheExplicitPlatformBootstrap()
     {
         var database = await postgres.CreateDatabaseAsync();
         using var factory = new IntegrationApiFactory(database, settings: new Dictionary<string, string?>
@@ -29,8 +29,8 @@ public sealed class PlatformSeederTests(PostgresFixture postgres) : IClassFixtur
         using var client = factory.CreateHttpClient();
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/live")).StatusCode);
         await using var db = database.CreateDbContext();
-        Assert.Single(await db.AccesosPlataforma.ToListAsync());
-        Assert.Single(await db.Usuarios.ToListAsync());
+        Assert.Empty(await db.AccesosPlataforma.ToListAsync());
+        Assert.Empty(await db.Usuarios.ToListAsync());
         Assert.Empty(await db.Operadores.ToListAsync());
         Assert.Empty(await db.Comercios.ToListAsync());
         Assert.Empty(await db.AccesosUsuario.ToListAsync());

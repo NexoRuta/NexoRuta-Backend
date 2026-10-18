@@ -46,10 +46,12 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         Guid commerceId;
         Guid operatorId;
         Guid userId;
+        Guid commerceAccessId;
         await using (var seed = new NexoRutaDbContext(options))
         {
             commerceId = await seed.Comercios.Select(x => x.Id).SingleAsync();
             operatorId = await seed.Operadores.Select(x => x.Id).SingleAsync();
+            commerceAccessId = await seed.AccesosUsuario.Where(x => x.ComercioId != null).Select(x => x.Id).SingleAsync();
             userId = await seed.AccesosUsuario.Where(x => x.ComercioId != null).Select(x => x.UsuarioId).SingleAsync();
         }
 
@@ -65,6 +67,10 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
             .AddInterceptors(lockObserver)
             .Options;
         await using var shipmentDb = new NexoRutaDbContext(optionsWithObserver);
+        var context = await new EfAccesosUsuarioRepository(shipmentDb).ObtenerAsync(commerceAccessId)
+            ?? throw new InvalidOperationException("The seeded commerce access is missing.");
+        await using var shipmentTransaction = await shipmentDb.Database.BeginTransactionAsync();
+        await shipmentDb.ApplyAsync(RlsActorContext.From(context));
         var recipient = new Destinatario(operatorId, "Test recipient");
         var address = new Direccion(operatorId, "Test address");
         var shipment = new Envio(operatorId, commerceId, userId, recipient.Id, address.Id);
@@ -474,7 +480,7 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
     }
 
     [Fact]
-    public async Task Guardar_FkDeTenantInvalidaRevierteTodoElEnvio()
+    public async Task Guardar_AggregateWithMismatchedTenantKeysWritesNothing()
     {
         await using var db = new NexoRutaDbContext(options);
         var inicial = Datos();
@@ -487,9 +493,13 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
             comercio.UsuarioId, destinatario.Id, direccion.Id);
         var bulto = new Bulto(Guid.CreateVersion7(), envio.Id, "FK-INVALIDA", 100m, 10m, 20m, 30m);
 
-        var error = await Assert.ThrowsAsync<DbUpdateException>(() =>
+        var context = await new EfAccesosUsuarioRepository(db).ObtenerAsync(comercio.AccesoId)
+            ?? throw new InvalidOperationException("The seeded commerce access is missing.");
+        await using var transaction = await db.Database.BeginTransactionAsync();
+        await db.ApplyAsync(RlsActorContext.From(context));
+        var error = await Assert.ThrowsAsync<ArgumentException>(() =>
             new EfEnviosRepository(db).GuardarAsync(envio, destinatario, direccion, bulto));
-        Assert.Equal(PostgresErrorCodes.ForeignKeyViolation, Assert.IsType<PostgresException>(error.InnerException).SqlState);
+        Assert.Contains("tenant keys", error.Message, StringComparison.OrdinalIgnoreCase);
 
         await using var consulta = new NexoRutaDbContext(options);
         Assert.Empty(await consulta.Envios.ToListAsync());
@@ -543,8 +553,13 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
     private static async Task<ContextoUsuario> Cuenta(NexoRutaDbContext db, string email, TipoAccesoUsuario tipo)
         => Assert.Single(await new EfAccesosUsuarioRepository(db).ListarAsync(tipo), x => x.UsuarioEmail == email);
 
-    private static Task<EnvioCreado> Crear(NexoRutaDbContext db, Guid accesoId, Guid operadorId, string codigo)
-        => new CrearEnvioUseCase(new EfEnviosRepository(db), new UsuarioSeleccionado(db, accesoId), new EfOperadoresRepository(db))
+    private static async Task<EnvioCreado> Crear(NexoRutaDbContext db, Guid accesoId, Guid operadorId, string codigo)
+    {
+        var context = await new EfAccesosUsuarioRepository(db).ObtenerAsync(accesoId)
+            ?? throw new InvalidOperationException("The selected access is missing.");
+        await using var transaction = await db.BeginOrJoinAsync();
+        await db.ApplyAsync(RlsActorContext.From(context));
+        var created = await new CrearEnvioUseCase(new EfEnviosRepository(db), new UsuarioSeleccionado(db, accesoId), new EfOperadoresRepository(db))
             .EjecutarAsync(new CrearEnvioCommand(
                 OperadorId: operadorId,
                 DestinatarioNombre: "Destinatario de prueba",
@@ -554,9 +569,20 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
                 LargoCentimetros: 32m,
                 AnchoCentimetros: 21m,
                 AltoCentimetros: 11m));
+        await transaction.CommitAsync();
+        return created;
+    }
 
-    private static Task<IReadOnlyList<EnvioDetalle>> Listar(NexoRutaDbContext db, Guid accesoId)
-        => new ListarEnviosUseCase(new EfEnviosRepository(db), new UsuarioSeleccionado(db, accesoId)).EjecutarAsync();
+    private static async Task<IReadOnlyList<EnvioDetalle>> Listar(NexoRutaDbContext db, Guid accesoId)
+    {
+        var context = await new EfAccesosUsuarioRepository(db).ObtenerAsync(accesoId)
+            ?? throw new InvalidOperationException("The selected access is missing.");
+        await using var transaction = await db.BeginOrJoinAsync();
+        await db.ApplyAsync(RlsActorContext.From(context));
+        var shipments = await new ListarEnviosUseCase(new EfEnviosRepository(db), new UsuarioSeleccionado(db, accesoId)).EjecutarAsync();
+        await transaction.CommitAsync();
+        return shipments;
+    }
 
     private sealed class UsuarioSeleccionado(NexoRutaDbContext db, Guid accesoId) : IUsuarioActual
     {
