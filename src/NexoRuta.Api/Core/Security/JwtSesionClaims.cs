@@ -5,4 +5,7 @@ public static class JwtSesionClaims
 {
     public const string VersionSesion =
         "nexoruta:version_sesion";
+
+    public const string VersionCredencial =
+        "nexoruta:version_credencial";
 }

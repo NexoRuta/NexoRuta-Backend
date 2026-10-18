@@ -14,7 +14,7 @@ public sealed class IniciarSesionUseCaseTests
     {
         var user = new UsuarioLogin(Guid.NewGuid(), Guid.NewGuid(), "user@example.test", 7);
         var repository = new Users(user);
-        var verifier = new PasswordVerifier(valid);
+        var verifier = new PasswordVerifier(valid, 4);
         var result = await new IniciarSesionUseCase(repository, verifier)
             .EjecutarAsync(" user@example.test ", " password-with-spaces ");
         Assert.Equal("user@example.test", repository.Email);
@@ -27,6 +27,7 @@ public sealed class IniciarSesionUseCaseTests
             Assert.Equal(user.AccesoId, result.AccesoId);
             Assert.Equal(user.Email, result.Email);
             Assert.Equal(user.VersionSesion, result.VersionSesion);
+            Assert.Equal(4, result.VersionCredencial);
         }
         else Assert.Null(result);
     }
@@ -96,15 +97,15 @@ public sealed class IniciarSesionUseCaseTests
         }
     }
 
-    private sealed class PasswordVerifier(bool valid) : IVerificadorPassword
+    private sealed class PasswordVerifier(bool valid, long version = 0) : IVerificadorPassword
     {
         public int Calls { get; private set; }
         public (Guid UsuarioId, string Password)? Input { get; private set; }
-        public Task<bool> VerificarAsync(Guid usuarioId, string password, CancellationToken cancellationToken = default)
+        public Task<long?> VerificarYObtenerVersionCredencialAsync(Guid usuarioId, string password, CancellationToken cancellationToken = default)
         {
             Calls++; Input = (usuarioId, password);
             cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(valid);
+            return Task.FromResult(valid ? version : (long?)null);
         }
     }
 }

@@ -66,12 +66,14 @@ public sealed class IdentityAccountStoreTests(PostgresFixture postgres) : IClass
         Assert.Equal(userId, migrated.Id);
         Assert.Equal(hash, migrated.PasswordHash);
         Assert.Equal(7, migrated.Version);
+        Assert.Equal(0, migrated.VersionCredencial);
         Assert.Equal(email, migrated.Email);
         Assert.Equal(email.ToUpperInvariant(), migrated.NormalizedEmail);
         Assert.True(await identityUsers.CheckPasswordAsync(found, password));
         Assert.Equal(ownerId, foundOwner.Id);
         Assert.Equal(ownerHash, foundOwner.PasswordHash);
         Assert.Equal(4, foundOwner.Version);
+        Assert.Equal(0, foundOwner.VersionCredencial);
         Assert.True(await identityUsers.CheckPasswordAsync(foundOwner, password));
         Assert.Equal(access.AccesoId, (await db.AccesosPlataforma.SingleAsync()).AccesoId);
         Assert.Equal(userId, (await db.AccesosPlataforma.SingleAsync()).UsuarioId);

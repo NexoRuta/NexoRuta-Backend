@@ -745,7 +745,10 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
     public async Task UpgradeFromThePreviousSchemaPreservesUserAccessAndShipmentGuids()
     {
         var database = await postgres.CreateDatabaseAsync(PreviousMigration);
+        // ponytail: this fixture uses the current ORM to seed a prior schema; temporarily include the upcoming defaulted column, then let the migration add it to pre-existing rows.
+        await ExecuteSqlAsync(database, "ALTER TABLE \"Usuarios\" ADD COLUMN \"VersionCredencial\" bigint NOT NULL DEFAULT 0");
         var rows = await SeedTenantGraphAsync(database);
+        await ExecuteSqlAsync(database, "ALTER TABLE \"Usuarios\" DROP COLUMN \"VersionCredencial\"");
         await using (var db = database.CreateDbContext())
             await db.Database.MigrateAsync();
 
@@ -753,8 +756,9 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
         await verify.OpenAsync();
         await using var command = new NpgsqlCommand("""
             SELECT e."Id", e."ComercioId", e."OperadorId", e."CreadoPorUsuarioId", e."DestinatarioId", e."DireccionId",
-                   a."Id", a."UsuarioId", a."ComercioId"
+                   a."Id", a."UsuarioId", a."ComercioId", u."VersionCredencial"
             FROM "Envios" e JOIN "AccesosUsuario" a ON a."UsuarioId" = e."CreadoPorUsuarioId"
+            JOIN "Usuarios" u ON u."Id" = e."CreadoPorUsuarioId"
             WHERE e."Id" = @shipment AND a."Id" = @access
             """, verify);
         command.Parameters.AddWithValue("shipment", rows.ShipmentA1);
@@ -770,6 +774,7 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
         Assert.Equal(rows.AccessA, reader.GetGuid(6));
         Assert.Equal(rows.UserA, reader.GetGuid(7));
         Assert.Equal(rows.CommerceA, reader.GetGuid(8));
+        Assert.Equal(0L, reader.GetInt64(9));
     }
 
     [Fact]
@@ -834,6 +839,14 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
             AddressA2 = a2.Address.Id,
             ParcelA2 = a2.Parcel.Id
         };
+    }
+
+    private static async Task ExecuteSqlAsync(IntegrationDatabase database, string sql)
+    {
+        await using var connection = new NpgsqlConnection(database.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand(sql, connection);
+        await command.ExecuteNonQueryAsync();
     }
 
     private static (Destinatario Recipient, Direccion Address, Envio Shipment, Bulto Parcel) Shipment(

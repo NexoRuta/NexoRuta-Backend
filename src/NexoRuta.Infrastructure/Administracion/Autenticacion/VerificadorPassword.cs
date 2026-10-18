@@ -8,13 +8,13 @@ namespace NexoRuta.Infrastructure.Administracion.Autenticacion;
 public sealed class VerificadorPassword(
     UserManager<Usuario> users) : IVerificadorPassword
 {
-    public async Task<bool> VerificarAsync(Guid usuarioId, string password, CancellationToken cancellationToken = default)
+    public async Task<long?> VerificarYObtenerVersionCredencialAsync(Guid usuarioId, string password, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (usuarioId == Guid.Empty || string.IsNullOrWhiteSpace(password))
-            return false;
+            return null;
 
         var user = await users.FindByIdAsync(usuarioId.ToString());
-        return user is not null && await users.CheckPasswordAsync(user, password);
+        return user is not null && await users.CheckPasswordAsync(user, password) ? user.VersionCredencial : null;
     }
 }
