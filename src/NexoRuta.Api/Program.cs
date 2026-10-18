@@ -35,8 +35,8 @@ if (localBootstrapCommand)
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 builder.Services.AddNexoRutaPersistence(builder.Configuration);
-var dataProtection = builder.Services.AddDataProtection().SetApplicationName("NexoRuta.Api");
-var dataProtectionKeys = builder.Configuration["DataProtection:KeysDirectory"];
+var dataProtection = builder.Services.AddDataProtection().SetApplicationName(PasswordRecoveryDataProtection.ApplicationName);
+var dataProtectionKeys = builder.Configuration[PasswordRecoveryDataProtection.KeysDirectoryConfigurationKey];
 if (!string.IsNullOrWhiteSpace(dataProtectionKeys))
     dataProtection.PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeys));
 else if (builder.Environment.IsProduction() && !platformCommand && !localBootstrapCommand && !migrationCommand)

@@ -920,6 +920,67 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                     b.ToTable("ProcessedMessages", (string)null);
                 });
 
+            modelBuilder.Entity("NexoRuta.Infrastructure.Outbox.SecurityOutboxMessage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DeliveryState")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("Destination")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTimeOffset?>("LeaseUntilUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("NextAttemptAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("ProcessorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("PublishedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Destination", "State", "NextAttemptAtUtc");
+
+                    b.ToTable("SecurityOutboxMessages", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_SecurityOutboxMessages_Contract", "(\"Type\" = 'PasswordRecoveryEmail' AND \"Destination\" = 'RabbitMq' AND \"DeliveryState\" IN ('Pending', 'Delivered', 'Expired', 'Failed')) OR (\"Type\" = 'PasswordRecoveryRequested' AND \"Destination\" = 'Kafka' AND \"DeliveryState\" IS NULL)");
+                        });
+                });
+
             modelBuilder.Entity("NexoRuta.Infrastructure.Seguimiento.Persistence.EntregaSeguimiento", b =>
                 {
                     b.Property<Guid>("Id")

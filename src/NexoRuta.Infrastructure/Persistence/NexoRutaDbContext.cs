@@ -29,6 +29,7 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
     public DbSet<EnlaceSeguimiento> EnlacesSeguimiento => Set<EnlaceSeguimiento>();
 
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+    public DbSet<SecurityOutboxMessage> SecurityOutboxMessages => Set<SecurityOutboxMessage>();
     public DbSet<ProcessedMessage> ProcessedMessages => Set<ProcessedMessage>();
 
     public DbSet<EntregaSeguimiento> EntregasSeguimiento => Set<EntregaSeguimiento>();
@@ -330,6 +331,22 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
                     x.Id
                 })
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SecurityOutboxMessage>(entity =>
+        {
+            entity.ToTable("SecurityOutboxMessages", table =>
+                table.HasCheckConstraint("CK_SecurityOutboxMessages_Contract",
+                    $"(\"Type\" = '{SecurityOutboxMessageTypes.PasswordRecoveryEmail}' AND \"Destination\" = '{SecurityOutboxDestinations.RabbitMq}' AND \"DeliveryState\" IN ('{PasswordRecoveryEmailDeliveryStates.Pending}', '{PasswordRecoveryEmailDeliveryStates.Delivered}', '{PasswordRecoveryEmailDeliveryStates.Expired}', '{PasswordRecoveryEmailDeliveryStates.Failed}')) OR " +
+                    $"(\"Type\" = '{SecurityOutboxMessageTypes.PasswordRecoveryRequested}' AND \"Destination\" = '{SecurityOutboxDestinations.Kafka}' AND \"DeliveryState\" IS NULL)"));
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Type).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.Destination).HasConversion<string>().HasMaxLength(32).IsRequired();
+            entity.Property(x => x.State).HasConversion<string>().HasMaxLength(32).IsRequired();
+            entity.Property(x => x.Payload).HasColumnType("text").IsRequired();
+            entity.Property(x => x.DeliveryState).HasConversion<string>().HasMaxLength(32);
+            entity.Property(x => x.LastError).HasMaxLength(200);
+            entity.HasIndex(x => new { x.Destination, x.State, x.NextAttemptAtUtc });
         });
 
         modelBuilder.Entity<ProcessedMessage>(entity =>

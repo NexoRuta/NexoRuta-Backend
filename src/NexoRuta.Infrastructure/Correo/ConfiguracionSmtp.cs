@@ -2,6 +2,7 @@ namespace NexoRuta.Infrastructure.Correo;
 
 public sealed class ConfiguracionSmtp
 {
+    public const string ConfigurationSection = "Email:Smtp";
     public string Host { get; set; } = "";
     public int Port { get; set; } = 25;
     public bool UseSsl { get; set; }

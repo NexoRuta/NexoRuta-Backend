@@ -48,13 +48,17 @@ public static class DependencyInjection
             .AddDefaultTokenProviders();
         services.Configure<DataProtectionTokenProviderOptions>(options =>
             options.TokenLifespan = TimeSpan.FromSeconds(configuration.GetValue("PasswordRecovery:TokenLifespanSeconds", 900)));
-        services.AddOptions<ConfiguracionSmtp>().Bind(configuration.GetSection("Email:Smtp"))
-            .Validate(options => !string.IsNullOrWhiteSpace(options.Host) && options.Port is > 0 and <= 65535
-                && MailAddress.TryCreate(options.FromAddress, out _)
-                && (string.IsNullOrWhiteSpace(options.Username) == string.IsNullOrWhiteSpace(options.Password)),
-                "Email:Smtp requires a host, valid port and from address; SMTP credentials must be provided together.")
-            .ValidateOnStart();
-        services.AddSingleton<ICorreoSender, SmtpCorreoSender>();
+        var smtpSection = configuration.GetSection(ConfiguracionSmtp.ConfigurationSection);
+        if (smtpSection.Exists())
+        {
+            services.AddOptions<ConfiguracionSmtp>().Bind(smtpSection)
+                .Validate(options => !string.IsNullOrWhiteSpace(options.Host) && options.Port is > 0 and <= 65535
+                    && MailAddress.TryCreate(options.FromAddress, out _)
+                    && (string.IsNullOrWhiteSpace(options.Username) == string.IsNullOrWhiteSpace(options.Password)),
+                    "Email:Smtp requires a host, valid port and from address; SMTP credentials must be provided together.")
+                .ValidateOnStart();
+            services.AddSingleton<ICorreoSender, SmtpCorreoSender>();
+        }
         services.AddScoped<IRecuperacionPassword, ServicioRecuperacionPassword>();
         services.AddSingleton(_ =>
         {

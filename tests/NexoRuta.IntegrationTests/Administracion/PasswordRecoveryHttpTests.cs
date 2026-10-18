@@ -1,17 +1,17 @@
-using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using System.Net.Mail;
 using System.Text.Json;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using NexoRuta.Application.Administracion;
-using NexoRuta.Application.Administracion.Interfaces;
 using NexoRuta.Domain.Administracion;
 using NexoRuta.Infrastructure.Administracion;
+using NexoRuta.Infrastructure.Administracion.Autenticacion;
+using NexoRuta.Infrastructure.Outbox;
 using NexoRuta.Infrastructure.Persistence;
 using NexoRuta.IntegrationTests.Fixtures;
 
@@ -27,13 +27,12 @@ public sealed class PasswordRecoveryHttpTests(PostgresFixture postgres) : IClass
         try
         {
             var settings = new Dictionary<string, string?> { ["DataProtection:KeysDirectory"] = keyDirectory.FullName };
-            var mailbox = new CapturingCorreoSender();
             string ownerEmail;
             string oldJwt;
             (Guid UserId, string Token) link;
             string existingResponse;
 
-            using (var firstFactory = new IntegrationApiFactory(database, settings: settings, correoSender: mailbox))
+            using (var firstFactory = new IntegrationApiFactory(database, settings: settings))
             using (var firstClient = firstFactory.CreateHttpClient())
             {
                 Assert.Equal(HttpStatusCode.OK, (await firstClient.GetAsync("/health/live")).StatusCode);
@@ -51,11 +50,11 @@ public sealed class PasswordRecoveryHttpTests(PostgresFixture postgres) : IClass
                 existingResponse = await existing.Content.ReadAsStringAsync();
                 Assert.Equal(existingResponse, await missing.Content.ReadAsStringAsync());
                 Assert.DoesNotContain("token", existingResponse, StringComparison.OrdinalIgnoreCase);
-                link = await ParseLink(mailbox.Messages.Single().Body);
+                link = await ReadLinkFromOutboxAsync(firstFactory.Services, db, ownerEmail);
             }
 
             // A second API host with the same persisted Data Protection keys must still accept the live Identity token.
-            using (var secondFactory = new IntegrationApiFactory(database, settings: settings, correoSender: mailbox))
+            using (var secondFactory = new IntegrationApiFactory(database, settings: settings))
             using (var client = secondFactory.CreateHttpClient())
             {
                 Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/live")).StatusCode);
@@ -87,11 +86,10 @@ public sealed class PasswordRecoveryHttpTests(PostgresFixture postgres) : IClass
     }
 
     [Fact]
-    public async Task MailFailureAndUnknownEmailHaveTheSamePublicResponse()
+    public async Task ExistingAndUnknownAccountsHaveTheSamePublicResponseAndOnlyExistingCreatesOutbox()
     {
         var database = await postgres.CreateDatabaseAsync();
-        var mailbox = new CapturingCorreoSender(fail: true);
-        using var factory = new IntegrationApiFactory(database, correoSender: mailbox);
+        using var factory = new IntegrationApiFactory(database);
         using var client = factory.CreateHttpClient();
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/live")).StatusCode);
         await using var db = database.CreateDbContext();
@@ -103,15 +101,15 @@ public sealed class PasswordRecoveryHttpTests(PostgresFixture postgres) : IClass
         Assert.Equal(HttpStatusCode.OK, unknown.StatusCode);
         var publicMessage = await known.Content.ReadAsStringAsync();
         Assert.Equal(publicMessage, await unknown.Content.ReadAsStringAsync());
-        Assert.DoesNotContain("sensitive SMTP", publicMessage, StringComparison.OrdinalIgnoreCase);
-        Assert.Empty(mailbox.Messages);
+        Assert.Equal(2, await db.SecurityOutboxMessages.CountAsync());
+        Assert.DoesNotContain(owner.Email!, publicMessage, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public async Task RecoveryRequestsAreRateLimited()
     {
         var database = await postgres.CreateDatabaseAsync();
-        using var factory = new IntegrationApiFactory(database, correoSender: new CapturingCorreoSender());
+        using var factory = new IntegrationApiFactory(database);
         using var client = factory.CreateHttpClient();
         var responses = new List<HttpResponseMessage>();
         try
@@ -139,7 +137,7 @@ public sealed class PasswordRecoveryHttpTests(PostgresFixture postgres) : IClass
                 ["DataProtection:KeysDirectory"] = keyDirectory.FullName,
                 ["PasswordRecovery:TokenLifespanSeconds"] = "1"
             };
-            using var factory = new IntegrationApiFactory(database, settings: settings, correoSender: new CapturingCorreoSender());
+            using var factory = new IntegrationApiFactory(database, settings: settings);
             using var client = factory.CreateHttpClient();
             Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/live")).StatusCode);
             await using var db = database.CreateDbContext();
@@ -168,8 +166,7 @@ public sealed class PasswordRecoveryHttpTests(PostgresFixture postgres) : IClass
         try
         {
             using var factory = new IntegrationApiFactory(database,
-                settings: new Dictionary<string, string?> { ["DataProtection:KeysDirectory"] = keyDirectory.FullName },
-                correoSender: new CapturingCorreoSender());
+                settings: new Dictionary<string, string?> { ["DataProtection:KeysDirectory"] = keyDirectory.FullName });
             using var client = factory.CreateHttpClient();
             Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/live")).StatusCode);
 
@@ -272,13 +269,11 @@ public sealed class PasswordRecoveryHttpTests(PostgresFixture postgres) : IClass
     public async Task RecoveryDoesNotReactivateDisabledAccessOrSuspendedOrganization()
     {
         var database = await postgres.CreateDatabaseAsync();
-        var mailbox = new CapturingCorreoSender();
         var keyDirectory = Directory.CreateTempSubdirectory("nexoruta-password-recovery-suspended-");
         try
         {
             using var factory = new IntegrationApiFactory(database,
-                settings: new Dictionary<string, string?> { ["DataProtection:KeysDirectory"] = keyDirectory.FullName },
-                correoSender: mailbox);
+                settings: new Dictionary<string, string?> { ["DataProtection:KeysDirectory"] = keyDirectory.FullName });
             using var client = factory.CreateHttpClient();
             Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/live")).StatusCode);
 
@@ -292,7 +287,7 @@ public sealed class PasswordRecoveryHttpTests(PostgresFixture postgres) : IClass
 
             using var requested = await RequestRecoveryAsync(client, user.Email!);
             Assert.Equal(HttpStatusCode.OK, requested.StatusCode);
-            var link = await ParseLink(mailbox.Messages.Single().Body);
+            var link = await ReadLinkFromOutboxAsync(factory.Services, db, user.Email!);
             using var reset = await ResetAsync(client, link.UserId, link.Token, "Operator-recovered-password-2026!");
             Assert.Equal(HttpStatusCode.NoContent, reset.StatusCode);
 
@@ -348,17 +343,23 @@ public sealed class PasswordRecoveryHttpTests(PostgresFixture postgres) : IClass
         return client.SendAsync(request);
     }
 
-    private sealed class CapturingCorreoSender(bool fail = false) : ICorreoSender
+    private static async Task<(Guid UserId, string Token)> ReadLinkFromOutboxAsync(
+        IServiceProvider services, NexoRutaDbContext db, string recipient)
     {
-        private readonly ConcurrentQueue<(string Recipient, string Subject, string Body)> messages = new();
-        public IReadOnlyCollection<(string Recipient, string Subject, string Body)> Messages => messages.ToArray();
+        var emailMessage = await db.SecurityOutboxMessages.SingleAsync(x => x.Type == SecurityOutboxMessageTypes.PasswordRecoveryEmail);
+        var eventMessage = await db.SecurityOutboxMessages.SingleAsync(x => x.Type == SecurityOutboxMessageTypes.PasswordRecoveryRequested);
+        Assert.DoesNotContain(recipient, emailMessage.Payload, StringComparison.Ordinal);
+        using var eventJson = JsonDocument.Parse(eventMessage.Payload);
+        var eventFields = eventJson.RootElement.EnumerateObject().Select(property => property.Name).Order().ToArray();
+        Assert.Equal(new[] { "eventId", "occurredAt", "schemaVersion", "usuarioId" }, eventFields);
+        Assert.Equal(eventMessage.Id.ToString("D"), eventJson.RootElement.GetProperty("eventId").GetString());
 
-        public Task EnviarAsync(string destinatario, string asunto, string cuerpoTexto, CancellationToken ct)
-        {
-            ct.ThrowIfCancellationRequested();
-            if (fail) throw new SmtpException("sensitive SMTP server response");
-            messages.Enqueue((destinatario, asunto, cuerpoTexto));
-            return Task.CompletedTask;
-        }
+        var protector = services.GetRequiredService<IDataProtectionProvider>()
+            .CreateProtector(PasswordRecoveryDataProtection.EmailCommandPurpose);
+        var plaintext = protector.Unprotect(emailMessage.Payload);
+        var command = JsonSerializer.Deserialize<PasswordRecoveryEmailCommand>(plaintext, PasswordRecoveryJson.Options);
+        Assert.NotNull(command);
+        Assert.Equal(recipient, command.Recipient);
+        return await ParseLink(command.Link);
     }
 }
