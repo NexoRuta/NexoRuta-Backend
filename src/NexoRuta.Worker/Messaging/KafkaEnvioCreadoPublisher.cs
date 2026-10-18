@@ -47,13 +47,13 @@ public sealed class KafkaEnvioCreadoPublisher : IDisposable
         };
     }
 
-    internal static Message<string, string> CrearMensaje(OutboxMessage mensaje)
+    internal static Message<string, string> CrearMensaje(OutboxClaim mensaje)
     {
-        if (mensaje.Destino != OutboxDestino.Kafka || mensaje.Tipo != "EnvioCreado")
+        if (mensaje.Destino != nameof(OutboxDestino.Kafka) || mensaje.Tipo != OutboxMessageTypes.ShipmentCreated)
             throw new ArgumentException("Expected a Kafka EnvioCreado outbox event.", nameof(mensaje));
         var headers = new Headers();
         headers.Add("eventId", Encoding.UTF8.GetBytes(mensaje.Id.ToString("D")));
-        headers.Add("eventType", Encoding.UTF8.GetBytes("EnvioCreado"));
+        headers.Add("eventType", Encoding.UTF8.GetBytes(OutboxMessageTypes.ShipmentCreated));
         headers.Add("eventVersion", Encoding.UTF8.GetBytes("1"));
         headers.Add("occurredAt", Encoding.UTF8.GetBytes(
             mensaje.CreadoEnUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)));
@@ -65,7 +65,10 @@ public sealed class KafkaEnvioCreadoPublisher : IDisposable
         };
     }
 
-    public async Task PublicarAsync(OutboxMessage mensaje, CancellationToken cancellationToken = default)
+    internal static Message<string, string> CrearMensaje(OutboxMessage mensaje)
+        => CrearMensaje(OutboxClaim.From(mensaje));
+
+    public async Task PublicarAsync(OutboxClaim mensaje, CancellationToken cancellationToken = default)
     {
         var contenido = CrearMensaje(mensaje);
         cancellationToken.ThrowIfCancellationRequested();

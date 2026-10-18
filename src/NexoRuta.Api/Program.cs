@@ -21,7 +21,14 @@ if (platformCommand && !args.SequenceEqual(["platform-admin", "create"]))
     Environment.ExitCode = 2;
     return;
 }
-var builder = WebApplication.CreateBuilder(platformCommand ? [] : args);
+var localBootstrapCommand = args.SequenceEqual(["local-bootstrap"]);
+var migrationCommand = args.SequenceEqual(["database-migrate"]);
+var builder = WebApplication.CreateBuilder(platformCommand || localBootstrapCommand || migrationCommand ? [] : args);
+if (localBootstrapCommand)
+{
+    builder.Configuration["DatabaseInitialization:SeedData"] = "true";
+    builder.Configuration["PlatformInitialization:Enabled"] = "true";
+}
 
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
@@ -32,6 +39,22 @@ if (platformCommand)
 {
     await using var commandApp = builder.Build();
     Environment.ExitCode = await NexoRuta.Api.Features.Plataforma.InicializarPlataformaCommand.EjecutarAsync(commandApp.Services);
+    return;
+}
+if (localBootstrapCommand)
+{
+    await using var commandApp = builder.Build();
+    await using var scope = commandApp.Services.CreateAsyncScope();
+    var seeder = scope.ServiceProvider.GetRequiredService<DatosInicialesSeeder>();
+    await seeder.SeedPlataformaAsync();
+    await seeder.SeedAsync();
+    return;
+}
+if (migrationCommand)
+{
+    await using var commandApp = builder.Build();
+    await using var scope = commandApp.Services.CreateAsyncScope();
+    await scope.ServiceProvider.GetRequiredService<NexoRutaDbContext>().Database.MigrateAsync();
     return;
 }
 
@@ -177,14 +200,12 @@ builder.Services.AddRateLimiter(options =>
 
 
 var app = builder.Build();
-
 {
     await using var scope = app.Services.CreateAsyncScope();
     if (app.Configuration.GetValue<bool>("DatabaseInitialization:ApplyMigrations"))
         await scope.ServiceProvider.GetRequiredService<NexoRutaDbContext>().Database.MigrateAsync();
     if (app.Configuration.GetValue<bool>("DatabaseInitialization:SeedData"))
         await scope.ServiceProvider.GetRequiredService<DatosInicialesSeeder>().SeedAsync();
-    await scope.ServiceProvider.GetRequiredService<DatosInicialesSeeder>().SeedPlataformaAsync();
 }
 
 if (app.Environment.IsDevelopment())
@@ -193,6 +214,7 @@ if (app.Environment.IsDevelopment())
 app.UseRouting();
 app.UseRateLimiter();
 app.UseAuthentication();
+app.UseMiddleware<RlsTransactionMiddleware>();
 app.UseAuthorization();
 app.MapControllers();
 app.MapHealthChecks("/health/ready");

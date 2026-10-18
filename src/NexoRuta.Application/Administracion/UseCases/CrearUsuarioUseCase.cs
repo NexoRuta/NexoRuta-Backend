@@ -11,8 +11,7 @@ public sealed class CrearUsuarioUseCase(
     IUsuarioActual usuarioActual,
     IPermisosUsuarioRepository permisos,
     IUsuariosOrganizacionRepository usuarios,
-    IRolesRepository roles,
-    IGeneradorPasswordHash generadorHash)
+    IRolesRepository roles)
 {
     public async Task<UsuarioOrganizacionResumen> EjecutarAsync(
         string email,
@@ -65,11 +64,7 @@ public sealed class CrearUsuarioUseCase(
         }
 
         // 5. Crear la identidad y su acceso organizacional.
-        var passwordHash = generadorHash.Generar(
-            emailNormalizado, password);
-
-        var usuario = new Usuario(
-            emailNormalizado, passwordHash);
+        var usuario = new Usuario(emailNormalizado);
 
         var acceso = new AccesoUsuario(
             usuario.Id,
@@ -79,12 +74,12 @@ public sealed class CrearUsuarioUseCase(
 
         // 6. Persistir las dos entidades atómicamente.
         await usuarios.GuardarNuevoAsync(
-            usuario, acceso, ct);
+            usuario, password, acceso, ct);
 
         return new UsuarioOrganizacionResumen(
             usuario.Id,
             acceso.Id,
-            usuario.Email,
+            usuario.Email!,
             rol.Id,
             rol.Codigo,
             rol.Nombre,

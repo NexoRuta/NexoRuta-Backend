@@ -15,18 +15,32 @@ using Microsoft.AspNetCore.Identity;
 using NexoRuta.Application.Administracion.Interfaces;
 using NexoRuta.Application.Administracion.UseCases;
 using NexoRuta.Infrastructure.Administracion.Autenticacion;
+using NexoRuta.Domain.Administracion;
 namespace NexoRuta.Infrastructure.Persistence;
 
 public static class DependencyInjection
 {
     public static IServiceCollection AddNexoRutaPersistence(
         this IServiceCollection services,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        string connectionStringName = "Postgres")
     {
-        var connectionString = configuration.GetConnectionString("Postgres")
-            ?? throw new InvalidOperationException("Falta ConnectionStrings:Postgres.");
+        var connectionString = configuration.GetConnectionString(connectionStringName)
+            ?? throw new InvalidOperationException($"Falta ConnectionStrings:{connectionStringName}.");
 
         services.AddDbContext<NexoRutaDbContext>(options => options.UseNpgsql(connectionString));
+        services.AddIdentityCore<Usuario>(options =>
+            {
+                options.User.RequireUniqueEmail = true;
+                options.User.AllowedUserNameCharacters = string.Empty;
+                options.Password.RequiredLength = 12;
+                options.Password.RequireDigit = false;
+                options.Password.RequireLowercase = false;
+                options.Password.RequireUppercase = false;
+                options.Password.RequireNonAlphanumeric = false;
+                options.Password.RequiredUniqueChars = 1;
+            })
+            .AddEntityFrameworkStores<NexoRutaDbContext>();
         services.AddSingleton(_ =>
         {
             if (!configuration.GetValue<bool>("DatabaseInitialization:SeedData"))
@@ -72,9 +86,6 @@ public static class DependencyInjection
 
 
 
-
-        services.AddSingleton<IPasswordHasher<string>, PasswordHasher<string>>();
-        services.AddSingleton<IGeneradorPasswordHash, GeneradorPasswordHash>();
 
         services.AddScoped<DatosInicialesSeeder>();
 

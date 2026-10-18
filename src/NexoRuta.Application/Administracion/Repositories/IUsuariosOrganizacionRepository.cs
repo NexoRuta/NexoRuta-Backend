@@ -17,6 +17,7 @@ public interface IUsuariosOrganizacionRepository
 
     Task GuardarNuevoAsync(
         Usuario usuario,
+        string password,
         AccesoUsuario acceso,
         CancellationToken cancellationToken = default);
     Task<bool> CambiarEstadoAsync(

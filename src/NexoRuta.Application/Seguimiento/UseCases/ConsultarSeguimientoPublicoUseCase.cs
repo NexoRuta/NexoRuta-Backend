@@ -1,12 +1,10 @@
 using NexoRuta.Application.Seguimiento.Interfaces;
-using NexoRuta.Application.Seguimiento.Services;
 using NexoRuta.Domain.Envios;
 
 namespace NexoRuta.Application.Seguimiento.UseCases;
 
 public sealed class ConsultarSeguimientoPublicoUseCase(
-    IEnlacesSeguimientoRepository enlaces,
-    IConsultaEstadoEnvio consultaEstado)
+    IEnlacesSeguimientoRepository enlaces)
 {
     public async Task<EstadoEnvio?> EjecutarAsync(
         string? token,
@@ -16,23 +14,7 @@ public sealed class ConsultarSeguimientoPublicoUseCase(
         if (!TieneFormatoValido(token))
             return null;
 
-        var tokenHash =
-            GeneradorTokenSeguimiento.CalcularHash(token!);
-
-        var enlace = await enlaces.BuscarPorHashAsync(
-            tokenHash,
-            cancellationToken);
-
-        if (enlace is null ||
-            !enlace.EstaVigente(DateTimeOffset.UtcNow))
-        {
-            return null;
-        }
-
-        return await consultaEstado.ObtenerEstadoAsync(
-            enlace.OperadorId,
-            enlace.EnvioId,
-            cancellationToken);
+        return await enlaces.ObtenerEstadoPublicoAsync(token!, cancellationToken);
     }
 
     private static bool TieneFormatoValido(string? token)

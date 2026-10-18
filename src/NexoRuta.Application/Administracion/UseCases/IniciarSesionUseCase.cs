@@ -27,10 +27,10 @@ public sealed class IniciarSesionUseCase(
         if (usuario is null)
             return null;
 
-        var passwordValida = verificador.Verificar(
-            usuario.Email,
-            usuario.PasswordHash,
-            password);
+        var passwordValida = await verificador.VerificarAsync(
+            usuario.UsuarioId,
+            password,
+            cancellationToken);
 
         if (!passwordValida)
             return null;

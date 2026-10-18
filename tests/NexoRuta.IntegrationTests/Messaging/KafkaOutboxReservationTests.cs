@@ -77,9 +77,9 @@ public sealed class KafkaOutboxReservationTests(PostgresFixture postgres) : ICla
             new OutboxMessage(envio.OperadorId, envio.Id, "GenerarSeguimiento", OutboxDestino.RabbitMq, "{}"));
         await db.SaveChangesAsync();
         var repo = new EfOutboxRepository(db);
-        Assert.Equal(OutboxDestino.Kafka, (await repo.ReservarSiguienteAsync(Guid.NewGuid(), OutboxDestino.Kafka))!.Destino);
+        Assert.Equal(nameof(OutboxDestino.Kafka), (await repo.ReservarSiguienteAsync(Guid.NewGuid(), OutboxDestino.Kafka))!.Destino);
         Assert.Null(await repo.ReservarSiguienteAsync(Guid.NewGuid(), OutboxDestino.Kafka));
-        Assert.Equal(OutboxDestino.RabbitMq, (await repo.ReservarSiguienteAsync(Guid.NewGuid(), OutboxDestino.RabbitMq))!.Destino);
+        Assert.Equal(nameof(OutboxDestino.RabbitMq), (await repo.ReservarSiguienteAsync(Guid.NewGuid(), OutboxDestino.RabbitMq))!.Destino);
         Assert.Null(await repo.ReservarSiguienteAsync(Guid.NewGuid(), OutboxDestino.RabbitMq));
     }
 }

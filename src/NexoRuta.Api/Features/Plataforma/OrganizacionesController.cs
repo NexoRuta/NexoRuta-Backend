@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using NexoRuta.Api.Controllers;
 using NexoRuta.Application.Administracion.Exceptions;
 using NexoRuta.Application.Administracion.Repositories;
 using NexoRuta.Domain.Administracion;
@@ -56,7 +57,8 @@ public sealed class OrganizacionesController(IPlataformaRepository plataforma) :
             var result = await plataforma.CrearAsync(tipo, request.Nombre, request.Administrador.Email, request.Administrador.Password, ct);
             return Created($"/api/admin/{path}/{result.Organizacion.Id}", result);
         }
-        catch (CorreoYaRegistradoException error) { return Conflict(new { message = error.Message }); }
+        catch (Exception error) when (error is CorreoYaRegistradoException or CredencialesInvalidasException)
+        { return ErrorCuentaHttp.Traducir(error); }
         catch (ArgumentException error) { return BadRequest(new { message = error.Message }); }
     }
 

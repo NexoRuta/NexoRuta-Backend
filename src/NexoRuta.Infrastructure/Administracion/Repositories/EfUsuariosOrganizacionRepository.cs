@@ -6,10 +6,12 @@ using NexoRuta.Infrastructure.Persistence;
 using NexoRuta.Domain.Administracion;
 using NexoRuta.Application.Administracion.Exceptions;
 using NexoRuta.Application.Administracion.Context;
+using Microsoft.AspNetCore.Identity;
 namespace NexoRuta.Infrastructure.Administracion.Repositories;
 
 public sealed class EfUsuariosOrganizacionRepository(
-    NexoRutaDbContext db)
+    NexoRutaDbContext db,
+    UserManager<Usuario> identityUsers)
     : IUsuariosOrganizacionRepository
 {
     public async Task<IReadOnlyList<UsuarioOrganizacionResumen>>
@@ -39,7 +41,7 @@ public sealed class EfUsuariosOrganizacionRepository(
             select new UsuarioOrganizacionResumen(
                 usuario.Id,
                 acceso.Id,
-                usuario.Email,
+                usuario.Email!,
                 acceso.RolId,
                 rol == null ? null : rol.Codigo,
                 rol == null ? null : rol.Nombre,
@@ -57,21 +59,24 @@ public sealed class EfUsuariosOrganizacionRepository(
         var normalizado = email.Trim().ToLowerInvariant();
 
         return db.Usuarios.AsNoTracking().AnyAsync(
-            x => x.Email.ToLower() == normalizado,
+            x => x.Email!.ToLower() == normalizado,
             cancellationToken);
     }
 
     public async Task GuardarNuevoAsync(
         Usuario usuario,
+        string password,
         AccesoUsuario acceso,
         CancellationToken cancellationToken = default)
     {
-        db.Usuarios.Add(usuario);
-        db.AccesosUsuario.Add(acceso);
-
+        await using var transaction = await db.BeginOrJoinAsync(cancellationToken);
         try
         {
+            var result = await identityUsers.CreateAsync(usuario, password);
+            IdentityErrorContract.ExigirCreacionValida(result, identityUsers.ErrorDescriber);
+            db.AccesosUsuario.Add(acceso);
             await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
         }
         catch (DbUpdateException ex)
             when (ex.InnerException is Npgsql.PostgresException
@@ -130,7 +135,7 @@ public sealed class EfUsuariosOrganizacionRepository(
         if (actor.OperadorId.HasValue == actor.ComercioId.HasValue)
             throw new AccesoNoPermitidoException();
 
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await db.BeginOrJoinAsync(cancellationToken);
         var acceso = await db.AccesosUsuario.FromSqlInterpolated($"""
             SELECT * FROM "AccesosUsuario"
             WHERE "UsuarioId" = {usuarioId}
@@ -147,12 +152,16 @@ public sealed class EfUsuariosOrganizacionRepository(
         var usuario = await db.Usuarios.SingleAsync(x => x.Id == usuarioId, cancellationToken);
         if (usuario.Version != version)
             throw new DbUpdateConcurrencyException("El correo cambió durante la operación. Recargá e intentá nuevamente.");
-        if (usuario.Email.Trim().ToLowerInvariant() == emailNormalizado) return true;
+        if (usuario.Email!.Trim().ToLowerInvariant() == emailNormalizado) return true;
         usuario.CambiarEmail(emailNormalizado);
 
         acceso.RevocarSesiones();
         try
         {
+            var emailResult = await identityUsers.SetEmailAsync(usuario, emailNormalizado);
+            EnsureIdentityEmailUpdate(emailResult);
+            var userNameResult = await identityUsers.SetUserNameAsync(usuario, emailNormalizado);
+            EnsureIdentityEmailUpdate(userNameResult);
             await db.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
         }
@@ -162,6 +171,16 @@ public sealed class EfUsuariosOrganizacionRepository(
             throw new CorreoYaRegistradoException();
         }
         return true;
+    }
+
+    private void EnsureIdentityEmailUpdate(IdentityResult result)
+    {
+        if (result.Succeeded) return;
+        if (IdentityErrorContract.EsDuplicado(result, identityUsers.ErrorDescriber))
+            throw new CorreoYaRegistradoException();
+        if (result.Errors.Any(x => x.Code == "ConcurrencyFailure"))
+            throw new DbUpdateConcurrencyException("The account changed during the email update; reload and retry.");
+        throw new InvalidOperationException("Identity rejected the account email update.");
     }
 
 }

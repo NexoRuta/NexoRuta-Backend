@@ -74,7 +74,7 @@ public sealed class ProcesarGeneracionSeguimientoTests(
         var envioId = creado.GetProperty("id").GetGuid();
 
         // Simula el MessageId que proporcionará RabbitMQ.
-        var messageId = Guid.NewGuid();
+        var messageId = await PublishedTrackingJobTestData.PublishInitialTrackingJobAsync(database, envioId);
 
         // Clave aleatoria exclusiva de esta prueba.
         var clave = RandomNumberGenerator.GetBytes(32);
@@ -193,7 +193,7 @@ public sealed class ProcesarGeneracionSeguimientoTests(
 
 
         // ACT: llega otro mensaje distinto para el mismo envío.
-        var segundoMessageId = Guid.NewGuid();
+        var segundoMessageId = await PublishedTrackingJobTestData.CreatePublishedTrackingJobAsync(database, operadorId, envioId);
 
         await using (var dbSegundoMensaje = database.CreateDbContext())
         {
@@ -297,7 +297,7 @@ public sealed class ProcesarGeneracionSeguimientoTests(
             .ReadFromJsonAsync<JsonElement>();
 
         var envioId = creado.GetProperty("id").GetGuid();
-        var messageId = Guid.NewGuid();
+        var messageId = await PublishedTrackingJobTestData.PublishInitialTrackingJobAsync(database, envioId);
 
         // Simular una falla de PostgreSQL al guardar
         // el registro de idempotencia.
@@ -459,8 +459,8 @@ public sealed class ProcesarGeneracionSeguimientoTests(
         var cifrador = new CifradorTokenSeguimiento(
             configuracion);
 
-        var mensajeA = Guid.NewGuid();
-        var mensajeB = Guid.NewGuid();
+        var mensajeA = await PublishedTrackingJobTestData.PublishInitialTrackingJobAsync(database, envioId);
+        var mensajeB = await PublishedTrackingJobTestData.CreatePublishedTrackingJobAsync(database, operadorId, envioId);
 
         // Permite iniciar ambos procesadores simultáneamente.
         var inicio = new TaskCompletionSource(
@@ -574,7 +574,7 @@ public sealed class ProcesarGeneracionSeguimientoTests(
             .ReadFromJsonAsync<JsonElement>();
 
         var envioId = creado.GetProperty("id").GetGuid();
-        var messageId = Guid.NewGuid();
+        var messageId = await PublishedTrackingJobTestData.PublishInitialTrackingJobAsync(database, envioId);
 
         var configuracion = new ConfigurationBuilder()
             .AddInMemoryCollection(
