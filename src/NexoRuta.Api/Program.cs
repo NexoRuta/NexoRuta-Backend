@@ -43,7 +43,13 @@ if (localBootstrapCommand)
 }
 
 builder.Services.AddControllers();
-builder.Services.AddOpenApi();
+builder.Services.AddOpenApi(options => options.AddSchemaTransformer((schema, context, _) =>
+{
+    var type = context.JsonTypeInfo.Type;
+    if (type == typeof(decimal) || Nullable.GetUnderlyingType(type) == typeof(decimal))
+        schema.Format = "decimal";
+    return Task.CompletedTask;
+}));
 builder.Services.AddNexoRutaPersistence(builder.Configuration);
 var dataProtection = builder.Services.AddDataProtection().SetApplicationName(PasswordRecoveryDataProtection.ApplicationName);
 var dataProtectionKeys = builder.Configuration[PasswordRecoveryDataProtection.KeysDirectoryConfigurationKey];

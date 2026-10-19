@@ -5,6 +5,7 @@ using NexoRuta.Domain.Administracion;
 using NexoRuta.Domain.Envios;
 using NexoRuta.Domain.Seguimiento;
 using NexoRuta.Domain.ZonasCobertura;
+using NexoRuta.Domain.Tarifas;
 using NexoRuta.Infrastructure.Seguimiento.Persistence;
 using NexoRuta.Infrastructure.Outbox;
 
@@ -38,6 +39,10 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
     public DbSet<FranjaEntrega> FranjasEntrega => Set<FranjaEntrega>();
     public DbSet<ZonaCoberturaRevision> ZonasCoberturaRevisiones => Set<ZonaCoberturaRevision>();
     public DbSet<DepartamentoReferencia> DepartamentosReferencia => Set<DepartamentoReferencia>();
+    public DbSet<TarifarioOperador> TarifariosOperador => Set<TarifarioOperador>();
+    public DbSet<VersionTarifario> VersionesTarifario => Set<VersionTarifario>();
+    public DbSet<TarifaZonaModalidad> TarifasZonaModalidad => Set<TarifaZonaModalidad>();
+    public DbSet<AjusteTarifario> AjustesTarifario => Set<AjusteTarifario>();
 
     public DbSet<Rol> Roles => Set<Rol>();
     public DbSet<Permiso> Permisos => Set<Permiso>();
@@ -547,6 +552,103 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
             entity.Property(x => x.Licencia).HasMaxLength(160).IsRequired();
             entity.Property(x => x.ImportadaUtc).IsRequired();
             entity.HasIndex(x => x.Geometria).HasMethod("gist").HasDatabaseName("IX_DepartamentosReferencia_Geometria_Gist");
+        });
+
+        modelBuilder.Entity<TarifarioOperador>(entity =>
+        {
+            entity.ToTable("TarifariosOperador", table =>
+                table.HasCheckConstraint("CK_TarifariosOperador_PublicationCounter", "\"UltimoNumeroPublicacion\" >= 0"));
+            entity.HasKey(x => x.OperadorId);
+            entity.Property(x => x.UltimoNumeroPublicacion).HasDefaultValue(0).IsRequired();
+            entity.Property(x => x.ActualizadoUtc).IsRequired();
+            entity.HasOne<Operador>().WithMany().HasForeignKey(x => x.OperadorId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<VersionTarifario>().WithMany()
+                .HasForeignKey(x => new { x.OperadorId, x.VersionVigenteId })
+                .HasPrincipalKey(x => new { x.OperadorId, x.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<VersionTarifario>(entity =>
+        {
+            entity.ToTable("VersionesTarifario", table =>
+            {
+                table.HasCheckConstraint("CK_VersionesTarifario_State",
+                    "\"Estado\" IN ('Borrador', 'Publicada')");
+                table.HasCheckConstraint("CK_VersionesTarifario_Publication",
+                    "(\"Estado\" = 'Borrador' AND \"NumeroVersionPublicada\" IS NULL AND \"PublicadaUtc\" IS NULL AND \"PublicadaPorUsuarioId\" IS NULL) OR " +
+                    "(\"Estado\" = 'Publicada' AND \"NumeroVersionPublicada\" > 0 AND \"PublicadaUtc\" IS NOT NULL AND \"PublicadaPorUsuarioId\" IS NOT NULL)");
+                table.HasCheckConstraint("CK_VersionesTarifario_Version", "\"VersionConcurrencia\" >= 0");
+                table.HasCheckConstraint("CK_VersionesTarifario_Currency", "\"Moneda\" = 'UYU'");
+            });
+            entity.HasKey(x => new { x.OperadorId, x.Id });
+            entity.Property(x => x.Id).ValueGeneratedNever();
+            entity.Property(x => x.Estado).HasConversion<string>().HasMaxLength(16).IsRequired();
+            entity.Property(x => x.NumeroVersionPublicada);
+            entity.Property(x => x.VersionConcurrencia).HasDefaultValue(0L).IsConcurrencyToken().ValueGeneratedNever();
+            entity.Property(x => x.Moneda).HasConversion<string>().HasMaxLength(3).IsRequired();
+            entity.Property(x => x.CreadaUtc).IsRequired();
+            entity.Property(x => x.PublicadaUtc);
+            entity.HasIndex(x => x.OperadorId).IsUnique()
+                .HasFilter("\"Estado\" = 'Borrador'").HasDatabaseName("UX_VersionesTarifario_OneDraftPerOperator");
+            entity.HasIndex(x => new { x.OperadorId, x.NumeroVersionPublicada }).IsUnique()
+                .HasFilter("\"NumeroVersionPublicada\" IS NOT NULL").HasDatabaseName("UX_VersionesTarifario_PublicationNumber");
+            entity.HasOne<Operador>().WithMany().HasForeignKey(x => x.OperadorId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Usuario>().WithMany().HasForeignKey(x => x.CreadaPorUsuarioId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Usuario>().WithMany().HasForeignKey(x => x.PublicadaPorUsuarioId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasMany(x => x.Tarifas).WithOne()
+                .HasForeignKey(x => new { x.OperadorId, x.VersionId })
+                .HasPrincipalKey(x => new { x.OperadorId, x.Id })
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.Navigation(x => x.Tarifas).UsePropertyAccessMode(PropertyAccessMode.Field);
+        });
+
+        modelBuilder.Entity<TarifaZonaModalidad>(entity =>
+        {
+            entity.ToTable("TarifasZonaModalidad", table =>
+            {
+                table.HasCheckConstraint("CK_TarifasZonaModalidad_Modality", "\"Modalidad\" IN ('Estandar', 'Urgente')");
+                table.HasCheckConstraint("CK_TarifasZonaModalidad_Amounts",
+                    "\"ImporteBaseUyu\" >= 0 AND \"PrecioPorKilogramoUyu\" >= 0 AND \"PrecioPorMetroCubicoUyu\" >= 0");
+            });
+            entity.HasKey(x => new { x.OperadorId, x.VersionId, x.ZonaId, x.Modalidad });
+            entity.Property(x => x.Modalidad).HasConversion<string>().HasMaxLength(16).IsRequired();
+            entity.Property(x => x.ImporteBaseUyu).HasPrecision(ReglasTarifario.MoneyPrecision, ReglasTarifario.MoneyScale);
+            entity.Property(x => x.PrecioPorKilogramoUyu).HasPrecision(ReglasTarifario.RatePrecision, ReglasTarifario.RateScale);
+            entity.Property(x => x.PrecioPorMetroCubicoUyu).HasPrecision(ReglasTarifario.RatePrecision, ReglasTarifario.RateScale);
+            entity.HasOne<VersionTarifario>().WithMany(x => x.Tarifas)
+                .HasForeignKey(x => new { x.OperadorId, x.VersionId })
+                .HasPrincipalKey(x => new { x.OperadorId, x.Id }).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<ZonaCobertura>().WithMany()
+                .HasForeignKey(x => new { x.OperadorId, x.ZonaId })
+                .HasPrincipalKey(x => new { x.OperadorId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasMany(x => x.Ajustes).WithOne()
+                .HasForeignKey(x => new { x.OperadorId, x.VersionId, x.ZonaId, x.Modalidad })
+                .HasPrincipalKey(x => new { x.OperadorId, x.VersionId, x.ZonaId, x.Modalidad })
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.Navigation(x => x.Ajustes).UsePropertyAccessMode(PropertyAccessMode.Field);
+        });
+
+        modelBuilder.Entity<AjusteTarifario>(entity =>
+        {
+            entity.ToTable("AjustesTarifario", table =>
+            {
+                table.HasCheckConstraint("CK_AjustesTarifario_Type", "\"Tipo\" IN ('RecargoFijo', 'RecargoPorcentual', 'BonificacionFija', 'BonificacionPorcentual')");
+                table.HasCheckConstraint("CK_AjustesTarifario_Value",
+                    "((\"Tipo\" IN ('RecargoFijo', 'BonificacionFija') AND \"ImporteFijoUyu\" IS NOT NULL AND \"Porcentaje\" IS NULL AND \"ImporteFijoUyu\" >= 0) OR " +
+                    "(\"Tipo\" IN ('RecargoPorcentual', 'BonificacionPorcentual') AND \"ImporteFijoUyu\" IS NULL AND \"Porcentaje\" BETWEEN 0 AND 100))");
+                table.HasCheckConstraint("CK_AjustesTarifario_Name", "length(btrim(\"Nombre\")) > 0");
+            });
+            entity.HasKey(x => new { x.OperadorId, x.Id });
+            entity.Property(x => x.Id).ValueGeneratedNever();
+            entity.Property(x => x.Modalidad).HasConversion<string>().HasMaxLength(16).IsRequired();
+            entity.Property(x => x.Nombre).HasMaxLength(120).IsRequired();
+            entity.Property(x => x.Tipo).HasConversion<string>().HasMaxLength(24).IsRequired();
+            entity.Property(x => x.ImporteFijoUyu).HasPrecision(ReglasTarifario.MoneyPrecision, ReglasTarifario.MoneyScale);
+            entity.Property(x => x.Porcentaje).HasPrecision(ReglasTarifario.PercentagePrecision, ReglasTarifario.PercentageScale);
+            entity.HasOne<TarifaZonaModalidad>().WithMany(x => x.Ajustes)
+                .HasForeignKey(x => new { x.OperadorId, x.VersionId, x.ZonaId, x.Modalidad })
+                .HasPrincipalKey(x => new { x.OperadorId, x.VersionId, x.ZonaId, x.Modalidad })
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }
