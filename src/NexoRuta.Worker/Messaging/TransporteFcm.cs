@@ -13,6 +13,13 @@ public sealed class TransporteFcm : ITransporteFcm, IDisposable
         app = FirebaseApp.Create(new AppOptions { ProjectId = proyecto, Credential = GoogleCredential.GetApplicationDefault() }, "nexoruta-push");
         mensajeria = FirebaseMessaging.GetMessaging(app);
     }
-    public Task<BatchResponse> EnviarAsync(MulticastMessage mensaje, CancellationToken ct) => mensajeria.SendEachForMulticastAsync(mensaje, ct);
+    public async Task<IReadOnlyList<ResultadoEnvioPush>> EnviarAsync(MulticastMessage mensaje, CancellationToken ct)
+    {
+        var respuesta = await mensajeria.SendEachForMulticastAsync(mensaje, ct);
+        return respuesta.Responses.Select(r => r.IsSuccess
+            ? new ResultadoEnvioPush(EstadoEnvioPush.Aceptado, r.MessageId)
+            : new ResultadoEnvioPush(r.Exception?.MessagingErrorCode == MessagingErrorCode.Unregistered
+                ? EstadoEnvioPush.RegistroInvalido : EstadoEnvioPush.Reintentar)).ToArray();
+    }
     public void Dispose() => app.Delete();
 }

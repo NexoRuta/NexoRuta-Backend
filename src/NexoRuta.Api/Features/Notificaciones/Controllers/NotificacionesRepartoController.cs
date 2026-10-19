@@ -5,10 +5,10 @@ using NexoRuta.Api.Features.Notificaciones.Contracts;
 using NexoRuta.Application.Notificaciones.UseCases;
 using NexoRuta.Application.Reparto.Exceptions;
 namespace NexoRuta.Api.Features.Notificaciones.Controllers;
-[ApiController, Authorize(Policy = "reparto.ejecutar"), Route("api/mobile")]
+[ApiController, Authorize, Route("api/mobile")]
 public sealed class NotificacionesRepartoController(NotificacionesRepartoUseCase casos) : ControllerBase
 {
-    [HttpPut("instalaciones")]
+    [HttpPut("instalaciones"), Authorize(Policy = "reparto.ejecutar")]
     [ProducesResponseType(204), ProducesResponseType(400), ProducesResponseType(403), ProducesResponseType(409), ProducesResponseType(503)]
     public async Task<IActionResult> Registrar(RegistroInstalacionRequest request, CancellationToken ct)
     {
@@ -19,21 +19,29 @@ public sealed class NotificacionesRepartoController(NotificacionesRepartoUseCase
         catch (ArgumentException ex) { return Problem(ex.Message, statusCode: 400); }
         catch (InvalidOperationException) { return Problem("El registro de notificaciones no está disponible.", statusCode: 503); }
     }
-    [HttpGet("notificaciones")]
+    [HttpDelete("instalaciones/{id:guid}")]
+    [ProducesResponseType(204), ProducesResponseType(403), ProducesResponseType(404)]
+    public async Task<IActionResult> Desactivar(Guid id, CancellationToken ct)
+    {
+        if (!Guid.TryParse(User.FindFirst(JwtSesionClaims.SesionMovil)?.Value, out _)) return Forbid();
+        try { return await casos.DesactivarAsync(id, ct) ? NoContent() : NotFound(); }
+        catch (RepartoNoPermitidoException) { return Forbid(); }
+    }
+    [HttpGet("notificaciones"), Authorize(Policy = "reparto.ejecutar")]
     [ProducesResponseType<AvisoRepartoResponse[]>(200), ProducesResponseType(403)]
     public async Task<IActionResult> Listar(CancellationToken ct)
     {
         try { return Ok((await casos.ListarAsync(ct)).Select(AvisoRepartoResponse.Desde).ToArray()); }
         catch (RepartoNoPermitidoException) { return Forbid(); }
     }
-    [HttpGet("notificaciones/{id:guid}")]
+    [HttpGet("notificaciones/{id:guid}"), Authorize(Policy = "reparto.ejecutar")]
     [ProducesResponseType<AvisoRepartoResponse>(200), ProducesResponseType(403), ProducesResponseType(404)]
     public async Task<IActionResult> Obtener(Guid id, CancellationToken ct)
     {
         try { var aviso = await casos.ObtenerAsync(id, null, ct); return aviso is null ? NotFound() : Ok(AvisoRepartoResponse.Desde(aviso)); }
         catch (RepartoNoPermitidoException) { return Forbid(); }
     }
-    [HttpPost("notificaciones/{id:guid}/confirmaciones")]
+    [HttpPost("notificaciones/{id:guid}/confirmaciones"), Authorize(Policy = "reparto.ejecutar")]
     [ProducesResponseType<AvisoRepartoResponse>(200), ProducesResponseType(400), ProducesResponseType(403), ProducesResponseType(404)]
     public async Task<IActionResult> Confirmar(Guid id, RegistroAvisoRequest request, CancellationToken ct)
     {

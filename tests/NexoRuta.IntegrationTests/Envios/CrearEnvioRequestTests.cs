@@ -24,7 +24,7 @@ public sealed class CrearEnvioRequestTests
             var number = decimal.Parse(value, CultureInfo.InvariantCulture);
             var request = new CrearEnvioRequest
             {
-                OperadorId = Guid.CreateVersion7(), DestinatarioNombre = "Ana",
+                OperadorId = Guid.CreateVersion7(), DestinatarioNombre = "Ana", DestinatarioEmail = "destinatario@example.test",
                 Direccion = "Rivera 123", CodigoBulto = "B-001",
                 PesoGramos = number, LargoCentimetros = number, AnchoCentimetros = number, AltoCentimetros = number
             };

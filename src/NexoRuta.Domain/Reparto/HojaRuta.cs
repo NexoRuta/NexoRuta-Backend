@@ -37,15 +37,16 @@ public sealed class HojaRuta
     {
         if (Estado != EstadoHojaRuta.Planificada || paradas.Any(x => x.EnvioId == envioId))
             throw new InvalidOperationException("La ruta ya está despachada o el envío está repetido.");
-        if (paradas.Count > 0 && llegada < paradas[^1].LlegadaEstimadaUtc)
+        var ultima = paradas.MaxBy(p => p.Orden);
+        if (ultima is not null && llegada < ultima.LlegadaEstimadaUtc)
             throw new ArgumentException("Las llegadas estimadas deben respetar el orden de las paradas.");
-        paradas.Add(new ParadaRuta(Id, OperadorId, envioId, paradas.Count + 1, llegada));
+        paradas.Add(new ParadaRuta(Id, OperadorId, envioId, (ultima?.Orden ?? 0) + 1, llegada));
         Version++;
     }
 
     public void Despachar(long versionEsperada)
     {
-        if (Version != versionEsperada || Estado != EstadoHojaRuta.Planificada || paradas.Count == 0)
+        if (Version != versionEsperada || Estado != EstadoHojaRuta.Planificada || !paradas.Any(p => p.Activa))
             throw new InvalidOperationException("La ruta cambió o no está lista para despachar.");
         Estado = EstadoHojaRuta.Despachada; Version++;
     }

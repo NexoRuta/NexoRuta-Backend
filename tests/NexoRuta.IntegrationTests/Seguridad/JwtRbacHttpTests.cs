@@ -91,6 +91,7 @@ public sealed class JwtRbacHttpTests(PostgresFixture postgres) : IClassFixture<P
     [InlineData("malformed-access")]
     [InlineData("no-user")]
     [InlineData("no-access")]
+    [InlineData("no-credential-version")]
     [InlineData("issuer")]
     [InlineData("audience")]
     public async Task InvalidJwtCannotAuthenticateEvenWithLegacyAccessHeader(string scenario)
@@ -206,7 +207,7 @@ public sealed class JwtRbacHttpTests(PostgresFixture postgres) : IClassFixture<P
     [InlineData("Development", "/api/envios")]
     [InlineData("Development", "/api/roles")]
     [InlineData("Development", "/api/usuarios/actual")]
-    [InlineData("Development", "/api/comercio/operadores")]
+    [InlineData("Development", "/api/operadores")]
     [InlineData("Testing", "/api/envios")]
     [InlineData("Production", "/api/envios")]
     public async Task LegacyAccessHeaderAloneNeverAuthenticates(string environment, string path)
@@ -258,7 +259,7 @@ public sealed class JwtRbacHttpTests(PostgresFixture postgres) : IClassFixture<P
         async Task<Guid> Create(string token, Guid operatorId)
         {
             using var request = Request(token, HttpMethod.Post);
-            request.Content = JsonContent.Create(new { OperadorId = operatorId, DestinatarioNombre = "Recipient",
+            request.Content = JsonContent.Create(new { OperadorId = operatorId, DestinatarioNombre = "Recipient", DestinatarioEmail = "destinatario@example.test",
                 Direccion = "Address 123", CodigoBulto = Guid.NewGuid().ToString("N"), PesoGramos = 100,
                 LargoCentimetros = 10, AnchoCentimetros = 10, AltoCentimetros = 10 });
             using var response = await client.SendAsync(request);
@@ -278,7 +279,7 @@ public sealed class JwtRbacHttpTests(PostgresFixture postgres) : IClassFixture<P
         }
         using var forbiddenRequest = Request(operatorJwt, HttpMethod.Post);
         forbiddenRequest.Content = JsonContent.Create(new { OperadorId = operatorAccess.OperadorId,
-            DestinatarioNombre = "Recipient", Direccion = "Address 123", CodigoBulto = "DENIED",
+            DestinatarioNombre = "Recipient", DestinatarioEmail = "destinatario@example.test", Direccion = "Address 123", CodigoBulto = "DENIED",
             PesoGramos = 100, LargoCentimetros = 10, AnchoCentimetros = 10, AltoCentimetros = 10 });
         using var forbidden = await client.SendAsync(forbiddenRequest);
         Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
@@ -327,6 +328,7 @@ public sealed class JwtRbacHttpTests(PostgresFixture postgres) : IClassFixture<P
         if (user is not null) claims.Add(new Claim(JwtRegisteredClaimNames.Sub, user));
         if (access is not null) claims.Add(new Claim(AccesoSeleccionado.ClaimAccesoId, access));
         claims.Add(new Claim(JwtSesionClaims.VersionSesion, "0"));
+        if (scenario != "no-credential-version") claims.Add(new Claim(JwtSesionClaims.VersionCredencial, "0"));
         if (additionalClaims is not null) claims.AddRange(additionalClaims);
         var key = scenario == "signature" ? System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)
             : Convert.FromBase64String(AuthenticationTestData.SigningKey);

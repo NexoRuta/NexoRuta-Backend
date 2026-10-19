@@ -7,4 +7,5 @@ public sealed record EnvioDetalle(
     string DestinatarioNombre,
     string Direccion,
     string Estado,
+    long Version,
     IReadOnlyList<BultoDetalle> Bultos);

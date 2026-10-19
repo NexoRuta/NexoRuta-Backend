@@ -11,7 +11,7 @@ public sealed class EfConfiguracionRepartoRepository(NexoRutaDbContext db) : ICo
 {
     public async Task<ConfiguracionRepartoDatos?> ObtenerAsync(Guid operadorId, CancellationToken ct)
     {
-        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        await using var tx = await db.BeginOrJoinAsync(ct);
         await Contexto(operadorId, ct);
         var actual = await db.ConfiguracionesReparto.AsNoTracking().Where(x => x.OperadorId == operadorId)
             .OrderByDescending(x => x.Version).FirstOrDefaultAsync(ct);
@@ -21,7 +21,7 @@ public sealed class EfConfiguracionRepartoRepository(NexoRutaDbContext db) : ICo
 
     public async Task<ConfiguracionRepartoDatos> GuardarAsync(Guid operadorId, ConfiguracionRepartoDatos datos, CancellationToken ct)
     {
-        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        await using var tx = await db.BeginOrJoinAsync(ct);
         await Contexto(operadorId, ct);
         await BloquearOperador(operadorId, ct);
         var actual = await db.ConfiguracionesReparto.Where(x => x.OperadorId == operadorId).MaxAsync(x => (long?)x.Version, ct) ?? 0;
@@ -38,7 +38,7 @@ public sealed class EfConfiguracionRepartoRepository(NexoRutaDbContext db) : ICo
 
     public async Task<IReadOnlyList<VehiculoDatos>> VehiculosAsync(Guid operadorId, CancellationToken ct)
     {
-        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        await using var tx = await db.BeginOrJoinAsync(ct);
         await Contexto(operadorId, ct);
         var datos = await db.Vehiculos.AsNoTracking().Where(x => x.OperadorId == operadorId).OrderBy(x => x.Matricula)
             .Select(x => new VehiculoDatos(x.Id, x.Matricula, x.PesoMaximoGramos, x.VolumenMaximoCm3, x.Activo, x.Version)).ToArrayAsync(ct);
@@ -48,7 +48,7 @@ public sealed class EfConfiguracionRepartoRepository(NexoRutaDbContext db) : ICo
 
     public async Task<VehiculoDatos?> GuardarVehiculoAsync(Guid operadorId, VehiculoDatos datos, CancellationToken ct)
     {
-        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        await using var tx = await db.BeginOrJoinAsync(ct);
         await Contexto(operadorId, ct);
         await BloquearOperador(operadorId, ct);
         Vehiculo vehiculo;

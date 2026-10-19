@@ -9,8 +9,6 @@ namespace NexoRuta.Api.Features.Comercios.Controllers;
 [ApiController]
 [Authorize(Policy = nameof(TipoAccesoUsuario.Comercio))]
 [Route("api/operadores")]
-// Keep the existing Commerce and M05 clients compatible with the global catalog.
-[Route("api/comercio/operadores")]
 public sealed class OperadoresDisponiblesController(IOperadoresRepository operadores) : ControllerBase
 {
     [HttpGet]

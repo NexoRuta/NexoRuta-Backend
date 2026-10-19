@@ -10,6 +10,9 @@ public sealed class CrearEnvioRequest
     [Required, StringLength(160)]
     public string DestinatarioNombre { get; set; } = "";
 
+    [Required, EmailAddress, StringLength(254)]
+    public string DestinatarioEmail { get; set; } = "";
+
     [Required, StringLength(240)]
     public string Direccion { get; set; } = "";
 

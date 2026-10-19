@@ -40,8 +40,10 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
     public DbSet<Destinatario> Destinatarios => Set<Destinatario>();
     public DbSet<Direccion> Direcciones => Set<Direccion>();
     public DbSet<Envio> Envios => Set<Envio>();
+    public DbSet<NexoRuta.Infrastructure.Envios.CancelacionEnvio> CancelacionesEnvio => Set<NexoRuta.Infrastructure.Envios.CancelacionEnvio>();
     public DbSet<Bulto> Bultos => Set<Bulto>();
     public DbSet<EnlaceSeguimiento> EnlacesSeguimiento => Set<EnlaceSeguimiento>();
+    public DbSet<CodigoCancelacionPublica> CodigosCancelacionPublica => Set<CodigoCancelacionPublica>();
 
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
     public DbSet<ProcessedMessage> ProcessedMessages => Set<ProcessedMessage>();
@@ -59,6 +61,9 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        base.OnModelCreating(modelBuilder);
+        modelBuilder.ApplyConfiguration(new CodigoCancelacionPublicaConfiguration());
+        modelBuilder.ApplyConfiguration(new NexoRuta.Infrastructure.Envios.CancelacionEnvioConfiguration());
         modelBuilder.ApplyConfiguration(new Reparto.RepartidorConfiguration());
         modelBuilder.ApplyConfiguration(new Reparto.ConfiguracionRepartoConfiguration());
         modelBuilder.ApplyConfiguration(new Reparto.VehiculoConfiguration());
@@ -268,6 +273,7 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
             entity.HasKey(x => x.Id);
             entity.HasAlternateKey(x => new { x.OperadorId, x.Id });
             entity.Property(x => x.Nombre).HasMaxLength(160).IsRequired();
+            entity.Property(x => x.Email).HasMaxLength(254).IsRequired();
             entity.HasOne<Operador>().WithMany().HasForeignKey(x => x.OperadorId).OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -339,6 +345,8 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
                 table.HasCheckConstraint("CK_OutboxMessages_Contract",
                     "(\"Tipo\" = 'GenerarSeguimiento' AND \"VersionContrato\" = 1 AND \"Destino\" = 'RabbitMq' AND \"Ambito\" = 'Envio' AND \"EstadoEntrega\" IS NULL) OR " +
                     "(\"Tipo\" = 'EnvioCreado' AND \"VersionContrato\" = 1 AND \"Destino\" = 'Kafka' AND \"Ambito\" = 'Envio' AND \"EstadoEntrega\" IS NULL) OR " +
+                    "(\"Tipo\" = 'RepartoModificado' AND \"VersionContrato\" = 1 AND \"Destino\" = 'PushFcm' AND \"Ambito\" = 'Envio' AND \"EstadoEntrega\" IS NULL) OR " +
+                    "(\"Tipo\" = 'CodigoCancelacionEmail' AND \"VersionContrato\" = 1 AND \"Destino\" = 'RabbitMq' AND \"Ambito\" = 'Envio' AND \"EstadoEntrega\" IS NULL) OR " +
                     "(\"Tipo\" = 'PasswordRecoveryEmail' AND \"VersionContrato\" = 1 AND \"Destino\" = 'RabbitMq' AND \"Ambito\" = 'Identidad' AND \"EstadoEntrega\" IN ('Pending', 'Delivered', 'Expired', 'Failed')) OR " +
                     "(\"Tipo\" = 'PasswordRecoveryRequested' AND \"VersionContrato\" = 1 AND \"Destino\" = 'Kafka' AND \"Ambito\" = 'Identidad' AND \"EstadoEntrega\" IS NULL)");
                 table.HasCheckConstraint("CK_OutboxMessages_Priority", "\"Prioridad\" IN ('Baja', 'Normal', 'Alta')");

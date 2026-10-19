@@ -138,12 +138,14 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, UserManager<Usu
                     VALUES ({commerceEntity!.Id}, {commerceEntity.Nombre}, 'Activa', 0, true)
                     """, ct);
             db.Entry(organization).State = EntityState.Unchanged;
-            db.AddRange(role, access);
             if (nuevaIdentidad)
             {
                 var userResult = await identityUsers.CreateAsync(user, password!);
                 IdentityErrorContract.ExigirCreacionValida(userResult, identityUsers.ErrorDescriber);
             }
+            db.Roles.Add(role);
+            await db.SaveChangesAsync(ct);
+            db.AccesosUsuario.Add(access);
             db.AddRange(permissions.Select(p => new RolPermiso(role.Id, p.Id)));
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);

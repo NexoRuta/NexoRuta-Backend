@@ -35,7 +35,7 @@ public sealed partial class EfOperacionesRepartoRepository(NexoRutaDbContext db,
         ValidarDatos(datos);
         var payload = JsonSerializer.Serialize(operacion, Json);
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload)));
-        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        await using var tx = await db.BeginOrJoinAsync(ct);
         await ContextoYBloqueo(operadorId, ct);
         var hoja = await Hoja(operadorId, accesoId, jornadaId, ct);
         if (hoja is null) return null;
@@ -53,7 +53,7 @@ public sealed partial class EfOperacionesRepartoRepository(NexoRutaDbContext db,
         try { detalle = await Ejecutar(hoja, operacion, datos, ct); }
         catch (ConflictoRepartoException ex)
         {
-            // No guardar modificaciones parciales; el hecho y su prueba quedan para el despachador.
+            // No guardar modificaciones parciales; conservar el hecho y su prueba como conflicto.
             db.ChangeTracker.Clear();
             hoja = (await Hoja(operadorId, accesoId, jornadaId, ct))!;
             resultado = "Conflicto"; detalle = ex.Message;

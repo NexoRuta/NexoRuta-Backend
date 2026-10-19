@@ -72,7 +72,7 @@ public sealed class SuspensionSessionHttpTests(PostgresFixture postgres) : IClas
         Assert.Equal(HttpStatusCode.Unauthorized, oldTokenRead.StatusCode);
         using var oldTokenCreate = await ownerClient.PostAsJsonAsync("/api/envios", new
         {
-            OperadorId = Guid.NewGuid(), DestinatarioNombre = "Ana", Direccion = "Rivera 123", CodigoBulto = "SUSPENDED",
+            OperadorId = Guid.NewGuid(), DestinatarioNombre = "Ana", DestinatarioEmail = "destinatario@example.test", Direccion = "Rivera 123", CodigoBulto = "SUSPENDED",
             PesoGramos = 100m, LargoCentimetros = 10m, AnchoCentimetros = 10m, AltoCentimetros = 10m
         });
         Assert.Equal(HttpStatusCode.Unauthorized, oldTokenCreate.StatusCode);

@@ -25,7 +25,8 @@ public sealed class ZonaCoberturaUseCaseTests
         [new(-56, -34), new(-55, -34), new(-55, -33), new(-56, -34)]));
 
         var access = new RequerirOperadorCoberturaUseCase(current, permissions);
-        await new CrearZonaCoberturaUseCase(access, repository).EjecutarAsync("Centro", geometry);
+        await new CrearZonaCoberturaUseCase(access, repository, new ValidarTerritorioUruguayUseCase(repository))
+            .EjecutarAsync("Centro", geometry);
 
         Assert.Equal((actor.UsuarioId, actor.AccesoId, CatalogoPermisos.ConfiguracionGestionar), permissions.Requested);
         Assert.Equal(actor.OperadorId, repository.Created!.OperadorId);
@@ -41,7 +42,7 @@ public sealed class ZonaCoberturaUseCaseTests
         var repository = new Zones();
 
         await Assert.ThrowsAsync<AccesoCoberturaNoPermitidoException>(() =>
-            new ConsultarCoberturaUseCase(new RequerirOperadorCoberturaUseCase(new CurrentUser(commerce), permissions), repository).EjecutarAsync(-56, -34));
+            new ConsultarCoberturaUseCase(new RequerirOperadorCoberturaUseCase(new CurrentUser(commerce), permissions), repository, new ValidarTerritorioUruguayUseCase(repository)).EjecutarAsync(-56, -34));
         Assert.Null(permissions.Requested);
     }
 
@@ -52,7 +53,7 @@ public sealed class ZonaCoberturaUseCaseTests
         var repository = new Zones();
 
         await Assert.ThrowsAsync<AccesoCoberturaNoPermitidoException>(() =>
-            new ConsultarCoberturaUseCase(new RequerirOperadorCoberturaUseCase(new CurrentUser(OperatorContext()), permissions), repository).EjecutarAsync(-56, -34));
+            new ConsultarCoberturaUseCase(new RequerirOperadorCoberturaUseCase(new CurrentUser(OperatorContext()), permissions), repository, new ValidarTerritorioUruguayUseCase(repository)).EjecutarAsync(-56, -34));
         Assert.NotNull(permissions.Requested);
     }
 
@@ -64,7 +65,7 @@ public sealed class ZonaCoberturaUseCaseTests
         var suspended = OperatorContext() with { Estado = EstadoOrganizacion.Suspendida };
 
         await Assert.ThrowsAsync<AccesoCoberturaNoPermitidoException>(() =>
-            new ConsultarCoberturaUseCase(new RequerirOperadorCoberturaUseCase(new CurrentUser(suspended), permissions), repository)
+            new ConsultarCoberturaUseCase(new RequerirOperadorCoberturaUseCase(new CurrentUser(suspended), permissions), repository, new ValidarTerritorioUruguayUseCase(repository))
                 .EjecutarAsync(-56, -34));
         Assert.Null(permissions.Requested);
     }
@@ -118,6 +119,15 @@ public sealed class ZonaCoberturaUseCaseTests
 
         public Task<DepartamentoReferencia?> ObtenerDepartamentoAsync(string codigo, CancellationToken cancellationToken = default)
             => Task.FromResult<DepartamentoReferencia?>(null);
+
+        public Task<TerritorioUruguayReferencia?> ObtenerTerritorioUruguayAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<TerritorioUruguayReferencia?>(null);
+
+        public Task<DepartamentoReferenciaConGeometria?> ObtenerDepartamentoConGeometriaAsync(string codigo, CancellationToken cancellationToken = default)
+            => Task.FromResult<DepartamentoReferenciaConGeometria?>(null);
+
+        public Task<ResultadoValidacionTerritorial> ValidarTerritorioUruguayAsync(Geometry geometria, CancellationToken cancellationToken = default)
+            => Task.FromResult(ResultadoValidacionTerritorial.Cubierta);
 
         public Task GuardarNuevaAsync(ZonaCobertura zona, Guid usuarioId, CancellationToken cancellationToken = default)
         {

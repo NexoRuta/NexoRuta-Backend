@@ -19,7 +19,7 @@ public sealed class SesionesMovilesUseCase(IniciarSesionUseCase login,
             return null;
         var ahora = reloj.GetUtcNow();
         var sesion = new SesionMovil(identidad.UsuarioId, identidad.AccesoId.Value,
-            identidad.VersionSesion, ahora, ahora.Add(vigencia));
+            identidad.VersionSesion, identidad.VersionCredencial, ahora, ahora.Add(vigencia));
         var token = tokens.Crear();
         await sesiones.CrearAsync(sesion, token.Hash, ct);
         return new(identidad, sesion, token.Token);
@@ -42,7 +42,8 @@ public sealed class SesionesMovilesUseCase(IniciarSesionUseCase login,
         var nuevo = tokens.Crear();
         var rotada = await sesiones.RotarAsync(hash, nuevo.Hash, ahora, ct);
         return rotada is null ? null : new(new SesionIniciada(actual.UsuarioId, actual.AccesoId,
-            actual.UsuarioEmail, actual.VersionSesion, TipoOrganizacion: actual.TipoAcceso), rotada, nuevo.Token);
+            actual.UsuarioEmail, actual.VersionSesion, TipoOrganizacion: actual.TipoAcceso,
+            VersionCredencial: rotada.VersionCredencial), rotada, nuevo.Token);
     }
 
     public Task RevocarAsync(string tokenRenovacion, CancellationToken ct)

@@ -21,7 +21,7 @@ public sealed class SesionMovilTests
     public void ContratoUtcConservaPrecisionDeMicrosegundosAntesDePersistir()
     {
         var ahora = Inicio.AddTicks(7);
-        var sesion = new SesionMovil(Guid.NewGuid(), Guid.NewGuid(), 0, ahora, ahora.AddDays(30));
+        var sesion = new SesionMovil(Guid.NewGuid(), Guid.NewGuid(), 0, 0, ahora, ahora.AddDays(30));
         Assert.Equal(0, sesion.CreadaEnUtc.UtcTicks % 10);
         Assert.Equal(0, sesion.ExpiraEnUtc.UtcTicks % 10);
         Assert.Equal(Inicio.AddDays(30), sesion.ExpiraEnUtc);
@@ -41,15 +41,15 @@ public sealed class SesionMovilTests
     [Theory]
     [InlineData(0)] [InlineData(-1)]
     public void VencimientoNoPositivoNoCreaSesion(int dias)
-        => Assert.Throws<ArgumentException>(() => new SesionMovil(Guid.NewGuid(), Guid.NewGuid(), 0, Inicio, Inicio.AddDays(dias)));
+        => Assert.Throws<ArgumentException>(() => new SesionMovil(Guid.NewGuid(), Guid.NewGuid(), 0, 0, Inicio, Inicio.AddDays(dias)));
 
     [Fact]
     public void IdentidadAccesoOVersionInvalidosSeRechazan()
     {
-        Assert.Throws<ArgumentException>(() => new SesionMovil(Guid.Empty, Guid.NewGuid(), 0, Inicio, Inicio.AddDays(30)));
-        Assert.Throws<ArgumentException>(() => new SesionMovil(Guid.NewGuid(), Guid.Empty, 0, Inicio, Inicio.AddDays(30)));
-        Assert.Throws<ArgumentException>(() => new SesionMovil(Guid.NewGuid(), Guid.NewGuid(), -1, Inicio, Inicio.AddDays(30)));
+        Assert.Throws<ArgumentException>(() => new SesionMovil(Guid.Empty, Guid.NewGuid(), 0, 0, Inicio, Inicio.AddDays(30)));
+        Assert.Throws<ArgumentException>(() => new SesionMovil(Guid.NewGuid(), Guid.Empty, 0, 0, Inicio, Inicio.AddDays(30)));
+        Assert.Throws<ArgumentException>(() => new SesionMovil(Guid.NewGuid(), Guid.NewGuid(), -1, 0, Inicio, Inicio.AddDays(30)));
     }
 
-    private static SesionMovil Nueva() => new(Guid.NewGuid(), Guid.NewGuid(), 7, Inicio, Inicio.AddDays(30));
+    private static SesionMovil Nueva() => new(Guid.NewGuid(), Guid.NewGuid(), 7, 0, Inicio, Inicio.AddDays(30));
 }

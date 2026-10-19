@@ -20,8 +20,8 @@ var builder = Host.CreateApplicationBuilder(args);
 builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.Warning);
 
 var transport = builder.Configuration[WorkerConfigurationKeys.Transport] ?? WorkerTransportNames.RabbitMq;
-if (transport is not (WorkerTransportNames.RabbitMq or WorkerTransportNames.Kafka))
-    throw new InvalidOperationException("Messaging:Transport must be RabbitMq or Kafka.");
+if (transport is not (WorkerTransportNames.RabbitMq or WorkerTransportNames.Kafka or WorkerTransportNames.Push))
+    throw new InvalidOperationException("Messaging:Transport must be RabbitMq, Kafka or Push.");
 
 var connectionString = builder.Configuration.GetConnectionString("Postgres")
     ?? throw new InvalidOperationException("ConnectionStrings:Postgres is required for this Worker.");
@@ -55,10 +55,13 @@ if (transport == WorkerTransportNames.RabbitMq)
     builder.Services.AddDataProtection()
         .SetApplicationName(PasswordRecoveryDataProtection.ApplicationName)
         .PersistKeysToFileSystem(new DirectoryInfo(keysDirectory));
+    builder.Services.AddSingleton<IOutboxMessageHandler, RabbitCancellationCodeOutboxHandler>();
+    builder.Services.AddScoped<ProcesarCorreoCodigoCancelacion>();
+    builder.Services.AddHostedService<CancellationCodeEmailConsumer>();
     builder.Services.AddHostedService<PasswordRecoveryEmailConsumer>();
     builder.Services.AddHostedService<PasswordRecoveryEmailDeadLetterConsumer>();
 }
-else if (transport == "Push")
+else if (transport == WorkerTransportNames.Push)
 {
     builder.Services.AddScoped<NexoRuta.Infrastructure.Notificaciones.CifradorRegistroPush>();
     builder.Services.AddScoped<NexoRuta.Infrastructure.Notificaciones.EfDespachoPushRepository>();

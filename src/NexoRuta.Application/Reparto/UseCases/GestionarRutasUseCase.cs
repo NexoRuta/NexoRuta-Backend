@@ -24,6 +24,18 @@ public sealed class GestionarRutasUseCase(IUsuarioActual usuario, IRutasReposito
         var actor = await usuario.ObtenerAsync(ct);
         return await rutas.DespacharAsync(actor.OperadorId ?? throw new RepartoNoPermitidoException(), id, version, ct);
     }
+    public async Task<HojaRutaDatos?> ObtenerPropiaAsync(Guid id, CancellationToken ct)
+    {
+        var actor = await usuario.ObtenerAsync(ct);
+        var op = actor.OperadorId ?? throw new RepartoNoPermitidoException();
+        if (await repartidores.ObtenerActivoAsync(op, actor.AccesoId, ct) is null) throw new RepartoNoPermitidoException();
+        return await rutas.ObtenerPropiaAsync(op, actor.AccesoId, id, ct);
+    }
+    public async Task<HojaRutaDatos?> ReasignarAsync(Guid envioId, ReasignarEnvioDatos datos, CancellationToken ct)
+    {
+        var actor = await usuario.ObtenerAsync(ct);
+        return await rutas.ReasignarAsync(actor.OperadorId ?? throw new RepartoNoPermitidoException(), envioId, datos, ct);
+    }
     public async Task<bool> RecibirAsync(Guid envioId, long version, CancellationToken ct)
     {
         var actor = await usuario.ObtenerAsync(ct);

@@ -6,12 +6,15 @@ using NexoRuta.Domain.Envios;
 namespace NexoRuta.IntegrationTests.Fixtures;
 internal static class RepartoHttpData
 {
+    internal static readonly DateOnly FechaOperacion = DateOnly.FromDateTime(
+        TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("America/Montevideo")).DateTime);
+    internal static DateTimeOffset LlegadaEstimada => new(FechaOperacion.ToDateTime(new TimeOnly(15, 0)), TimeSpan.Zero);
     internal static async Task<Preparado> Preparar(IntegrationDatabase data, HttpClient client, bool politica = true, bool confirmar = true)
     {
         await using var db = data.CreateDbContext();
         var operador = await db.AccesosUsuario.SingleAsync(x => x.OperadorId != null);
         var comercio = await db.AccesosUsuario.SingleAsync(x => x.ComercioId != null);
-        var destinatario = new Destinatario(operador.OperadorId!.Value, "Destinatario de prueba");
+        var destinatario = new Destinatario(operador.OperadorId!.Value, "Destinatario de prueba", "destinatario@example.test");
         var direccion = new Direccion(operador.OperadorId.Value, "Av. de prueba 123");
         var envio = new Envio(operador.OperadorId.Value, comercio.ComercioId!.Value, comercio.UsuarioId, destinatario.Id, direccion.Id);
         db.Destinatarios.Add(destinatario); db.Direcciones.Add(direccion); db.Envios.Add(envio);
@@ -36,7 +39,7 @@ internal static class RepartoHttpData
     }
     internal static object Politica() => new { Version = 0, ZonaHoraria = "America/Montevideo", MaximoParadas = 30, MaximoIntentos = 3,
         RequiereFoto = true, RequiereNombre = true, BloquearDiscrepanciasCarga = true, Motivos = new[] { "Ausente" } };
-    internal static object Solicitud(Preparado p) => new { RepartidorAccesoId = p.AccesoId, p.VehiculoId, Fecha = "2026-10-17",
-        Paradas = new[] { new { p.EnvioId, LlegadaEstimadaUtc = "2026-10-17T15:00:00Z" } } };
+    internal static object Solicitud(Preparado p) => new { RepartidorAccesoId = p.AccesoId, p.VehiculoId, Fecha = FechaOperacion,
+        Paradas = new[] { new { p.EnvioId, LlegadaEstimadaUtc = LlegadaEstimada } } };
     internal sealed record Preparado(Guid AccesoId, Guid VehiculoId, Guid EnvioId);
 }

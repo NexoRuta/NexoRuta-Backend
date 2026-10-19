@@ -50,7 +50,9 @@ public sealed class IdentityAccountStoreTests(PostgresFixture postgres) : IClass
         ownerRole.ProtegerComoRolSistema();
         var ownerAccess = new AccesoUsuario(ownerId, operatorEntity.Id, null, ownerRole, esPropietario: true);
         ownerAccess.RevocarSesiones();
-        db.AddRange(role, access, operatorEntity, ownerRole, ownerAccess);
+        db.AddRange(role, operatorEntity, ownerRole);
+        await db.SaveChangesAsync();
+        db.AddRange(access, ownerAccess);
         await db.SaveChangesAsync();
 
         await db.Database.MigrateAsync();
@@ -85,14 +87,16 @@ public sealed class IdentityAccountStoreTests(PostgresFixture postgres) : IClass
         Assert.Equal(operatorEntity.Id, persistedOwnerAccess.OperadorId);
         Assert.Null(await db.Database.SqlQueryRaw<string?>(
             "SELECT to_regclass('public.\"AspNetUsers\"')::text AS \"Value\"").SingleAsync());
-        Assert.Equal(previousAccountForeignKeys, await db.Database.SqlQueryRaw<string>("""
+        var currentAccountForeignKeys = await db.Database.SqlQueryRaw<string>("""
             SELECT concat(conrelid::regclass::text, ':', conname) AS "Value"
             FROM pg_constraint
             WHERE contype = 'f'
               AND confrelid = '"Usuarios"'::regclass
               AND NOT EXISTS (SELECT 1 FROM pg_class c WHERE c.oid = conrelid AND c.relname LIKE 'AspNetUser%')
             ORDER BY 1
-            """).ToListAsync());
+            """).ToListAsync();
+        Assert.All(previousAccountForeignKeys, key => Assert.Contains(key, currentAccountForeignKeys));
+        Assert.Contains("\"SesionesMoviles\":FK_SesionesMoviles_Usuarios_UsuarioId", currentAccountForeignKeys);
     }
 
     [Fact]

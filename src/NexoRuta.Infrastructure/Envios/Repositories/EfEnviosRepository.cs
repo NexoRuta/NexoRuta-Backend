@@ -71,9 +71,9 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
         {
             createdId = await db.Database.SqlQueryRaw<Guid>(
                 "SELECT " + RlsSqlFunctionContract.CreateShipment +
-                "({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}) AS \"Value\"",
+                "({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11}) AS \"Value\"",
                 envio.Id, destinatario.Id, direccion.Id, bulto.Id,
-                destinatario.Nombre, direccion.Descripcion, bulto.Codigo,
+                destinatario.Nombre, destinatario.Email, direccion.Descripcion, bulto.Codigo,
                 bulto.PesoGramos, bulto.LargoCentimetros, bulto.AnchoCentimetros, bulto.AltoCentimetros)
                 .SingleAsync(cancellationToken);
         }
@@ -116,7 +116,8 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
                 ComercioNombre = comercio.Nombre,
                 DestinatarioNombre = destinatario.Nombre,
                 Direccion = direccion.Descripcion,
-                Estado = envio.Estado.ToString()
+                Estado = envio.Estado.ToString(),
+                envio.Version
             }).ToListAsync(cancellationToken);
 
         if (shipments.Count == 0)
@@ -147,6 +148,7 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
             DestinatarioNombre: x.DestinatarioNombre,
             Direccion: x.Direccion,
             Estado: x.Estado,
+            Version: x.Version,
             Bultos: packagesByShipment[x.Id].ToArray())).ToArray();
     }
 }

@@ -136,7 +136,7 @@ public sealed class RepartidoresHttpTests(PostgresFixture postgres) : IClassFixt
         await using var conn = new NpgsqlConnection(data.ConnectionString);
         await conn.OpenAsync();
         var rol = "reparto_" + Guid.NewGuid().ToString("N");
-        await using (var crear = new NpgsqlCommand($"CREATE ROLE \"{rol}\" NOLOGIN NOSUPERUSER NOBYPASSRLS; GRANT SELECT,INSERT,UPDATE,DELETE ON \"Repartidores\" TO \"{rol}\"", conn))
+        await using (var crear = new NpgsqlCommand($"CREATE ROLE \"{rol}\" NOLOGIN NOSUPERUSER NOBYPASSRLS; GRANT nexoruta_api TO \"{rol}\"; GRANT SELECT,INSERT,UPDATE,DELETE ON \"Repartidores\" TO \"{rol}\"", conn))
             await crear.ExecuteNonQueryAsync();
         await using var tx = await conn.BeginTransactionAsync();
         await using (var cambiar = new NpgsqlCommand($"SET LOCAL ROLE \"{rol}\"", conn, tx)) await cambiar.ExecuteNonQueryAsync();
@@ -183,7 +183,7 @@ public sealed class RepartidoresHttpTests(PostgresFixture postgres) : IClassFixt
 
     private static async Task Contexto(NpgsqlConnection c, NpgsqlTransaction tx, Guid op)
     {
-        await using var cmd = new NpgsqlCommand("SELECT set_config('nexoruta.operador_id', @operador, true)", c, tx);
+        await using var cmd = new NpgsqlCommand("SELECT set_config('nexoruta.actor_kind', 'operador', true), set_config('nexoruta.org_id', @operador, true)", c, tx);
         cmd.Parameters.AddWithValue("operador", op.ToString());
         await cmd.ExecuteScalarAsync();
     }

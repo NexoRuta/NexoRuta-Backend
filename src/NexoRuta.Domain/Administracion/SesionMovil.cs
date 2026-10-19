@@ -6,24 +6,26 @@ public sealed class SesionMovil
     public Guid UsuarioId { get; private set; }
     public Guid AccesoId { get; private set; }
     public long VersionSesion { get; private set; }
+    public long VersionCredencial { get; private set; }
     public DateTimeOffset CreadaEnUtc { get; private set; }
     public DateTimeOffset ExpiraEnUtc { get; private set; }
     public DateTimeOffset? RevocadaEnUtc { get; private set; }
 
     private SesionMovil() { }
 
-    public SesionMovil(Guid usuarioId, Guid accesoId, long versionSesion,
+    public SesionMovil(Guid usuarioId, Guid accesoId, long versionSesion, long versionCredencial,
         DateTimeOffset ahora, DateTimeOffset expiracion)
     {
         ahora = UtcEnMicrosegundos(ahora);
         expiracion = UtcEnMicrosegundos(expiracion);
-        if (usuarioId == Guid.Empty || accesoId == Guid.Empty || versionSesion < 0)
+        if (usuarioId == Guid.Empty || accesoId == Guid.Empty || versionSesion < 0 || versionCredencial < 0)
             throw new ArgumentException("La sesión requiere una identidad y un acceso válidos.");
         if (expiracion <= ahora) throw new ArgumentException("La sesión debe tener vigencia positiva.");
         Id = Guid.CreateVersion7();
         UsuarioId = usuarioId;
         AccesoId = accesoId;
         VersionSesion = versionSesion;
+        VersionCredencial = versionCredencial;
         CreadaEnUtc = ahora.ToUniversalTime();
         ExpiraEnUtc = expiracion.ToUniversalTime();
     }

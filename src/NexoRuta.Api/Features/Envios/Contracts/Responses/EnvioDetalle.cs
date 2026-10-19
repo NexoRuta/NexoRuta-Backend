@@ -11,6 +11,7 @@ public sealed record EnvioDetalle(
     string DestinatarioNombre,
     string Direccion,
     string Estado,
+    long Version,
     IReadOnlyList<BultoDetalle> Bultos)
 {
     public static EnvioDetalle Desde(Application.Envios.Results.EnvioDetalle envio) => new(
@@ -24,6 +25,7 @@ public sealed record EnvioDetalle(
         DestinatarioNombre: envio.DestinatarioNombre,
         Direccion: envio.Direccion,
         Estado: envio.Estado,
+        Version: envio.Version,
         Bultos: envio.Bultos.Select(bulto => new BultoDetalle(
             Codigo: bulto.Codigo,
             PesoGramos: bulto.PesoGramos,

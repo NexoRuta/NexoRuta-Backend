@@ -23,7 +23,7 @@ public sealed class EfRepartidoresRepository(NexoRutaDbContext db) : IRepartidor
 
     public async Task<IReadOnlyList<RepartidorResumen>> ListarAsync(Guid operadorId, CancellationToken ct)
     {
-        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        await using var tx = await db.BeginOrJoinAsync(ct);
         await ContextoAsync(operadorId, ct);
         var datos = await Consulta(operadorId).ToArrayAsync(ct);
         await tx.CommitAsync(ct);
@@ -32,7 +32,7 @@ public sealed class EfRepartidoresRepository(NexoRutaDbContext db) : IRepartidor
 
     public async Task<RepartidorResumen?> ObtenerActivoAsync(Guid operadorId, Guid accesoId, CancellationToken ct)
     {
-        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        await using var tx = await db.BeginOrJoinAsync(ct);
         await ContextoAsync(operadorId, ct);
         var datos = await Consulta(operadorId, accesoId, soloActivos: true).SingleOrDefaultAsync(ct);
         await tx.CommitAsync(ct);
@@ -42,12 +42,12 @@ public sealed class EfRepartidoresRepository(NexoRutaDbContext db) : IRepartidor
     public async Task<RepartidorResumen?> GuardarAsync(Guid operadorId, Guid accesoId, string nombre,
         bool activo, long? version, CancellationToken ct)
     {
-        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        await using var tx = await db.BeginOrJoinAsync(ct);
         await ContextoAsync(operadorId, ct);
-        // Bloquea también la creación: dos altas del mismo acceso no compiten contra una fila inexistente.
-        var acceso = await db.AccesosUsuario.FromSqlInterpolated(
-            $"SELECT * FROM \"AccesosUsuario\" WHERE \"Id\" = {accesoId} AND \"OperadorId\" = {operadorId} FOR UPDATE")
-            .SingleOrDefaultAsync(ct);
+        // Serializa también el alta; el propietario no admite UPDATE ni bloqueo de su acceso por RLS.
+        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT 1 FROM \"Operadores\" WHERE \"Id\" = {operadorId} FOR UPDATE", ct);
+        var acceso = await db.AccesosUsuario.AsNoTracking()
+            .SingleOrDefaultAsync(a => a.Id == accesoId && a.OperadorId == operadorId, ct);
         if (acceso is null || !acceso.Activo || acceso.RolId is null) return null;
         var perfil = await db.Repartidores.SingleOrDefaultAsync(x => x.AccesoId == accesoId && x.OperadorId == operadorId, ct);
         if (perfil is null)

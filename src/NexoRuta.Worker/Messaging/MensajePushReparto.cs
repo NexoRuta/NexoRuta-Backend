@@ -1,10 +1,10 @@
 using System.Globalization;
 using FirebaseAdmin.Messaging;
-using NexoRuta.Domain.Notificaciones;
+using NexoRuta.Infrastructure.Notificaciones;
 namespace NexoRuta.Worker.Messaging;
 public static class MensajePushReparto
 {
-    public static MulticastMessage Crear(AvisoReparto aviso, IReadOnlyList<string> fids, DateTimeOffset ahora) => new()
+    public static MulticastMessage Crear(AvisoPush aviso, IReadOnlyList<string> fids, DateTimeOffset ahora) => new()
     {
         Fids = fids,
         Notification = new() { Title = "Cambio en tu hoja de ruta", Body = "Hay una entrega que debés revisar. Abrí NexoRuta." },

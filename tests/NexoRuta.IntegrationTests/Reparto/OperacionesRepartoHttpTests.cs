@@ -10,7 +10,7 @@ using Npgsql;
 using static NexoRuta.IntegrationTests.Fixtures.RepartoHttpData;
 namespace NexoRuta.IntegrationTests.Reparto;
 
-public sealed class OperacionesRepartoHttpTests(PostgresFixture postgres) : IClassFixture<PostgresFixture>
+public sealed partial class OperacionesRepartoHttpTests(PostgresFixture postgres) : IClassFixture<PostgresFixture>
 {
     [Fact]
     public async Task ReintentoDevuelveLaMismaConfirmacionYSoloPersisteUnHecho()
@@ -90,12 +90,21 @@ public sealed class OperacionesRepartoHttpTests(PostgresFixture postgres) : ICla
         await using var final = data.CreateDbContext(); Assert.Equal(EstadoCustodiaBulto.Deposito, (await final.Bultos.SingleAsync(x => x.EnvioId == parada.EnvioId)).Custodia);
     }
 
-    [Fact]
-    public async Task EvidenciaCifradaEsInmutableYCompletaLaPruebaAutomaticamente()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task EvidenciaCifradaEsInmutableYCompletaLaPruebaAutomaticamente(bool cancelacionConcurrente)
     {
         var data = await postgres.CreateDatabaseAsync();
         using var factory = new IntegrationApiFactory(data, settings: new Dictionary<string, string?> { ["Reparto:EvidenciasEncryptionKey"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)) });
         using var client = factory.CreateHttpClient(); var hoja = await Cargada(data, client); var parada = hoja.Paradas[0];
+        if (cancelacionConcurrente)
+        {
+            await using var cancelacion = data.CreateDbContext();
+            var envio = await cancelacion.Envios.SingleAsync(e => e.Id == parada.EnvioId);
+            envio.CambiarEstado(EstadoEnvio.Cancelado, envio.Version);
+            await cancelacion.SaveChangesAsync();
+        }
         var entrega = await Aplicar(client, hoja, Operacion(Guid.NewGuid(), 4, "EntregaFisica", parada.EnvioId, parada.EnvioVersion));
         var fotoId = Guid.NewGuid(); var bytes = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==");
         var uri = $"/api/mobile/jornadas/{hoja.JornadaId}/evidencias/{fotoId}";
@@ -136,11 +145,11 @@ public sealed class OperacionesRepartoHttpTests(PostgresFixture postgres) : ICla
         Assert.Equal("Aplicada", (await Aplicar(client, hoja, Operacion(Guid.NewGuid(), 1, "InicioJornada"))).Resultado);
         Assert.Equal("Aplicada", (await Aplicar(client, hoja, Operacion(Guid.NewGuid(), 2, "CargarBulto", parada.EnvioId, parada.EnvioVersion, new { BultoId = parada.Bultos[0].Id }))).Resultado);
         Assert.Equal("Aplicada", (await Aplicar(client, hoja, Operacion(Guid.NewGuid(), 3, "ConfirmarCarga"))).Resultado);
-        return Assert.Single((await client.GetFromJsonAsync<HojaRutaResponse[]>("/api/mobile/rutas?fecha=2026-10-17"))!);
+        return Assert.Single((await client.GetFromJsonAsync<HojaRutaResponse[]>($"/api/mobile/rutas?fecha={FechaOperacion:yyyy-MM-dd}"))!);
     }
     private static object Operacion(Guid id, long secuencia, string tipo, Guid? envio = null, long? version = null, object? datos = null) =>
         new { Id = id, Secuencia = secuencia, Tipo = tipo, EnvioId = envio, VersionEnvio = version,
-            OcurridaEn = new DateTimeOffset(2026, 10, 17, 15, 0, 0, TimeSpan.Zero), Datos = datos ?? new { } };
+            OcurridaEn = LlegadaEstimada, Datos = datos ?? new { } };
     private static string Ruta(HojaRutaResponse hoja) => $"/api/mobile/jornadas/{hoja.JornadaId}/operaciones";
     private static async Task<ResultadoOperacionResponse> Aplicar(HttpClient client, HojaRutaResponse hoja, object comando)
     {

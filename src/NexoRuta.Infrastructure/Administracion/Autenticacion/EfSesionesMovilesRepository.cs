@@ -29,6 +29,8 @@ public sealed class EfSesionesMovilesRepository(NexoRutaDbContext db) : ISesione
         var sesion = await db.SesionesMoviles.FromSqlInterpolated(
             $"SELECT * FROM \"SesionesMoviles\" WHERE \"Id\" = {id.Value} FOR UPDATE").SingleAsync(ct);
         var token = await db.TokensRenovacionMoviles.SingleAsync(x => x.Hash == tokenHash, ct);
+        if (!await db.Usuarios.AnyAsync(u => u.Id == sesion.UsuarioId && u.VersionCredencial == sesion.VersionCredencial, ct))
+            sesion.Revocar(ahora);
         if (!sesion.AutorizarRenovacion(token.ConsumidoEnUtc.HasValue, ahora))
         {
             await db.SaveChangesAsync(ct);
@@ -53,5 +55,6 @@ public sealed class EfSesionesMovilesRepository(NexoRutaDbContext db) : ISesione
     public Task<bool> EstaVigenteAsync(Guid sesionId, Guid usuarioId, Guid accesoId, long version,
         DateTimeOffset ahora, CancellationToken ct)
         => db.SesionesMoviles.AsNoTracking().AnyAsync(x => x.Id == sesionId && x.UsuarioId == usuarioId
-            && x.AccesoId == accesoId && x.VersionSesion == version && x.RevocadaEnUtc == null && x.ExpiraEnUtc > ahora, ct);
+            && x.AccesoId == accesoId && x.VersionSesion == version && x.RevocadaEnUtc == null && x.ExpiraEnUtc > ahora
+            && db.Usuarios.Any(u => u.Id == x.UsuarioId && u.VersionCredencial == x.VersionCredencial), ct);
 }

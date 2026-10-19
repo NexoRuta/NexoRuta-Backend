@@ -12,6 +12,7 @@ public sealed class SesionMovilConfiguration : IEntityTypeConfiguration<SesionMo
         {
             t.HasCheckConstraint("CK_SesionesMoviles_Vigencia", "\"ExpiraEnUtc\" > \"CreadaEnUtc\"");
             t.HasCheckConstraint("CK_SesionesMoviles_Version", "\"VersionSesion\" >= 0");
+            t.HasCheckConstraint("CK_SesionesMoviles_VersionCredencial", "\"VersionCredencial\" >= 0");
         });
         entity.HasKey(x => x.Id);
         entity.Property(x => x.Id).ValueGeneratedNever();

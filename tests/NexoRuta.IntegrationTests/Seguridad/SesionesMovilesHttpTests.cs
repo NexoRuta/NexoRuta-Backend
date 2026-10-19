@@ -53,7 +53,33 @@ public sealed class SesionesMovilesHttpTests(PostgresFixture postgres) : IClassF
     }
 
     [Fact]
-    public async Task RotacionFuncionaConJwtExpiradoYReutilizacionRevocaSoloSuFamilia()
+    public async Task CambioDeCredencialRevocaRefreshYUnNuevoIngresoPuedeRenovar()
+    {
+        var database = await postgres.CreateDatabaseAsync();
+        using var factory = database.CreateApiFactory();
+        using var client = factory.CreateHttpClient();
+        await using var db = database.CreateDbContext();
+        var (user, _) = await Operador(db);
+        var anterior = await Login(client, user.Email);
+        user.RevocarSesionesPorCambioDePassword();
+        await db.SaveChangesAsync();
+
+        Assert.Equal(HttpStatusCode.Unauthorized, await EstadoActual(client, anterior.AccessToken));
+        using var invalidada = await client.PostAsJsonAsync(Ruta + "refresh", new { anterior.RefreshToken });
+        Assert.Equal(HttpStatusCode.Unauthorized, invalidada.StatusCode);
+
+        var nuevoIngreso = await Login(client, user.Email);
+        Assert.Equal(HttpStatusCode.OK, await EstadoActual(client, nuevoIngreso.AccessToken));
+        using var renovacion = await client.PostAsJsonAsync(Ruta + "refresh", new { nuevoIngreso.RefreshToken });
+        var renovada = await Leer(renovacion);
+        Assert.Equal(HttpStatusCode.OK, await EstadoActual(client, renovada.AccessToken));
+        Assert.Equal(nuevoIngreso.RefreshExpiresAtUtc, renovada.RefreshExpiresAtUtc);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RotacionFuncionaConJwtPrevioYReutilizacionRevocaSoloSuFamilia(bool jwtExpirado)
     {
         var database = await postgres.CreateDatabaseAsync();
         using var factory = database.CreateApiFactory();
@@ -63,21 +89,24 @@ public sealed class SesionesMovilesHttpTests(PostgresFixture postgres) : IClassF
         var primera = await Login(client, user.Email);
         var independiente = await Login(client, user.Email);
         var expired = new JwtSecurityTokenHandler().ReadJwtToken(primera.AccessToken);
-        var jwtExpirado = new JwtSecurityTokenHandler().WriteToken(new JwtSecurityToken(
+        var tokenExpirado = new JwtSecurityTokenHandler().WriteToken(new JwtSecurityToken(
             AuthenticationTestData.Issuer, AuthenticationTestData.Audience, expired.Claims,
             DateTime.UtcNow.AddHours(-1), DateTime.UtcNow.AddMinutes(-5),
             new SigningCredentials(new SymmetricSecurityKey(Convert.FromBase64String(AuthenticationTestData.SigningKey)), SecurityAlgorithms.HmacSha256)));
-        Assert.Equal(HttpStatusCode.Unauthorized, await EstadoActual(client, jwtExpirado));
+        Assert.Equal(HttpStatusCode.Unauthorized, await EstadoActual(client, tokenExpirado));
         using var request = new HttpRequestMessage(HttpMethod.Post, Ruta + "refresh")
         { Content = JsonContent.Create(new { primera.RefreshToken }) };
-        request.Headers.Authorization = new("Bearer", jwtExpirado);
+        request.Headers.Authorization = new("Bearer", jwtExpirado ? tokenExpirado : primera.AccessToken);
         using var response = await client.SendAsync(request);
         var nueva = await Leer(response);
         Assert.NotEqual(primera.RefreshToken, nueva.RefreshToken);
         Assert.Equal(primera.SesionId, nueva.SesionId);
         Assert.Equal(primera.RefreshExpiresAtUtc, nueva.RefreshExpiresAtUtc);
         Assert.Equal(HttpStatusCode.OK, await EstadoActual(client, nueva.AccessToken));
-        using var replay = await client.PostAsJsonAsync(Ruta + "refresh", new { primera.RefreshToken });
+        using var replayRequest = new HttpRequestMessage(HttpMethod.Post, Ruta + "refresh")
+        { Content = JsonContent.Create(new { primera.RefreshToken }) };
+        replayRequest.Headers.Authorization = new("Bearer", nueva.AccessToken);
+        using var replay = await client.SendAsync(replayRequest);
         Assert.Equal(HttpStatusCode.Unauthorized, replay.StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, await EstadoActual(client, nueva.AccessToken));
         using var renovacionRevocada = await client.PostAsJsonAsync(Ruta + "refresh", new { nueva.RefreshToken });
@@ -228,7 +257,7 @@ public sealed class SesionesMovilesHttpTests(PostgresFixture postgres) : IClassF
         var (user, _) = await Operador(db);
         var ajeno = await db.AccesosUsuario.SingleAsync(x => x.ComercioId != null);
         var ahora = DateTimeOffset.UtcNow;
-        db.SesionesMoviles.Add(new SesionMovil(user.Id, ajeno.Id, ajeno.VersionSesion, ahora, ahora.AddDays(30)));
+        db.SesionesMoviles.Add(new SesionMovil(user.Id, ajeno.Id, ajeno.VersionSesion, user.VersionCredencial, ahora, ahora.AddDays(30)));
         var error = await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
         var postgresError = Assert.IsType<Npgsql.PostgresException>(error.InnerException);
         Assert.Equal("23503", postgresError.SqlState);
@@ -248,6 +277,8 @@ public sealed class SesionesMovilesHttpTests(PostgresFixture postgres) : IClassF
         var paths = root.GetProperty("paths");
         foreach (var endpoint in new[] { "login", "refresh", "logout" })
             Assert.True(paths.TryGetProperty(Ruta + endpoint, out _));
+        var baja = paths.GetProperty("/api/mobile/instalaciones/{id}").GetProperty("delete").GetProperty("responses");
+        foreach (var status in new[] { "204", "403", "404" }) Assert.True(baja.TryGetProperty(status, out _));
         var schema = paths.GetProperty(Ruta + "refresh").GetProperty("post").GetProperty("responses")
             .GetProperty("200").GetProperty("content").GetProperty("application/json").GetProperty("schema");
         if (schema.TryGetProperty("$ref", out var referencia))

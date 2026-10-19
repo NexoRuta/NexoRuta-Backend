@@ -66,7 +66,8 @@ public sealed partial class EfOperacionesRepartoRepository
         if (op.Tipo == "FinJornada")
         {
             Exigir(!bultos.Any(x => x.RutaCustodiaId == hoja.Id && x.Custodia == EstadoCustodiaBulto.Repartidor), "Declará primero los bultos que devolvés al depósito.");
-            foreach (var envio in envios.Where(x => x.Estado == EstadoEnvio.EntregaPendienteValidacion))
+            foreach (var envio in envios.Where(x => x.Estado == EstadoEnvio.EntregaPendienteValidacion
+                && bultos.Any(b => b.EnvioId == x.Id && b.RutaCustodiaId == hoja.Id && b.Custodia == EstadoCustodiaBulto.Destinatario)))
                 envio.CambiarEstado(EstadoEnvio.EntregaSinValidacion, envio.Version);
             foreach (var parada in hoja.Paradas.Where(x => x.Activa))
             {
@@ -79,8 +80,24 @@ public sealed partial class EfOperacionesRepartoRepository
         var actual = envios.SingleOrDefault(x => x.Id == op.EnvioId);
         var paradaActual = hoja.Paradas.SingleOrDefault(x => x.EnvioId == op.EnvioId);
         Exigir(actual is not null && paradaActual is not null, "El envío no pertenece a esta hoja.");
-        Exigir(op.VersionEnvio == actual!.Version, "El envío cambió en el servidor; se conserva el hecho para resolución del despachador.");
-        var propios = bultos.Where(x => x.EnvioId == actual.Id).ToArray();
+        var propios = bultos.Where(x => x.EnvioId == actual!.Id).ToArray();
+        if (op.Tipo == "EntregaFisica" && op.VersionEnvio is >= 0 && op.VersionEnvio < actual!.Version
+            && actual.Estado is (EstadoEnvio.Cancelado or EstadoEnvio.Reprogramado or EstadoEnvio.AsignadoRuta))
+        {
+            Exigir(hoja.SalidaEnUtc is not null && propios.Length > 0 && propios.All(x => x.Custodia == EstadoCustodiaBulto.Repartidor
+                && x.AccesoCustodioId == hoja.RepartidorAccesoId && x.RutaCustodiaId == hoja.Id),
+                "La entrega física no coincide con los bultos cargados y su custodia; se conserva como conflicto.");
+            var otras = await db.HojasRuta.Include(h => h.Paradas).Where(h => h.OperadorId == hoja.OperadorId && h.Id != hoja.Id
+                && h.Paradas.Any(p => p.EnvioId == actual.Id && p.Activa)).ToArrayAsync(ct);
+            Exigir(otras.All(h => h.Estado == EstadoHojaRuta.Planificada), "La asignación posterior ya fue despachada; se conserva el hecho como conflicto.");
+            var prueba = await AplicarPrueba(hoja, actual.Id, datos, ct);
+            actual.ConciliarEntregaFisica(op.OcurridaEn, Completa(prueba, politica), actual.Version);
+            foreach (var bulto in propios) bulto.Entregar(hoja.RepartidorAccesoId, hoja.Id);
+            foreach (var otra in otras) otra.SuspenderParada(actual.Id, "Entrega física registrada en la ruta original; no corresponde otra entrega.");
+            paradaActual!.Completar();
+            return "Entrega física conciliada automáticamente; una cancelación posterior requiere devolución. La prueba conserva los requisitos de esta jornada.";
+        }
+        Exigir(op.VersionEnvio == actual!.Version, "El envío cambió en el servidor; se conservan el hecho y su evidencia como conflicto de sincronización.");
         if (op.Tipo == "CargarBulto")
         {
             Exigir(hoja.SalidaEnUtc is null && paradaActual!.Activa && actual.Estado == EstadoEnvio.AsignadoRuta, "La carga solo se realiza en depósito antes de salir.");
@@ -126,7 +143,7 @@ public sealed partial class EfOperacionesRepartoRepository
         Exigir(datos.FotoId is null || await Archivo(hoja, envioId, datos.FotoId, "Foto", ct), "La foto no está subida o no pertenece a esta entrega.");
         Exigir(datos.FirmaId is null || await Archivo(hoja, envioId, datos.FirmaId, "Firma", ct), "La firma no está subida o no pertenece a esta entrega.");
         var prueba = await db.PruebasEntrega.SingleOrDefaultAsync(x => x.OperadorId == hoja.OperadorId && x.EnvioId == envioId, ct);
-        Exigir(prueba is null || prueba.RutaId == hoja.Id, "La prueba pertenece a otra ruta; requiere resolución del despachador.");
+        Exigir(prueba is null || prueba.RutaId == hoja.Id, "La prueba pertenece a otra ruta; se conserva la evidencia como conflicto de sincronización.");
         if (prueba is null) { prueba = new() { OperadorId = hoja.OperadorId, EnvioId = envioId, RutaId = hoja.Id }; db.PruebasEntrega.Add(prueba); }
         if (!string.IsNullOrWhiteSpace(datos.Nombre)) prueba.Nombre = datos.Nombre.Trim();
         if (!string.IsNullOrWhiteSpace(datos.Documento)) prueba.Documento = datos.Documento.Trim();

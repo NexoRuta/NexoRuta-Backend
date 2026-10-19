@@ -52,12 +52,26 @@ public sealed class Envio
 
     public void DeclararEntregaFisica(DateTimeOffset instante, bool pruebaCompleta, long versionEsperada)
     {
+        if (Estado != EstadoEnvio.EnTransito)
+            throw new InvalidOperationException("La entrega física requiere el envío en tránsito y su versión actual.");
+        RegistrarEntregaFisica(instante, pruebaCompleta, versionEsperada);
+    }
+
+    public void ConciliarEntregaFisica(DateTimeOffset instante, bool pruebaCompleta, long versionEsperada)
+    {
+        if (Estado is not (EstadoEnvio.Cancelado or EstadoEnvio.Reprogramado or EstadoEnvio.AsignadoRuta))
+            throw new InvalidOperationException("La conciliación requiere una cancelación o reprogramación concurrente con la entrega física.");
+        RegistrarEntregaFisica(instante, pruebaCompleta, versionEsperada);
+    }
+
+    private void RegistrarEntregaFisica(DateTimeOffset instante, bool pruebaCompleta, long versionEsperada)
+    {
         if (instante == default || EntregaFisicaEnUtc is not null)
             throw new InvalidOperationException("La declaración física requiere una fecha y no puede reemplazar otra entrega.");
-        if (Version != versionEsperada || Estado != EstadoEnvio.EnTransito)
-            throw new InvalidOperationException("La entrega física requiere el envío en tránsito y su versión actual.");
+        if (Version != versionEsperada) throw new InvalidOperationException("El envío cambió desde la última consulta.");
         EntregaFisicaEnUtc = instante.ToUniversalTime();
-        CambiarEstado(pruebaCompleta ? EstadoEnvio.Entregado : EstadoEnvio.EntregaPendienteValidacion, versionEsperada);
+        Estado = pruebaCompleta ? EstadoEnvio.Entregado : EstadoEnvio.EntregaPendienteValidacion;
+        Version = checked(Version + 1);
     }
 
     public void RegistrarProgresoPrueba(long versionEsperada)

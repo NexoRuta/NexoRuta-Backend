@@ -14,6 +14,12 @@ public sealed class NotificacionesRepartoUseCase(IUsuarioActual usuario, IRepart
     }
     public async Task RegistrarAsync(Guid sesion, Guid instalacion, string plataforma, string fid, bool permitida, CancellationToken ct)
     { var actor = await Actor(ct); await repositorio.RegistrarInstalacionAsync(actor.Op, actor.Acceso, sesion, instalacion, plataforma, fid, permitida, ct); }
+    public async Task<bool> DesactivarAsync(Guid instalacion, CancellationToken ct)
+    {
+        var actor = await usuario.ObtenerAsync(ct);
+        var op = actor.OperadorId ?? throw new RepartoNoPermitidoException();
+        return await repositorio.DesactivarInstalacionAsync(op, actor.AccesoId, instalacion, ct);
+    }
     public async Task<IReadOnlyList<AvisoRepartoDatos>> ListarAsync(CancellationToken ct)
     { var actor = await Actor(ct); return await repositorio.ListarAsync(actor.Op, actor.Acceso, ct); }
     public async Task<AvisoRepartoDatos?> ObtenerAsync(Guid id, string? registro, CancellationToken ct)

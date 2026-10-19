@@ -10,7 +10,7 @@ namespace NexoRuta.Api.Core.Security;
 
 public sealed class JwtValidacionEventos(
     IAccesosUsuarioRepository accesos, IPlataformaRepository plataforma, IRegistroRepository identidades,
-    UserManager<Usuario> users) : JwtBearerEvents
+    UserManager<Usuario> users, ISesionesMovilesRepository sesiones, TimeProvider reloj) : JwtBearerEvents
 {
     public override async Task TokenValidated(
         TokenValidatedContext context)
@@ -28,12 +28,11 @@ public sealed class JwtValidacionEventos(
         }
 
         var credentialVersionClaim = context.Principal?.FindFirst(JwtSesionClaims.VersionCredencial)?.Value;
-        var credentialVersion = 0L; // Existing JWTs predate the global credential-version claim.
-        if (credentialVersionClaim is not null && !long.TryParse(
+        if (!long.TryParse(
                 credentialVersionClaim,
                 NumberStyles.None,
                 CultureInfo.InvariantCulture,
-                out credentialVersion))
+                out var credentialVersion))
         {
             context.Fail("Credential session version is invalid.");
             return;

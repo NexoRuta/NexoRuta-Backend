@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
+using NexoRuta.Infrastructure.Persistence;
 using NexoRuta.Application.Reparto.Exceptions;
 namespace NexoRuta.Infrastructure.Reparto;
 
@@ -15,7 +16,7 @@ public sealed partial class EfOperacionesRepartoRepository
                 || contenido.AsSpan().StartsWith(new byte[] { 255, 216, 255 })))
             throw new ArgumentException("La evidencia debe ser una foto o firma PNG/JPEG de hasta 2 MiB.");
         var hash = Convert.ToHexString(SHA256.HashData(contenido));
-        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        await using var tx = await db.BeginOrJoinAsync(ct);
         await ContextoYBloqueo(operadorId, ct);
         var hoja = await Hoja(operadorId, accesoId, jornadaId, ct);
         if (hoja is null || !hoja.Paradas.Any(x => x.EnvioId == envioId)) return false;

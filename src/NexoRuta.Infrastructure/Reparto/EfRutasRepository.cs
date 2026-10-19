@@ -8,11 +8,11 @@ using NexoRuta.Infrastructure.Persistence;
 
 namespace NexoRuta.Infrastructure.Reparto;
 
-public sealed class EfRutasRepository(NexoRutaDbContext db, TimeProvider reloj) : IRutasRepository
+public sealed partial class EfRutasRepository(NexoRutaDbContext db, TimeProvider reloj) : IRutasRepository
 {
     public async Task<IReadOnlyList<HojaRutaDatos>> ListarAsync(Guid operadorId, Guid? repartidorId, DateOnly fecha, CancellationToken ct)
     {
-        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        await using var tx = await db.BeginOrJoinAsync(ct);
         await Contexto(operadorId, ct);
         var consulta = db.HojasRuta.AsNoTracking().Include(x => x.Paradas).Where(x => x.OperadorId == operadorId && x.Fecha == fecha);
         if (repartidorId is { } rep) consulta = consulta.Where(x => x.RepartidorAccesoId == rep && x.Estado != EstadoHojaRuta.Planificada);
@@ -25,9 +25,9 @@ public sealed class EfRutasRepository(NexoRutaDbContext db, TimeProvider reloj) 
 
     public async Task<HojaRutaDatos> PlanificarAsync(Guid operadorId, PlanificarRutaDatos datos, CancellationToken ct)
     {
-        if (datos.Paradas is null || datos.Paradas.Count == 0 || datos.Paradas.Select(x => x.EnvioId).Distinct().Count() != datos.Paradas.Count)
-            throw new ArgumentException("Seleccioná envíos distintos y al menos una parada.");
-        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        if (datos.Paradas is null || datos.Paradas.Count > 500 || datos.Paradas.Select(x => x.EnvioId).Distinct().Count() != datos.Paradas.Count)
+            throw new ArgumentException("Seleccioná hasta 500 envíos distintos.");
+        await using var tx = await db.BeginOrJoinAsync(ct);
         await Contexto(operadorId, ct); await Bloquear(operadorId, ct);
         var politica = await db.ConfiguracionesReparto.Where(x => x.OperadorId == operadorId).OrderByDescending(x => x.Version).FirstOrDefaultAsync(ct)
             ?? throw new ConflictoRepartoException("Configurá las reglas operativas antes de planificar.");
@@ -70,7 +70,7 @@ public sealed class EfRutasRepository(NexoRutaDbContext db, TimeProvider reloj) 
 
     public async Task<HojaRutaDatos?> DespacharAsync(Guid operadorId, Guid rutaId, long version, CancellationToken ct)
     {
-        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        await using var tx = await db.BeginOrJoinAsync(ct);
         await Contexto(operadorId, ct); await Bloquear(operadorId, ct);
         var hoja = await db.HojasRuta.Include(x => x.Paradas).SingleOrDefaultAsync(x => x.OperadorId == operadorId && x.Id == rutaId, ct);
         if (hoja is null) return null;
@@ -79,7 +79,7 @@ public sealed class EfRutasRepository(NexoRutaDbContext db, TimeProvider reloj) 
             || !await db.Vehiculos.AnyAsync(x => x.OperadorId == operadorId && x.Id == hoja.VehiculoId && x.Activo, ct))
             throw new ConflictoRepartoException("Repartidor o vehículo deshabilitados.");
         var ids = hoja.Paradas.Where(x => x.Activa).Select(x => x.EnvioId).ToArray();
-        if (ids.Length != hoja.Paradas.Count || await db.Bultos.AnyAsync(x => x.OperadorId == operadorId && ids.Contains(x.EnvioId) && x.Custodia != EstadoCustodiaBulto.Deposito, ct)
+        if (ids.Length == 0 || await db.Bultos.AnyAsync(x => x.OperadorId == operadorId && ids.Contains(x.EnvioId) && x.Custodia != EstadoCustodiaBulto.Deposito, ct)
             || await db.Envios.CountAsync(x => x.OperadorId == operadorId && ids.Contains(x.Id) && x.Estado == EstadoEnvio.AsignadoRuta, ct) != ids.Length)
             throw new ConflictoRepartoException("Todos los envíos deben seguir asignados y sus bultos recibidos físicamente en depósito.");
         hoja.Despachar(version); await db.SaveChangesAsync(ct);
@@ -88,7 +88,7 @@ public sealed class EfRutasRepository(NexoRutaDbContext db, TimeProvider reloj) 
 
     public async Task<bool> RecibirAsync(Guid operadorId, Guid envioId, long version, CancellationToken ct)
     {
-        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        await using var tx = await db.BeginOrJoinAsync(ct);
         await Contexto(operadorId, ct); await Bloquear(operadorId, ct);
         var envio = await db.Envios.SingleOrDefaultAsync(x => x.OperadorId == operadorId && x.Id == envioId, ct);
         if (envio is null) return false;
@@ -106,7 +106,7 @@ public sealed class EfRutasRepository(NexoRutaDbContext db, TimeProvider reloj) 
 
     public async Task<bool> ConfirmarDestinoAsync(Guid comercioId, Guid usuarioId, Guid envioId, long version, double latitud, double longitud, CancellationToken ct)
     {
-        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        await using var tx = await db.BeginOrJoinAsync(ct);
         var operadorId = await db.Envios.Where(x => x.Id == envioId && x.ComercioId == comercioId).Select(x => (Guid?)x.OperadorId).SingleOrDefaultAsync(ct);
         if (operadorId is null) return false;
         await Contexto(operadorId.Value, ct); await Bloquear(operadorId.Value, ct);

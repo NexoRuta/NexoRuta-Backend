@@ -57,8 +57,6 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                 table: "Repartidores",
                 columns: new[] { "OperadorId", "Activo" });
 
-            migrationBuilder.InsertData("Permisos", new[] { "Id", "Codigo", "Nombre" },
-                new object[] { new Guid("019e0000-0000-7000-8000-000000000101"), "reparto.ejecutar", "Ejecutar la hoja de ruta propia" });
             migrationBuilder.Sql("""
                 ALTER TABLE "Repartidores" ENABLE ROW LEVEL SECURITY;
                 ALTER TABLE "Repartidores" FORCE ROW LEVEL SECURITY;
@@ -71,10 +69,6 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.Sql("""
-                DELETE FROM "RolesPermisos" WHERE "PermisoId" = '019e0000-0000-7000-8000-000000000101';
-                DELETE FROM "Permisos" WHERE "Id" = '019e0000-0000-7000-8000-000000000101';
-                """);
             migrationBuilder.DropTable(
                 name: "Repartidores");
 
