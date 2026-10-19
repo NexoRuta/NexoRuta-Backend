@@ -8,11 +8,25 @@ using NexoRuta.Domain.ZonasCobertura;
 using NexoRuta.Domain.Tarifas;
 using NexoRuta.Infrastructure.Seguimiento.Persistence;
 using NexoRuta.Infrastructure.Outbox;
+using NexoRuta.Infrastructure.Administracion.Autenticacion;
 
 namespace NexoRuta.Infrastructure.Persistence;
 
 public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> options) : IdentityUserContext<Usuario, Guid>(options)
 {
+    public DbSet<NexoRuta.Domain.Reparto.Repartidor> Repartidores => Set<NexoRuta.Domain.Reparto.Repartidor>();
+    public DbSet<NexoRuta.Domain.Reparto.ConfiguracionReparto> ConfiguracionesReparto => Set<NexoRuta.Domain.Reparto.ConfiguracionReparto>();
+    public DbSet<NexoRuta.Domain.Reparto.Vehiculo> Vehiculos => Set<NexoRuta.Domain.Reparto.Vehiculo>();
+    public DbSet<NexoRuta.Domain.Reparto.HojaRuta> HojasRuta => Set<NexoRuta.Domain.Reparto.HojaRuta>();
+    public DbSet<NexoRuta.Domain.Reparto.ParadaRuta> ParadasRuta => Set<NexoRuta.Domain.Reparto.ParadaRuta>();
+    public DbSet<NexoRuta.Infrastructure.Reparto.OperacionJornada> OperacionesJornada => Set<NexoRuta.Infrastructure.Reparto.OperacionJornada>();
+    public DbSet<NexoRuta.Infrastructure.Reparto.EvidenciaReparto> EvidenciasReparto => Set<NexoRuta.Infrastructure.Reparto.EvidenciaReparto>();
+    public DbSet<NexoRuta.Infrastructure.Reparto.PruebaEntrega> PruebasEntrega => Set<NexoRuta.Infrastructure.Reparto.PruebaEntrega>();
+    public DbSet<NexoRuta.Domain.Notificaciones.AvisoReparto> AvisosReparto => Set<NexoRuta.Domain.Notificaciones.AvisoReparto>();
+    public DbSet<NexoRuta.Infrastructure.Notificaciones.InstalacionMovil> InstalacionesMoviles => Set<NexoRuta.Infrastructure.Notificaciones.InstalacionMovil>();
+    public DbSet<NexoRuta.Infrastructure.Notificaciones.EntregaPush> EntregasPush => Set<NexoRuta.Infrastructure.Notificaciones.EntregaPush>();
+    public DbSet<SesionMovil> SesionesMoviles => Set<SesionMovil>();
+    public DbSet<TokenRenovacionMovil> TokensRenovacionMoviles => Set<TokenRenovacionMovil>();
     public DbSet<AccesoPlataforma> AccesosPlataforma => Set<AccesoPlataforma>();
     public DbSet<RolPlataforma> RolesPlataforma => Set<RolPlataforma>();
     public DbSet<RolPlataformaPermiso> RolesPlataformaPermisos => Set<RolPlataformaPermiso>();
@@ -27,8 +41,10 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
     public DbSet<Destinatario> Destinatarios => Set<Destinatario>();
     public DbSet<Direccion> Direcciones => Set<Direccion>();
     public DbSet<Envio> Envios => Set<Envio>();
+    public DbSet<NexoRuta.Infrastructure.Envios.CancelacionEnvio> CancelacionesEnvio => Set<NexoRuta.Infrastructure.Envios.CancelacionEnvio>();
     public DbSet<Bulto> Bultos => Set<Bulto>();
     public DbSet<EnlaceSeguimiento> EnlacesSeguimiento => Set<EnlaceSeguimiento>();
+    public DbSet<CodigoCancelacionPublica> CodigosCancelacionPublica => Set<CodigoCancelacionPublica>();
 
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
     public DbSet<ProcessedMessage> ProcessedMessages => Set<ProcessedMessage>();
@@ -51,6 +67,21 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+        modelBuilder.ApplyConfiguration(new CodigoCancelacionPublicaConfiguration());
+        modelBuilder.ApplyConfiguration(new NexoRuta.Infrastructure.Envios.CancelacionEnvioConfiguration());
+        modelBuilder.ApplyConfiguration(new Reparto.RepartidorConfiguration());
+        modelBuilder.ApplyConfiguration(new Reparto.ConfiguracionRepartoConfiguration());
+        modelBuilder.ApplyConfiguration(new Reparto.VehiculoConfiguration());
+        modelBuilder.ApplyConfiguration(new Notificaciones.AvisoRepartoConfiguration());
+        modelBuilder.ApplyConfiguration(new Notificaciones.InstalacionMovilConfiguration());
+        modelBuilder.ApplyConfiguration(new Notificaciones.EntregaPushConfiguration());
+        modelBuilder.ApplyConfiguration(new Reparto.HojaRutaConfiguration());
+        modelBuilder.ApplyConfiguration(new Reparto.OperacionJornadaConfiguration());
+        modelBuilder.ApplyConfiguration(new Reparto.EvidenciaRepartoConfiguration());
+        modelBuilder.ApplyConfiguration(new Reparto.PruebaEntregaConfiguration());
+        modelBuilder.ApplyConfiguration(new Reparto.ParadaRutaConfiguration());
+        modelBuilder.ApplyConfiguration(new SesionMovilConfiguration());
+        modelBuilder.ApplyConfiguration(new TokenRenovacionMovilConfiguration());
         modelBuilder.HasAnnotation("NexoRuta:RlsVersion", 1);
         modelBuilder.HasPostgresExtension("postgis");
         modelBuilder.Entity<RolPlataformaPermiso>(entity =>
@@ -247,6 +278,7 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
             entity.HasKey(x => x.Id);
             entity.HasAlternateKey(x => new { x.OperadorId, x.Id });
             entity.Property(x => x.Nombre).HasMaxLength(160).IsRequired();
+            entity.Property(x => x.Email).HasMaxLength(254).IsRequired();
             entity.HasOne<Operador>().WithMany().HasForeignKey(x => x.OperadorId).OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -256,15 +288,22 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
             entity.HasKey(x => x.Id);
             entity.HasAlternateKey(x => new { x.OperadorId, x.Id });
             entity.Property(x => x.Descripcion).HasMaxLength(240).IsRequired();
+            entity.Property(x => x.Version).IsConcurrencyToken();
             entity.HasOne<Operador>().WithMany().HasForeignKey(x => x.OperadorId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<Envio>(entity =>
         {
-            entity.ToTable("Envios");
+            entity.ToTable("Envios", t =>
+            {
+                t.HasCheckConstraint("CK_Envios_Version", "\"Version\" >= 0");
+                t.HasCheckConstraint("CK_Envios_EntregaFisica", "\"Estado\" NOT IN ('Entregado','EntregaPendienteValidacion','EntregaSinValidacion') OR \"EntregaFisicaEnUtc\" IS NOT NULL");
+                t.HasCheckConstraint("CK_Envios_Cancelacion", "\"Estado\" <> 'Cancelado' OR \"EntregaFisicaEnUtc\" IS NULL");
+            });
             entity.HasKey(x => x.Id);
             entity.HasAlternateKey(x => new { x.OperadorId, x.Id });
             entity.Property(x => x.Estado).HasConversion<string>().HasMaxLength(32).IsRequired();
+            entity.Property(x => x.Version).IsConcurrencyToken();
             entity.HasOne<Operador>().WithMany().HasForeignKey(x => x.OperadorId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<Comercio>().WithMany().HasForeignKey(x => x.ComercioId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<Usuario>().WithMany().HasForeignKey(x => x.CreadoPorUsuarioId).OnDelete(DeleteBehavior.Restrict);
@@ -280,6 +319,14 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
 
         modelBuilder.Entity<Bulto>(entity =>
         {
+            entity.Property(x => x.Custodia).HasConversion<string>().HasMaxLength(30);
+            entity.Property(x => x.Version).IsConcurrencyToken();
+            entity.HasOne<NexoRuta.Domain.Reparto.HojaRuta>().WithMany()
+                .HasForeignKey(x => new { x.OperadorId, x.RutaCustodiaId })
+                .HasPrincipalKey(x => new { x.OperadorId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<NexoRuta.Domain.Reparto.Repartidor>().WithMany()
+                .HasForeignKey(x => new { x.AccesoCustodioId, x.OperadorId })
+                .HasPrincipalKey(x => new { x.AccesoId, x.OperadorId }).OnDelete(DeleteBehavior.Restrict);
             entity.ToTable("Bultos");
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Codigo).HasMaxLength(80).IsRequired();
@@ -303,6 +350,8 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
                 table.HasCheckConstraint("CK_OutboxMessages_Contract",
                     "(\"Tipo\" = 'GenerarSeguimiento' AND \"VersionContrato\" = 1 AND \"Destino\" = 'RabbitMq' AND \"Ambito\" = 'Envio' AND \"EstadoEntrega\" IS NULL) OR " +
                     "(\"Tipo\" = 'EnvioCreado' AND \"VersionContrato\" = 1 AND \"Destino\" = 'Kafka' AND \"Ambito\" = 'Envio' AND \"EstadoEntrega\" IS NULL) OR " +
+                    "(\"Tipo\" = 'RepartoModificado' AND \"VersionContrato\" = 1 AND \"Destino\" = 'PushFcm' AND \"Ambito\" = 'Envio' AND \"EstadoEntrega\" IS NULL) OR " +
+                    "(\"Tipo\" = 'CodigoCancelacionEmail' AND \"VersionContrato\" = 1 AND \"Destino\" = 'RabbitMq' AND \"Ambito\" = 'Envio' AND \"EstadoEntrega\" IS NULL) OR " +
                     "(\"Tipo\" = 'PasswordRecoveryEmail' AND \"VersionContrato\" = 1 AND \"Destino\" = 'RabbitMq' AND \"Ambito\" = 'Identidad' AND \"EstadoEntrega\" IN ('Pending', 'Delivered', 'Expired', 'Failed')) OR " +
                     "(\"Tipo\" = 'PasswordRecoveryRequested' AND \"VersionContrato\" = 1 AND \"Destino\" = 'Kafka' AND \"Ambito\" = 'Identidad' AND \"EstadoEntrega\" IS NULL)");
                 table.HasCheckConstraint("CK_OutboxMessages_Priority", "\"Prioridad\" IN ('Baja', 'Normal', 'Alta')");

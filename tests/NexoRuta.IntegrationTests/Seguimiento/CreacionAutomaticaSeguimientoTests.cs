@@ -43,7 +43,7 @@ public sealed class CreacionAutomaticaSeguimientoTests(
             Content = JsonContent.Create(new
             {
                 operadorId,
-                destinatarioNombre = "Destinatario Outbox",
+                destinatarioNombre = "Destinatario Outbox", destinatarioEmail = "destinatario@example.test",
                 direccion = "Dirección de prueba",
                 codigoBulto = "B-OUTBOX-001",
                 pesoGramos = 1250m,
@@ -180,7 +180,7 @@ public sealed class CreacionAutomaticaSeguimientoTests(
             Content = JsonContent.Create(new
             {
                 operadorId,
-                destinatarioNombre = "Destinatario rollback",
+                destinatarioNombre = "Destinatario rollback", destinatarioEmail = "destinatario@example.test",
                 direccion = "Dirección de prueba",
                 codigoBulto = "B-ROLLBACK-001",
                 pesoGramos = 1250m,

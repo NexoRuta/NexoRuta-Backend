@@ -47,7 +47,7 @@ public sealed class OperadoresDisponiblesHttpTests(PostgresFixture postgres) : I
         {
             Content = JsonContent.Create(new
             {
-                OperadorId = suspendedId, DestinatarioNombre = "Ana", Direccion = "Rivera 123", CodigoBulto = "B-001",
+                OperadorId = suspendedId, DestinatarioNombre = "Ana", DestinatarioEmail = "destinatario@example.test", Direccion = "Rivera 123", CodigoBulto = "B-001",
                 PesoGramos = 100m, LargoCentimetros = 10m, AnchoCentimetros = 10m, AltoCentimetros = 10m
             })
         };
@@ -59,11 +59,10 @@ public sealed class OperadoresDisponiblesHttpTests(PostgresFixture postgres) : I
         Assert.Empty(await verify.OutboxMessages.ToListAsync());
     }
 
-    [Theory]
-    [InlineData("api/operadores")]
-    [InlineData("api/comercio/operadores")]
-    public async Task CatalogoGlobal_ConservaAmbasRutasYAutorizaSoloComercios(string route)
+    [Fact]
+    public async Task CatalogoGlobal_UsaUnaSolaRutaYAutorizaSoloComercios()
     {
+        const string route = "api/operadores";
         var database = await postgres.CreateDatabaseAsync();
         await using var db = database.CreateDbContext();
         await AuthenticationTestData.Seeder(db,
@@ -81,6 +80,8 @@ public sealed class OperadoresDisponiblesHttpTests(PostgresFixture postgres) : I
         using var client = api.CreateHttpClient();
         using var anonymous = await client.GetAsync(route);
         Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+        using var eliminada = await client.GetAsync("api/comercio/operadores");
+        Assert.Equal(HttpStatusCode.NotFound, eliminada.StatusCode);
 
         var operatorEmail = (await db.Usuarios.SingleAsync(x => x.Id == operador.UsuarioId)).Email;
         var commerceEmail = (await db.Usuarios.SingleAsync(x => x.Id == comercio.UsuarioId)).Email;

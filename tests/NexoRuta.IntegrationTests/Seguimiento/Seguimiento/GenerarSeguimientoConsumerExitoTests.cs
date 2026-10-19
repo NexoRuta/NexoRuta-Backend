@@ -54,7 +54,7 @@ public sealed class GenerarSeguimientoConsumerExitoTests(
             // Obtener la cadena original ANTES de abrir
             // la conexión mediante cualquier consulta.
             cadenaPostgres =
-                db.Database.GetDbConnection().ConnectionString;
+                database.ConnectionString;
 
             operadorId = await db.Operadores
                 .Select(x => x.Id)
@@ -79,7 +79,7 @@ public sealed class GenerarSeguimientoConsumerExitoTests(
             Content = JsonContent.Create(new
             {
                 operadorId,
-                destinatarioNombre = "Destinatario RabbitMQ",
+                destinatarioNombre = "Destinatario RabbitMQ", destinatarioEmail = "destinatario@example.test",
                 direccion = "San José, Uruguay",
                 codigoBulto = "SEGUIMIENTO-RABBIT-001",
                 pesoGramos = 1200m,

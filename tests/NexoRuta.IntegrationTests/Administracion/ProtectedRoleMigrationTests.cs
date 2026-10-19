@@ -24,7 +24,9 @@ public sealed class ProtectedRoleMigrationTests(PostgresFixture postgres) : ICla
             var permission = new Permiso("usuarios.gestionar", "Manage users");
             var access = new AccesoUsuario(user.Id, operatorId, null, role);
             db.AddRange(new Operador("Operator", operatorId), user, role, permission,
-                new RolPermiso(role.Id, permission.Id), access);
+                new RolPermiso(role.Id, permission.Id));
+            await db.SaveChangesAsync();
+            db.AccesosUsuario.Add(access);
             await db.SaveChangesAsync();
             userId = user.Id;
             roleId = role.Id;

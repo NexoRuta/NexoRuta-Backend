@@ -46,6 +46,7 @@ public static class WorkerTransportNames
 {
     public const string RabbitMq = "RabbitMq";
     public const string Kafka = "Kafka";
+    public const string Push = "Push";
 }
 
 public static class PasswordRecoveryEmailTopology

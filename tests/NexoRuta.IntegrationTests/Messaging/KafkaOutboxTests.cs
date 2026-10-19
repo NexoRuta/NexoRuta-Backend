@@ -225,7 +225,7 @@ public sealed class KafkaOutboxTests(PostgresFixture postgres, KafkaFixture kafk
         {
             Content = JsonContent.Create(new
             {
-                operadorId, destinatarioNombre = "Kafka test recipient", direccion = "Test address",
+                operadorId, destinatarioNombre = "Kafka test recipient", destinatarioEmail = "destinatario@example.test", direccion = "Test address",
                 codigoBulto = $"Kafka-{Guid.NewGuid():N}", pesoGramos = 1200m,
                 largoCentimetros = 25m, anchoCentimetros = 20m, altoCentimetros = 15m
             })

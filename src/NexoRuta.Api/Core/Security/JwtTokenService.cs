@@ -6,13 +6,15 @@ using NexoRuta.Application.Administracion.Results;
 
 namespace NexoRuta.Api.Core.Security;
 
-public sealed class JwtTokenService(JwtConfiguracion config)
+public sealed class JwtTokenService(JwtConfiguracion config, TimeProvider reloj)
 {
     public (string Token, DateTime ExpiraEnUtc) Generar(
-        SesionIniciada sesion)
+        SesionIniciada sesion, Guid? sesionMovilId = null, DateTimeOffset? finSesion = null)
     {
-        var ahora = DateTime.UtcNow;
+        var ahora = reloj.GetUtcNow().UtcDateTime;
         var expiracion = ahora.AddMinutes(15);
+        if (finSesion is not null && finSesion.Value.UtcDateTime < expiracion)
+            expiracion = finSesion.Value.UtcDateTime;
 
         var claims = new List<Claim>
         {
@@ -31,6 +33,8 @@ public sealed class JwtTokenService(JwtConfiguracion config)
                 sesion.VersionCredencial.ToString(CultureInfo.InvariantCulture)),
         };
 
+        if (sesionMovilId is { } id)
+            claims.Add(new Claim(JwtSesionClaims.SesionMovil, id.ToString()));
         if (sesion.AccesoId is Guid accessId)
             claims.Add(new Claim(AccesoSeleccionado.ClaimAccesoId, accessId.ToString()));
         if (sesion.SinOrganizacion)

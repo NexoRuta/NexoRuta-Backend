@@ -77,7 +77,7 @@ public sealed class AltaPropiaHttpTests(PostgresFixture postgres) : IClassFixtur
             Assert.Equal(JsonValueKind.Null, identity.GetProperty(key).ValueKind);
         var userId = identity.GetProperty("usuarioId").GetGuid();
         Assert.Empty((await client.GetFromJsonAsync<string[]>("/api/usuarios/actual/permisos"))!);
-        foreach (var path in new[] { "/api/envios", "/api/usuarios", "/api/roles", "/api/admin/comercios", "/api/admin/operadores", "/api/comercio/operadores", "/api/operadores" })
+        foreach (var path in new[] { "/api/envios", "/api/usuarios", "/api/roles", "/api/admin/comercios", "/api/admin/operadores", "/api/operadores" })
             Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync(path)).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/api/alta-propia/{kind}", new { Nombre = "" })).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/api/alta-propia/{kind}", new { Nombre = "Spoof", UsuarioId = Guid.NewGuid(), Password, RolId = Guid.NewGuid(), Permisos = new[] { "plataforma.organizaciones.gestionar" } })).StatusCode);

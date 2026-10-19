@@ -165,7 +165,7 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
         await Login(client, PlatformEmail);
         var token = client.DefaultRequestHeaders.Authorization!.Parameter!;
         Assert.Equal("plataforma", new JwtSecurityTokenHandler().ReadJwtToken(token).Claims.Single(x => x.Type == AccesoSeleccionado.ClaimAmbito).Value);
-        foreach (var route in new[] { "/api/envios", "/api/usuarios", "/api/roles", "/api/comercio/operadores", "/api/operadores" })
+        foreach (var route in new[] { "/api/envios", "/api/usuarios", "/api/roles", "/api/operadores" })
             Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync(route)).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/api/envios", new { })).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"/api/envios/{Guid.NewGuid()}/seguimiento")).StatusCode);
@@ -237,13 +237,13 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
         var commerce2 = await Create("comercios", "commerce2@example.test");
         // Only four explicit logins after the platform login, within the existing five/minute limiter.
         await Login(client, "commerce1@example.test");
-        var available = await client.GetFromJsonAsync<JsonElement[]>("/api/comercio/operadores");
+        var available = await client.GetFromJsonAsync<JsonElement[]>("/api/operadores");
         Assert.Equal(2, available!.Length);
         async Task Ship(Guid op)
         {
             using var response = await client.PostAsJsonAsync("/api/envios", new
             {
-                OperadorId = op, DestinatarioNombre = "Recipient", Direccion = "Delivery address", CodigoBulto = "BOX",
+                OperadorId = op, DestinatarioNombre = "Recipient", DestinatarioEmail = "destinatario@example.test", Direccion = "Delivery address", CodigoBulto = "BOX",
                 PesoGramos = 100, LargoCentimetros = 10, AnchoCentimetros = 10, AltoCentimetros = 10
             });
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
@@ -389,11 +389,13 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
         role.ProtegerComoRolSistema();
         var access = new AccesoUsuario(shipment.CreadoPorUsuarioId, shipment.OperadorId, null, role);
         var permission = new Permiso("envios.consultar", "View shipments");
-        db.AddRange(role, access, permission, new RolPermiso(role.Id, permission.Id));
+        db.AddRange(role, permission, new RolPermiso(role.Id, permission.Id));
+        await db.SaveChangesAsync();
+        db.AccesosUsuario.Add(access);
         await db.SaveChangesAsync();
         var hash = (await db.Usuarios.SingleAsync()).PasswordHash;
         await db.Database.MigrateAsync("20261016021011_ProtectSystemAdministratorRoles");
-        await db.Database.MigrateAsync();
+        await HistoricRecipientEmail.MigrateAsync(db);
         db.ChangeTracker.Clear();
         Assert.Equal(shipment.Id, (await db.Envios.SingleAsync()).Id);
         Assert.Equal(access.Id, (await db.AccesosUsuario.SingleAsync()).Id);

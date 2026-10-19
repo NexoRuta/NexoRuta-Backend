@@ -27,10 +27,12 @@ namespace NexoRuta.IntegrationTests.Envios;
 public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : IClassFixture<PostgresFixture>, IAsyncLifetime
 {
     private DbContextOptions<NexoRutaDbContext> options = null!;
+    private string connectionString = null!;
 
     public async Task InitializeAsync()
     {
         var database = await postgres.CreateDatabaseAsync();
+        connectionString = database.ConnectionString;
         options = new DbContextOptionsBuilder<NexoRutaDbContext>()
             .UseNexoRutaPostgres(database.ConnectionString).Options;
     }
@@ -63,7 +65,7 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
 
         var lockObserver = new ShipmentLockObserver();
         var optionsWithObserver = new DbContextOptionsBuilder<NexoRutaDbContext>()
-            .UseNexoRutaPostgres(suspension.Database.GetConnectionString())
+            .UseNexoRutaPostgres(connectionString)
             .AddInterceptors(lockObserver)
             .Options;
         await using var shipmentDb = new NexoRutaDbContext(optionsWithObserver);
@@ -71,7 +73,7 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
             ?? throw new InvalidOperationException("The seeded commerce access is missing.");
         await using var shipmentTransaction = await shipmentDb.Database.BeginTransactionAsync();
         await shipmentDb.ApplyAsync(RlsActorContext.From(context));
-        var recipient = new Destinatario(operatorId, "Test recipient");
+        var recipient = new Destinatario(operatorId, "Test recipient", "destinatario@example.test");
         var address = new Direccion(operatorId, "Test address");
         var shipment = new Envio(operatorId, commerceId, userId, recipient.Id, address.Id);
         var parcel = new Bulto(operatorId, shipment.Id, "RACE-1", 100m, 10m, 10m, 10m);
@@ -370,15 +372,13 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         var segundoAcceso = Guid.Parse("018f0000-0000-7000-8000-000000000002");
         await db.Database.ExecuteSqlInterpolatedAsync(
             $"INSERT INTO \"AccesosUsuario\" (\"Id\", \"UsuarioId\", \"OperadorId\", \"OperadorComercioId\") VALUES ({cuentaAnterior}, {usuario.Id}, {opUno.Id}, {vinculoUno}), ({segundoAcceso}, {usuario.Id}, {opDos.Id}, {vinculoDos})");
-        var destinatario = new Destinatario(opUno.Id, "Destinatario anterior");
+        var destinatario = new Destinatario(opUno.Id, "Destinatario anterior", "destinatario@example.test");
         var direccion = new Direccion(opUno.Id, "Direccion anterior");
         var envio = new Envio(opUno.Id, comercio.Id, usuario.Id, destinatario.Id, direccion.Id);
         var bulto = new Bulto(opUno.Id, envio.Id, "ANTERIOR", 1750m, 32m, 21m, 11m);
-        db.AddRange(destinatario, direccion);
-        await db.SaveChangesAsync();
+        await InsertarDestinoAnterior(db, destinatario, direccion);
         await InsertarEnvioAnterior(db, envio, vinculoUno);
-        db.Bultos.Add(bulto);
-        await db.SaveChangesAsync();
+        await InsertarBultoAnterior(db, bulto);
 
         await migrator.MigrateAsync(actual);
         Assert.Equal(comercio.Id, await db.Database.SqlQuery<Guid>($"SELECT \"ComercioId\" AS \"Value\" FROM \"AccesosUsuario\" WHERE \"Id\" = {cuentaAnterior}").SingleAsync());
@@ -386,7 +386,7 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         // AccountOwner historically collapses duplicate user/commerce accounts to the lowest original UUID.
         var preCu01AccessIds = await db.Database.SqlQueryRaw<Guid>("SELECT \"Id\" AS \"Value\" FROM \"AccesosUsuario\" ORDER BY \"Id\"").ToArrayAsync();
         Assert.Equal(new[] { cuentaAnterior }, preCu01AccessIds);
-        await migrator.MigrateAsync();
+        await MigrarActualConCorreosDeFixture(db, migrator);
         db.ChangeTracker.Clear();
         var historical = await db.AccesosUsuario.SingleAsync(x => x.UsuarioId == usuario.Id);
         Assert.Equal(cuentaAnterior, historical.Id);
@@ -402,7 +402,7 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         await migrator.MigrateAsync(anterior);
         // ShipmentCommerce rollback reconstructs shipment-backed links only. No synthetic operator account is seeded.
         Assert.Equal(preCu01AccessIds, await db.Database.SqlQueryRaw<Guid>("SELECT \"Id\" AS \"Value\" FROM \"AccesosUsuario\" ORDER BY \"Id\"").ToArrayAsync());
-        await migrator.MigrateAsync();
+        await MigrarActualConCorreosDeFixture(db, migrator);
         db.ChangeTracker.Clear();
         Assert.Equal(usuario.Id, (await db.AccesosUsuario.SingleAsync(x => x.Id == cuentaAnterior)).UsuarioId);
         await ConfigureHistoricAccounts(db, inicial);
@@ -432,18 +432,16 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         var vinculo = Guid.CreateVersion7();
         await db.Database.ExecuteSqlInterpolatedAsync(
             $"INSERT INTO \"OperadoresComercios\" (\"Id\", \"OperadorId\", \"ComercioId\") VALUES ({vinculo}, {operador.OperadorId!.Value}, {cuenta.ComercioId!.Value})");
-        var destinatario = new Destinatario(operador.OperadorId.Value, "Destinatario anterior");
+        var destinatario = new Destinatario(operador.OperadorId.Value, "Destinatario anterior", "destinatario@example.test");
         var direccion = new Direccion(operador.OperadorId.Value, "Dirección anterior");
-        db.AddRange(destinatario, direccion);
-        await db.SaveChangesAsync();
+        await InsertarDestinoAnterior(db, destinatario, direccion);
         var envio = new Envio(operador.OperadorId.Value, cuenta.ComercioId.Value, cuenta.UsuarioId, destinatario.Id, direccion.Id);
         await InsertarEnvioAnterior(db, envio, vinculo);
         var bulto = new Bulto(envio.OperadorId, envio.Id, "ANTERIOR", 1750m, 32m, 21m, 11m);
-        db.Bultos.Add(bulto);
-        await db.SaveChangesAsync();
+        await InsertarBultoAnterior(db, bulto);
 
-        await migrator.MigrateAsync();
-        await migrator.MigrateAsync();
+        await MigrarActualConCorreosDeFixture(db, migrator);
+        await MigrarActualConCorreosDeFixture(db, migrator);
         Assert.False(await db.Database.SqlQueryRaw<bool>("SELECT to_regclass('\"OperadoresComercios\"') IS NOT NULL AS \"Value\"").SingleAsync());
         db.ChangeTracker.Clear();
         var migratedAccess = await db.AccesosUsuario.SingleAsync(x => x.Id == cuenta.AccesoId);
@@ -467,7 +465,7 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         await migrator.MigrateAsync(anterior);
         Assert.Equal(2, await db.Database.SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM \"OperadoresComercios\"").SingleAsync());
         Assert.Equal(3, await db.Database.SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM \"Envios\" e JOIN \"OperadoresComercios\" r ON e.\"OperadorComercioId\" = r.\"Id\" AND e.\"OperadorId\" = r.\"OperadorId\"").SingleAsync());
-        await migrator.MigrateAsync();
+        await MigrarActualConCorreosDeFixture(db, migrator);
         db.ChangeTracker.Clear();
         await ConfigureHistoricAccounts(db, inicial);
         var envios = await Listar(db, cuenta.AccesoId);
@@ -487,7 +485,7 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         await AuthenticationTestData.Seeder(db, inicial).SeedAsync();
         var comercio = await Cuenta(db, inicial.UsuarioEmail, TipoAccesoUsuario.Comercio);
         var operador = await Cuenta(db, inicial.OperadorUsuarioEmail, TipoAccesoUsuario.Operador);
-        var destinatario = new Destinatario(operador.OperadorId!.Value, "Ana");
+        var destinatario = new Destinatario(operador.OperadorId!.Value, "Ana", "destinatario@example.test");
         var direccion = new Direccion(operador.OperadorId.Value, "Rivera 123");
         var envio = new Envio(operador.OperadorId.Value, comercio.ComercioId!.Value,
             comercio.UsuarioId, destinatario.Id, direccion.Id);
@@ -527,6 +525,15 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         await db.SaveChangesAsync();
     }
 
+    private static async Task InsertarDestinoAnterior(NexoRutaDbContext db, Destinatario destinatario, Direccion direccion)
+    {
+        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Destinatarios\" (\"Id\", \"OperadorId\", \"Nombre\") VALUES ({destinatario.Id}, {destinatario.OperadorId}, {destinatario.Nombre})");
+        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Direcciones\" (\"Id\", \"OperadorId\", \"Descripcion\") VALUES ({direccion.Id}, {direccion.OperadorId}, {direccion.Descripcion})");
+    }
+
+    private static Task<int> InsertarBultoAnterior(NexoRutaDbContext db, Bulto bulto)
+        => db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Bultos\" (\"Id\", \"OperadorId\", \"EnvioId\", \"Codigo\", \"PesoGramos\", \"LargoCentimetros\", \"AnchoCentimetros\", \"AltoCentimetros\") VALUES ({bulto.Id}, {bulto.OperadorId}, {bulto.EnvioId}, {bulto.Codigo}, {bulto.PesoGramos}, {bulto.LargoCentimetros}, {bulto.AnchoCentimetros}, {bulto.AltoCentimetros})");
+
     private static Task<int> InsertarEnvioAnterior(NexoRutaDbContext db, Envio envio, Guid vinculoId)
         => db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Envios\" (\"Id\", \"OperadorId\", \"OperadorComercioId\", \"CreadoPorUsuarioId\", \"DestinatarioId\", \"DireccionId\", \"Estado\") VALUES ({envio.Id}, {envio.OperadorId}, {vinculoId}, {envio.CreadoPorUsuarioId}, {envio.DestinatarioId}, {envio.DireccionId}, 'Admitido')");
 
@@ -535,7 +542,7 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         using var db = new NexoRutaDbContext(options);
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["ConnectionStrings:Postgres"] = db.Database.GetConnectionString(),
+            ["ConnectionStrings:Postgres"] = connectionString,
             ["AccesoInicial:UsuarioEmail"] = "dueno@prueba.local",
             ["AccesoInicial:OperadorUsuarioEmail"] = "operador@prueba.local",
             ["AccesoInicial:OperadorNombre"] = "Operador de prueba",
@@ -563,6 +570,7 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
             .EjecutarAsync(new CrearEnvioCommand(
                 OperadorId: operadorId,
                 DestinatarioNombre: "Destinatario de prueba",
+                DestinatarioEmail: "destinatario@example.test",
                 Direccion: "Av. Rivera 123",
                 CodigoBulto: codigo,
                 PesoGramos: 1750m,
@@ -590,4 +598,6 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
             => await new EfAccesosUsuarioRepository(db).ObtenerAsync(accesoId, cancellationToken)
                 ?? throw new AccesoActualNoDisponibleException();
     }
+    private static Task MigrarActualConCorreosDeFixture(NexoRutaDbContext db, IMigrator migrator) => HistoricRecipientEmail.MigrateAsync(db);
+
 }

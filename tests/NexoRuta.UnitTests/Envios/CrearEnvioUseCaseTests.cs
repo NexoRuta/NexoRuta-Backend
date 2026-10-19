@@ -145,7 +145,8 @@ public sealed class CrearEnvioUseCaseTests
             "operador@empresa.local", "Distribución Sur", null, Guid.CreateVersion7(), "administrador_operador");
 
     private static CrearEnvioCommand Comando(Guid operadorId)
-        => new(OperadorId: operadorId, DestinatarioNombre: "Ana", Direccion: "18 de Julio 123",
+        => new(OperadorId: operadorId, DestinatarioNombre: "Ana",
+                DestinatarioEmail: "destinatario@example.test", Direccion: "18 de Julio 123",
             CodigoBulto: "B-001", PesoGramos: 1250m, LargoCentimetros: 30m, AnchoCentimetros: 20m, AltoCentimetros: 10m);
 
     private sealed class UsuarioActual(ContextoUsuario cuenta) : IUsuarioActual

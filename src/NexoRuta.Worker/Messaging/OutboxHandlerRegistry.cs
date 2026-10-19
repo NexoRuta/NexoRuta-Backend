@@ -65,3 +65,10 @@ public sealed class KafkaPasswordRecoveryRequestedOutboxHandler(KafkaEnvioCreado
     public Task HandleAsync(OutboxClaim message, CancellationToken cancellationToken)
         => publisher.PublicarRecuperacionAsync(message, cancellationToken);
 }
+
+public sealed class RabbitCancellationCodeOutboxHandler(RabbitMqOutboxPublisher publisher) : IOutboxMessageHandler
+{
+    public OutboxHandlerRoute Route { get; } = new(OutboxMessageTypes.CancellationCodeEmail, OutboxContractVersions.Current, OutboxDestino.RabbitMq);
+    public Task HandleAsync(OutboxClaim message, CancellationToken cancellationToken)
+        => publisher.PublishCancellationCodeAsync(message, cancellationToken);
+}

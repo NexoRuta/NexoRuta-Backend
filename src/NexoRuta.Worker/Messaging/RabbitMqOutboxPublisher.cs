@@ -18,6 +18,20 @@ public sealed class RabbitMqOutboxPublisher(IConfiguration configuration) : IAsy
     public Task PublishPasswordRecoveryEmailAsync(OutboxClaim message, CancellationToken cancellationToken)
         => PublishAsync(message, CreateEmailPublication, cancellationToken);
 
+    public Task PublishCancellationCodeAsync(OutboxClaim message, CancellationToken cancellationToken)
+        => PublishAsync(message, CreateCancellationPublication, cancellationToken);
+
+    private static (string Queue, BasicProperties Properties, ReadOnlyMemory<byte> Body) CreateCancellationPublication(OutboxClaim message)
+    {
+        Validate(message, OutboxDestino.RabbitMq, OutboxScope.Envio, OutboxMessageTypes.CancellationCodeEmail, OutboxContractVersions.Current);
+        if (message.OperadorId is null || message.EnvioId is null || message.ClaveAmbito != message.EnvioId)
+            throw new InvalidDataException("Invalid cancellation email scope.");
+        // El consumidor obtiene el sobre autorizado desde PostgreSQL, nunca desde el cuerpo del broker.
+        return (CancellationCodeEmailConsumer.Queue, new BasicProperties {
+            MessageId = message.Id.ToString("D"), Type = message.Tipo, Persistent = true, ContentType = "application/json"
+        }, "{}"u8.ToArray());
+    }
+
     private async Task PublishAsync(OutboxClaim message,
         Func<OutboxClaim, (string Queue, BasicProperties Properties, ReadOnlyMemory<byte> Body)> createPublication,
         CancellationToken cancellationToken)
@@ -45,6 +59,7 @@ public sealed class RabbitMqOutboxPublisher(IConfiguration configuration) : IAsy
         await channel.QueueDeclareAsync(TrackingQueue, durable: true, exclusive: false, autoDelete: false,
             arguments: null, cancellationToken: ct);
         await PasswordRecoveryEmailTopology.DeclareAsync(channel, ct);
+        await CancellationCodeEmailConsumer.DeclareAsync(channel, ct);
         return channel;
     }
 
