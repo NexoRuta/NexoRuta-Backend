@@ -14,6 +14,8 @@ using Microsoft.IdentityModel.Tokens;
 using NexoRuta.Application.Administracion.Context;
 using NexoRuta.Application.Administracion.Repositories;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.DataProtection;
+using NexoRuta.Infrastructure.Administracion.Autenticacion;
 var platformCommand = args.FirstOrDefault() == "platform-admin";
 if (platformCommand && !args.SequenceEqual(["platform-admin", "create"]))
 {
@@ -33,6 +35,21 @@ if (localBootstrapCommand)
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 builder.Services.AddNexoRutaPersistence(builder.Configuration);
+var dataProtection = builder.Services.AddDataProtection().SetApplicationName(PasswordRecoveryDataProtection.ApplicationName);
+var dataProtectionKeys = builder.Configuration[PasswordRecoveryDataProtection.KeysDirectoryConfigurationKey];
+if (!string.IsNullOrWhiteSpace(dataProtectionKeys))
+    dataProtection.PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeys));
+else if (builder.Environment.IsProduction() && !platformCommand && !localBootstrapCommand && !migrationCommand)
+    throw new InvalidOperationException("Production requires a persistent DataProtection:KeysDirectory.");
+builder.Services.AddOptions<PasswordRecoveryOptions>()
+    .Bind(builder.Configuration.GetSection("PasswordRecovery"))
+    .Validate(options => options.TokenLifespanSeconds is > 0 and <= 3600
+        && Uri.TryCreate(options.ResetPageUrl, UriKind.Absolute, out var url)
+        && url.Scheme is "https" or "http"
+        && (builder.Environment.IsDevelopment() || builder.Environment.IsEnvironment("Testing") || url.Scheme == "https")
+        && string.IsNullOrEmpty(url.UserInfo) && string.IsNullOrEmpty(url.Query) && string.IsNullOrEmpty(url.Fragment),
+        "Password recovery requires an absolute trusted HTTPS reset page URL (HTTP only in Development) and a token lifespan under one hour.")
+    .ValidateOnStart();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IUsuarioActual, UsuarioActualHttp>();
 if (platformCommand)
@@ -194,6 +211,17 @@ builder.Services.AddRateLimiter(options =>
                     AutoReplenishment = true
                 }));
     }
+
+    options.AddPolicy("auth-password-recovery", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "sin-ip",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 5,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
 
 });
 

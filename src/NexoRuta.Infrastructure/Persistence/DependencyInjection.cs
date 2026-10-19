@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using NexoRuta.Application.Administracion.Repositories;
@@ -16,6 +17,8 @@ using NexoRuta.Application.Administracion.Interfaces;
 using NexoRuta.Application.Administracion.UseCases;
 using NexoRuta.Infrastructure.Administracion.Autenticacion;
 using NexoRuta.Domain.Administracion;
+using System.Net.Mail;
+using NexoRuta.Infrastructure.Correo;
 namespace NexoRuta.Infrastructure.Persistence;
 
 public static class DependencyInjection
@@ -29,6 +32,7 @@ public static class DependencyInjection
             ?? throw new InvalidOperationException($"Falta ConnectionStrings:{connectionStringName}.");
 
         services.AddDbContext<NexoRutaDbContext>(options => options.UseNpgsql(connectionString));
+        services.AddDataProtection();
         services.AddIdentityCore<Usuario>(options =>
             {
                 options.User.RequireUniqueEmail = true;
@@ -40,7 +44,22 @@ public static class DependencyInjection
                 options.Password.RequireNonAlphanumeric = false;
                 options.Password.RequiredUniqueChars = 1;
             })
-            .AddEntityFrameworkStores<NexoRutaDbContext>();
+            .AddEntityFrameworkStores<NexoRutaDbContext>()
+            .AddDefaultTokenProviders();
+        services.Configure<DataProtectionTokenProviderOptions>(options =>
+            options.TokenLifespan = TimeSpan.FromSeconds(configuration.GetValue("PasswordRecovery:TokenLifespanSeconds", 900)));
+        var smtpSection = configuration.GetSection(ConfiguracionSmtp.ConfigurationSection);
+        if (smtpSection.Exists())
+        {
+            services.AddOptions<ConfiguracionSmtp>().Bind(smtpSection)
+                .Validate(options => !string.IsNullOrWhiteSpace(options.Host) && options.Port is > 0 and <= 65535
+                    && MailAddress.TryCreate(options.FromAddress, out _)
+                    && (string.IsNullOrWhiteSpace(options.Username) == string.IsNullOrWhiteSpace(options.Password)),
+                    "Email:Smtp requires a host, valid port and from address; SMTP credentials must be provided together.")
+                .ValidateOnStart();
+            services.AddSingleton<ICorreoSender, SmtpCorreoSender>();
+        }
+        services.AddScoped<IRecuperacionPassword, ServicioRecuperacionPassword>();
         services.AddSingleton(_ =>
         {
             if (!configuration.GetValue<bool>("DatabaseInitialization:SeedData"))

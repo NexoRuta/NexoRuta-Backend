@@ -26,6 +26,9 @@ public sealed class JwtTokenService(JwtConfiguracion config)
             new Claim(
                 JwtSesionClaims.VersionSesion,
                 sesion.VersionSesion.ToString(CultureInfo.InvariantCulture)),
+            new Claim(
+                JwtSesionClaims.VersionCredencial,
+                sesion.VersionCredencial.ToString(CultureInfo.InvariantCulture)),
         };
 
         if (sesion.AccesoId is Guid accessId)

@@ -10,7 +10,9 @@ using NexoRuta.Api.Controllers;
 using NexoRuta.Application.Administracion;
 using NexoRuta.Application.Administracion.Context;
 using NexoRuta.Application.Administracion.Exceptions;
+using NexoRuta.Application.Administracion.Interfaces;
 using NexoRuta.Application.Administracion.Repositories;
+using NexoRuta.Application.Administracion.Results;
 
 namespace NexoRuta.IntegrationTests.Administracion;
 
@@ -31,7 +33,7 @@ public sealed class RegistroErrorHttpTests
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
         builder.Services.AddControllers().AddApplicationPart(typeof(AuthController).Assembly).AddControllersAsServices();
-        builder.Services.AddSingleton(new AuthController(null!, null!, repository));
+        builder.Services.AddSingleton(new AuthController(null!, null!, repository, new PasswordRecoveryStub()));
         builder.Services.AddAuthorization();
         builder.Services.AddRateLimiter(options => options.AddFixedWindowLimiter("auth-register", limiter =>
         {
@@ -85,5 +87,12 @@ public sealed class RegistroErrorHttpTests
         }
         public Task<IdentidadSinOrganizacion?> ObtenerSinOrganizacionAsync(Guid usuarioId, CancellationToken ct)
             => throw new NotSupportedException();
+    }
+
+    private sealed class PasswordRecoveryStub : IRecuperacionPassword
+    {
+        public Task SolicitarAsync(string email, CancellationToken ct) => Task.CompletedTask;
+        public Task<ResultadoRestablecimientoPassword> RestablecerAsync(Guid usuarioId, string token, string nuevaPassword, CancellationToken ct)
+            => Task.FromResult(ResultadoRestablecimientoPassword.Correcto);
     }
 }

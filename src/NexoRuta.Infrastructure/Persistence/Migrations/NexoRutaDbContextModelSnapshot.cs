@@ -666,6 +666,12 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                         .HasColumnType("bigint")
                         .HasDefaultValue(0L);
 
+                    b.Property<long>("VersionCredencial")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
                     b.HasKey("Id");
 
                     b.HasIndex("Email")
@@ -841,6 +847,14 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("Ambito")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<Guid>("ClaveAmbito")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTimeOffset>("CreadoEnUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -849,7 +863,7 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
 
-                    b.Property<Guid>("EnvioId")
+                    b.Property<Guid?>("EnvioId")
                         .HasColumnType("uuid");
 
                     b.Property<string>("Estado")
@@ -857,15 +871,24 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
 
+                    b.Property<string>("EstadoEntrega")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
                     b.Property<int>("Intentos")
                         .HasColumnType("integer");
 
-                    b.Property<Guid>("OperadorId")
+                    b.Property<Guid?>("OperadorId")
                         .HasColumnType("uuid");
 
                     b.Property<string>("Payload")
                         .IsRequired()
                         .HasColumnType("jsonb");
+
+                    b.Property<string>("Prioridad")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
 
                     b.Property<Guid?>("ProcesadorId")
                         .HasColumnType("uuid");
@@ -888,13 +911,27 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
 
-                    b.HasKey("Id");
+                    b.Property<int>("VersionContrato")
+                        .HasColumnType("integer");
 
-                    b.HasIndex("Estado", "ProximoIntentoEnUtc");
+                    b.HasKey("Id");
 
                     b.HasIndex("OperadorId", "EnvioId");
 
-                    b.ToTable("OutboxMessages", (string)null);
+                    b.HasIndex("Ambito", "ClaveAmbito", "Destino", "Estado", "CreadoEnUtc");
+
+                    b.HasIndex("Destino", "Estado", "ProximoIntentoEnUtc", "Prioridad", "CreadoEnUtc");
+
+                    b.ToTable("OutboxMessages", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_OutboxMessages_Contract", "(\"Tipo\" = 'GenerarSeguimiento' AND \"VersionContrato\" = 1 AND \"Destino\" = 'RabbitMq' AND \"Ambito\" = 'Envio' AND \"EstadoEntrega\" IS NULL) OR (\"Tipo\" = 'EnvioCreado' AND \"VersionContrato\" = 1 AND \"Destino\" = 'Kafka' AND \"Ambito\" = 'Envio' AND \"EstadoEntrega\" IS NULL) OR (\"Tipo\" = 'PasswordRecoveryEmail' AND \"VersionContrato\" = 1 AND \"Destino\" = 'RabbitMq' AND \"Ambito\" = 'Identidad' AND \"EstadoEntrega\" IN ('Pending', 'Delivered', 'Expired', 'Failed')) OR (\"Tipo\" = 'PasswordRecoveryRequested' AND \"VersionContrato\" = 1 AND \"Destino\" = 'Kafka' AND \"Ambito\" = 'Identidad' AND \"EstadoEntrega\" IS NULL)");
+
+                            t.HasCheckConstraint("CK_OutboxMessages_Priority", "\"Prioridad\" IN ('Baja', 'Normal', 'Alta')");
+
+                            t.HasCheckConstraint("CK_OutboxMessages_Scope", "(\"Ambito\" = 'Envio' AND \"OperadorId\" IS NOT NULL AND \"EnvioId\" IS NOT NULL AND \"ClaveAmbito\" = \"EnvioId\") OR (\"Ambito\" = 'Identidad' AND \"OperadorId\" IS NULL AND \"EnvioId\" IS NULL)");
+
+                            t.HasCheckConstraint("CK_OutboxMessages_State", "\"Estado\" IN ('Pendiente', 'Procesando', 'Publicado', 'Error')");
+                        });
                 });
 
             modelBuilder.Entity("NexoRuta.Infrastructure.Outbox.ProcessedMessage", b =>
@@ -1217,8 +1254,7 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                         .WithMany()
                         .HasForeignKey("OperadorId", "EnvioId")
                         .HasPrincipalKey("OperadorId", "Id")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("NexoRuta.Infrastructure.Seguimiento.Persistence.EntregaSeguimiento", b =>

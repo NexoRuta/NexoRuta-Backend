@@ -1,59 +1,78 @@
+using System.Net.Mail;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
-using NexoRuta.Infrastructure.Outbox;
-using NexoRuta.Infrastructure.Persistence;
-using NexoRuta.Worker;
-using NexoRuta.Worker.Messaging;
+using MongoDB.Driver;
+using NexoRuta.Application.Administracion.Interfaces;
 using NexoRuta.Application.Seguimiento.Interfaces;
 using NexoRuta.Application.Seguimiento.UseCases;
+using NexoRuta.Infrastructure.Administracion.Autenticacion;
+using NexoRuta.Infrastructure.Correo;
+using NexoRuta.Infrastructure.Outbox;
+using NexoRuta.Infrastructure.Persistence;
 using NexoRuta.Infrastructure.Seguimiento.Consultas;
-using NexoRuta.Infrastructure.Seguimiento.Repositories;
 using NexoRuta.Infrastructure.Seguimiento.Processing;
+using NexoRuta.Infrastructure.Seguimiento.Repositories;
 using NexoRuta.Infrastructure.Seguimiento.Security;
+using NexoRuta.Worker.Messaging;
+using NexoRuta.Worker;
+
 var builder = Host.CreateApplicationBuilder(args);
-
-var connectionString =
-    builder.Configuration.GetConnectionString("Postgres")
-    ?? throw new InvalidOperationException(
-        "Falta ConnectionStrings:Postgres para el Worker.");
-
-builder.Services.AddDbContext<NexoRutaDbContext>(
-    options => options.UseNpgsql(connectionString));
-
-builder.Services.AddScoped<EfOutboxRepository>();
-
 builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.Warning);
 
-// Separate host processes: the RabbitMQ consumer can intentionally stop its host.
-// Kafka must not share that failure/shutdown boundary.
-var transport = builder.Configuration["Messaging:Transport"] ?? "RabbitMq";
-if (transport == "Kafka")
-{
-    builder.Services.AddSingleton<KafkaEnvioCreadoPublisher>();
-    builder.Services.AddHostedService<KafkaOutboxWorker>();
-}
-else if (transport == "RabbitMq")
-{
-    builder.Services.AddSingleton<RabbitMqSeguimientoPublisher>();
+var transport = builder.Configuration[WorkerConfigurationKeys.Transport] ?? WorkerTransportNames.RabbitMq;
+if (transport is not (WorkerTransportNames.RabbitMq or WorkerTransportNames.Kafka))
+    throw new InvalidOperationException("Messaging:Transport must be RabbitMq or Kafka.");
 
+var connectionString = builder.Configuration.GetConnectionString("Postgres")
+    ?? throw new InvalidOperationException("ConnectionStrings:Postgres is required for this Worker.");
+builder.Services.AddDbContext<NexoRutaDbContext>(options => options.UseNpgsql(connectionString));
+builder.Services.AddScoped<EfOutboxRepository>();
+
+if (transport == WorkerTransportNames.RabbitMq)
+{
+    builder.Services.AddSingleton<RabbitMqOutboxPublisher>();
+    builder.Services.AddSingleton<IOutboxMessageHandler, RabbitTrackingOutboxHandler>();
+    builder.Services.AddSingleton<IOutboxMessageHandler, RabbitPasswordRecoveryEmailOutboxHandler>();
+    builder.Services.AddSingleton<OutboxHandlerRegistry>();
     builder.Services.AddHostedService<Worker>();
-
     builder.Services.AddScoped<IConsultaEstadoEnvio, EfConsultaEstadoEnvio>();
-
     builder.Services.AddScoped<IEnlacesSeguimientoRepository, EfEnlacesSeguimientoRepository>();
-
     builder.Services.AddScoped<CrearEnlaceSeguimientoUseCase>();
-
     builder.Services.AddSingleton<CifradorTokenSeguimiento>();
-
     builder.Services.AddScoped<ProcesarGeneracionSeguimiento>();
-
-    // Publicación desde Outbox y consumo de RabbitMQ.
     builder.Services.AddHostedService<GenerarSeguimientoConsumer>();
+
+    var smtpSection = builder.Configuration.GetSection(ConfiguracionSmtp.ConfigurationSection);
+    builder.Services.AddOptions<ConfiguracionSmtp>().Bind(smtpSection)
+        .Validate(options => !string.IsNullOrWhiteSpace(options.Host) && options.Port is > 0 and <= 65535
+            && MailAddress.TryCreate(options.FromAddress, out _)
+            && (string.IsNullOrWhiteSpace(options.Username) == string.IsNullOrWhiteSpace(options.Password)),
+            "Email:Smtp requires a host, valid port and from address; SMTP credentials must be provided together.")
+        .ValidateOnStart();
+    builder.Services.AddSingleton<ICorreoSender, SmtpCorreoSender>();
+    var keysDirectory = builder.Configuration[PasswordRecoveryDataProtection.KeysDirectoryConfigurationKey]
+        ?? throw new InvalidOperationException("Data protection key directory is required by the RabbitWorker.");
+    builder.Services.AddDataProtection()
+        .SetApplicationName(PasswordRecoveryDataProtection.ApplicationName)
+        .PersistKeysToFileSystem(new DirectoryInfo(keysDirectory));
+    builder.Services.AddHostedService<PasswordRecoveryEmailConsumer>();
+    builder.Services.AddHostedService<PasswordRecoveryEmailDeadLetterConsumer>();
 }
 else
 {
-    throw new InvalidOperationException("Messaging:Transport must be RabbitMq or Kafka.");
+    builder.Services.AddSingleton<KafkaEnvioCreadoPublisher>();
+    builder.Services.AddSingleton<IOutboxMessageHandler, KafkaShipmentCreatedOutboxHandler>();
+    builder.Services.AddSingleton<IOutboxMessageHandler, KafkaPasswordRecoveryRequestedOutboxHandler>();
+    builder.Services.AddSingleton<OutboxHandlerRegistry>();
+    builder.Services.AddHostedService<KafkaOutboxWorker>();
+    var mongoConnection = builder.Configuration[WorkerConfigurationKeys.MongoConnectionString]
+        ?? throw new InvalidOperationException("MongoDB connection string is required.");
+    var mongoDatabase = builder.Configuration[WorkerConfigurationKeys.MongoDatabase]
+        ?? throw new InvalidOperationException("MongoDB database name is required.");
+    builder.Services.AddSingleton<IMongoClient>(_ => new MongoClient(mongoConnection));
+    builder.Services.AddSingleton(provider => provider.GetRequiredService<IMongoClient>().GetDatabase(mongoDatabase));
+    builder.Services.AddSingleton<PasswordRecoveryMongoStore>();
+    builder.Services.AddHostedService<PasswordRecoveryMongoConsumer>();
 }
 
-var host = builder.Build();
-await host.RunAsync();
+await builder.Build().RunAsync();

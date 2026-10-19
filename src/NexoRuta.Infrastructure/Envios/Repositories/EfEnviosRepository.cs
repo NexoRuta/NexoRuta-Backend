@@ -40,11 +40,11 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
         await db.SetShipmentAsync(envio.OperadorId, envio.Id, destinatario.Id, direccion.Id, bulto.Id, cancellationToken);
 
         // Trabajo asíncrono: generar el seguimiento.
-        var trabajoSeguimiento = new OutboxMessage(
-            operadorId: envio.OperadorId,
-            envioId: envio.Id,
-            tipo: OutboxMessageTypes.TrackingRequested,
-            destino: OutboxDestino.RabbitMq,
+        var trabajoSeguimiento = OutboxMessage.ForShipment(
+            operatorId: envio.OperadorId,
+            shipmentId: envio.Id,
+            type: OutboxMessageTypes.TrackingRequested,
+            destination: OutboxDestino.RabbitMq,
             payload: JsonSerializer.Serialize(new
             {
                 envioId = envio.Id,
@@ -52,11 +52,11 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
             }));
 
         // Evento de negocio: informar que se creó un envío.
-        var eventoEnvioCreado = new OutboxMessage(
-            operadorId: envio.OperadorId,
-            envioId: envio.Id,
-            tipo: OutboxMessageTypes.ShipmentCreated,
-            destino: OutboxDestino.Kafka,
+        var eventoEnvioCreado = OutboxMessage.ForShipment(
+            operatorId: envio.OperadorId,
+            shipmentId: envio.Id,
+            type: OutboxMessageTypes.ShipmentCreated,
+            destination: OutboxDestino.Kafka,
             payload: JsonSerializer.Serialize(new
             {
                 envioId = envio.Id,

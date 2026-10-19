@@ -6,7 +6,7 @@ namespace NexoRuta.Worker.Messaging;
 public static class RabbitMqSeguimientoTopology
 {
     public const string ColaPrincipal =
-        RabbitMqSeguimientoPublisher.NombreCola;
+        RabbitMqOutboxPublisher.TrackingQueue;
 
     public const string ColaReintento =
         "nexoruta.seguimiento.reintento";

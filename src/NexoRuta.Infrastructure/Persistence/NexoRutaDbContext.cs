@@ -176,6 +176,7 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
                 .HasMaxLength(1024);
             entity.Property(x => x.Email).HasMaxLength(254).IsRequired();
             entity.Property(x => x.Version).HasDefaultValue(0L).IsConcurrencyToken();
+            entity.Property(x => x.VersionCredencial).HasDefaultValue(0L).ValueGeneratedOnAdd().IsConcurrencyToken();
             entity.HasIndex(x => x.Email).IsUnique();
             entity.HasIndex(x => x.NormalizedEmail).IsUnique();
         });
@@ -282,53 +283,35 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
 
         modelBuilder.Entity<OutboxMessage>(entity =>
         {
-            entity.ToTable("OutboxMessages");
-
-            entity.HasKey(x => x.Id);
-            entity.Property(x => x.ProcesadorId);
-
-            entity.Property(x => x.ReservaHastaUtc);
-
-            entity.Property(x => x.Tipo)
-                .HasMaxLength(100)
-                .IsRequired();
-
-            entity.Property(x => x.Destino)
-                .HasConversion<string>()
-                .HasMaxLength(32)
-                .IsRequired();
-
-            entity.Property(x => x.Estado)
-                .HasConversion<string>()
-                .HasMaxLength(32)
-                .IsRequired();
-
-            entity.Property(x => x.Payload)
-                .HasColumnType("jsonb")
-                .IsRequired();
-
-            entity.Property(x => x.UltimoError)
-                .HasMaxLength(2000);
-
-            entity.HasIndex(x => new
+            entity.ToTable("OutboxMessages", table =>
             {
-                x.Estado,
-                x.ProximoIntentoEnUtc
+                table.HasCheckConstraint("CK_OutboxMessages_Scope",
+                    "(\"Ambito\" = 'Envio' AND \"OperadorId\" IS NOT NULL AND \"EnvioId\" IS NOT NULL AND \"ClaveAmbito\" = \"EnvioId\") OR " +
+                    "(\"Ambito\" = 'Identidad' AND \"OperadorId\" IS NULL AND \"EnvioId\" IS NULL)");
+                table.HasCheckConstraint("CK_OutboxMessages_Contract",
+                    "(\"Tipo\" = 'GenerarSeguimiento' AND \"VersionContrato\" = 1 AND \"Destino\" = 'RabbitMq' AND \"Ambito\" = 'Envio' AND \"EstadoEntrega\" IS NULL) OR " +
+                    "(\"Tipo\" = 'EnvioCreado' AND \"VersionContrato\" = 1 AND \"Destino\" = 'Kafka' AND \"Ambito\" = 'Envio' AND \"EstadoEntrega\" IS NULL) OR " +
+                    "(\"Tipo\" = 'PasswordRecoveryEmail' AND \"VersionContrato\" = 1 AND \"Destino\" = 'RabbitMq' AND \"Ambito\" = 'Identidad' AND \"EstadoEntrega\" IN ('Pending', 'Delivered', 'Expired', 'Failed')) OR " +
+                    "(\"Tipo\" = 'PasswordRecoveryRequested' AND \"VersionContrato\" = 1 AND \"Destino\" = 'Kafka' AND \"Ambito\" = 'Identidad' AND \"EstadoEntrega\" IS NULL)");
+                table.HasCheckConstraint("CK_OutboxMessages_Priority", "\"Prioridad\" IN ('Baja', 'Normal', 'Alta')");
+                table.HasCheckConstraint("CK_OutboxMessages_State", "\"Estado\" IN ('Pendiente', 'Procesando', 'Publicado', 'Error')");
             });
-
-            entity.HasOne<Envio>()
-                .WithMany()
-                .HasForeignKey(x => new
-                {
-                    x.OperadorId,
-                    x.EnvioId
-                })
-                .HasPrincipalKey(x => new
-                {
-                    x.OperadorId,
-                    x.Id
-                })
-                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Tipo).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.VersionContrato).IsRequired();
+            entity.Property(x => x.Ambito).HasConversion<string>().HasMaxLength(32).IsRequired();
+            entity.Property(x => x.ClaveAmbito).IsRequired();
+            entity.Property(x => x.Destino).HasConversion<string>().HasMaxLength(32).IsRequired();
+            entity.Property(x => x.Prioridad).HasConversion<string>().HasMaxLength(16).IsRequired();
+            entity.Property(x => x.Estado).HasConversion<string>().HasMaxLength(32).IsRequired();
+            entity.Property(x => x.EstadoEntrega).HasConversion<string>().HasMaxLength(32);
+            entity.Property(x => x.Payload).HasColumnType("jsonb").IsRequired();
+            entity.Property(x => x.UltimoError).HasMaxLength(2000);
+            entity.HasIndex(x => new { x.Destino, x.Estado, x.ProximoIntentoEnUtc, x.Prioridad, x.CreadoEnUtc });
+            entity.HasIndex(x => new { x.Ambito, x.ClaveAmbito, x.Destino, x.Estado, x.CreadoEnUtc });
+            entity.HasIndex(x => new { x.OperadorId, x.EnvioId });
+            entity.HasOne<Envio>().WithMany().HasForeignKey(x => new { x.OperadorId, x.EnvioId })
+                .HasPrincipalKey(x => new { x.OperadorId, x.Id }).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<ProcessedMessage>(entity =>

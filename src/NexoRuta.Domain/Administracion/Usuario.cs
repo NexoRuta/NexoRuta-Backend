@@ -6,6 +6,7 @@ namespace NexoRuta.Domain.Administracion;
 public sealed class Usuario : IdentityUser<Guid>
 {
     public long Version { get; private set; }
+    public long VersionCredencial { get; private set; }
 
     [AllowNull]
     public override string Email
@@ -55,4 +56,6 @@ public sealed class Usuario : IdentityUser<Guid>
         Version = checked(Version + 1);
         return true;
     }
+
+    public void RevocarSesionesPorCambioDePassword() => VersionCredencial = checked(VersionCredencial + 1);
 }

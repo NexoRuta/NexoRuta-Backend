@@ -3,7 +3,7 @@ namespace NexoRuta.Application.Administracion.Interfaces;
 
 public interface IVerificadorPassword
 {
-    Task<bool> VerificarAsync(
+    Task<long?> VerificarYObtenerVersionCredencialAsync(
         Guid usuarioId,
         string password,
         CancellationToken cancellationToken = default);
