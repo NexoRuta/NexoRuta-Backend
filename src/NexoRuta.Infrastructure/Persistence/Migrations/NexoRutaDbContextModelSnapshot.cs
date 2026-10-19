@@ -843,6 +843,188 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                     b.ToTable("EnlacesSeguimiento", (string)null);
                 });
 
+            modelBuilder.Entity("NexoRuta.Domain.Tarifas.AjusteTarifario", b =>
+                {
+                    b.Property<Guid>("OperadorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal?>("ImporteFijoUyu")
+                        .HasPrecision(14, 2)
+                        .HasColumnType("numeric(14,2)");
+
+                    b.Property<string>("Modalidad")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("Nombre")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<decimal?>("Porcentaje")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("numeric(5,2)");
+
+                    b.Property<string>("Tipo")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)");
+
+                    b.Property<Guid>("VersionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ZonaId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("OperadorId", "Id");
+
+                    b.HasIndex("OperadorId", "VersionId", "ZonaId", "Modalidad");
+
+                    b.ToTable("AjustesTarifario", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AjustesTarifario_Name", "length(btrim(\"Nombre\")) > 0");
+
+                            t.HasCheckConstraint("CK_AjustesTarifario_Type", "\"Tipo\" IN ('RecargoFijo', 'RecargoPorcentual', 'BonificacionFija', 'BonificacionPorcentual')");
+
+                            t.HasCheckConstraint("CK_AjustesTarifario_Value", "((\"Tipo\" IN ('RecargoFijo', 'BonificacionFija') AND \"ImporteFijoUyu\" IS NOT NULL AND \"Porcentaje\" IS NULL AND \"ImporteFijoUyu\" >= 0) OR (\"Tipo\" IN ('RecargoPorcentual', 'BonificacionPorcentual') AND \"ImporteFijoUyu\" IS NULL AND \"Porcentaje\" BETWEEN 0 AND 100))");
+                        });
+                });
+
+            modelBuilder.Entity("NexoRuta.Domain.Tarifas.TarifaZonaModalidad", b =>
+                {
+                    b.Property<Guid>("OperadorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("VersionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ZonaId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Modalidad")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<decimal>("ImporteBaseUyu")
+                        .HasPrecision(14, 2)
+                        .HasColumnType("numeric(14,2)");
+
+                    b.Property<decimal>("PrecioPorKilogramoUyu")
+                        .HasPrecision(14, 6)
+                        .HasColumnType("numeric(14,6)");
+
+                    b.Property<decimal>("PrecioPorMetroCubicoUyu")
+                        .HasPrecision(14, 6)
+                        .HasColumnType("numeric(14,6)");
+
+                    b.HasKey("OperadorId", "VersionId", "ZonaId", "Modalidad");
+
+                    b.HasIndex("OperadorId", "ZonaId");
+
+                    b.ToTable("TarifasZonaModalidad", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_TarifasZonaModalidad_Amounts", "\"ImporteBaseUyu\" >= 0 AND \"PrecioPorKilogramoUyu\" >= 0 AND \"PrecioPorMetroCubicoUyu\" >= 0");
+
+                            t.HasCheckConstraint("CK_TarifasZonaModalidad_Modality", "\"Modalidad\" IN ('Estandar', 'Urgente')");
+                        });
+                });
+
+            modelBuilder.Entity("NexoRuta.Domain.Tarifas.TarifarioOperador", b =>
+                {
+                    b.Property<Guid>("OperadorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("ActualizadoUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("UltimoNumeroPublicacion")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<Guid?>("VersionVigenteId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("OperadorId");
+
+                    b.HasIndex("OperadorId", "VersionVigenteId");
+
+                    b.ToTable("TarifariosOperador", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_TarifariosOperador_PublicationCounter", "\"UltimoNumeroPublicacion\" >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("NexoRuta.Domain.Tarifas.VersionTarifario", b =>
+                {
+                    b.Property<Guid>("OperadorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CreadaPorUsuarioId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreadaUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Estado")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("Moneda")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
+
+                    b.Property<int?>("NumeroVersionPublicada")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("PublicadaPorUsuarioId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("PublicadaUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("VersionConcurrencia")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
+                    b.HasKey("OperadorId", "Id");
+
+                    b.HasIndex("CreadaPorUsuarioId");
+
+                    b.HasIndex("OperadorId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_VersionesTarifario_OneDraftPerOperator")
+                        .HasFilter("\"Estado\" = 'Borrador'");
+
+                    b.HasIndex("PublicadaPorUsuarioId");
+
+                    b.HasIndex("OperadorId", "NumeroVersionPublicada")
+                        .IsUnique()
+                        .HasDatabaseName("UX_VersionesTarifario_PublicationNumber")
+                        .HasFilter("\"NumeroVersionPublicada\" IS NOT NULL");
+
+                    b.ToTable("VersionesTarifario", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_VersionesTarifario_Currency", "\"Moneda\" = 'UYU'");
+
+                            t.HasCheckConstraint("CK_VersionesTarifario_Publication", "(\"Estado\" = 'Borrador' AND \"NumeroVersionPublicada\" IS NULL AND \"PublicadaUtc\" IS NULL AND \"PublicadaPorUsuarioId\" IS NULL) OR (\"Estado\" = 'Publicada' AND \"NumeroVersionPublicada\" > 0 AND \"PublicadaUtc\" IS NOT NULL AND \"PublicadaPorUsuarioId\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_VersionesTarifario_State", "\"Estado\" IN ('Borrador', 'Publicada')");
+
+                            t.HasCheckConstraint("CK_VersionesTarifario_Version", "\"VersionConcurrencia\" >= 0");
+                        });
+                });
+
             modelBuilder.Entity("NexoRuta.Domain.ZonasCobertura.DepartamentoReferencia", b =>
                 {
                     b.Property<string>("Codigo")
@@ -1452,6 +1634,65 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("NexoRuta.Domain.Tarifas.AjusteTarifario", b =>
+                {
+                    b.HasOne("NexoRuta.Domain.Tarifas.TarifaZonaModalidad", null)
+                        .WithMany("Ajustes")
+                        .HasForeignKey("OperadorId", "VersionId", "ZonaId", "Modalidad")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NexoRuta.Domain.Tarifas.TarifaZonaModalidad", b =>
+                {
+                    b.HasOne("NexoRuta.Domain.Tarifas.VersionTarifario", null)
+                        .WithMany("Tarifas")
+                        .HasForeignKey("OperadorId", "VersionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("NexoRuta.Domain.ZonasCobertura.ZonaCobertura", null)
+                        .WithMany()
+                        .HasForeignKey("OperadorId", "ZonaId")
+                        .HasPrincipalKey("OperadorId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NexoRuta.Domain.Tarifas.TarifarioOperador", b =>
+                {
+                    b.HasOne("NexoRuta.Domain.Administracion.Operador", null)
+                        .WithMany()
+                        .HasForeignKey("OperadorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("NexoRuta.Domain.Tarifas.VersionTarifario", null)
+                        .WithMany()
+                        .HasForeignKey("OperadorId", "VersionVigenteId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("NexoRuta.Domain.Tarifas.VersionTarifario", b =>
+                {
+                    b.HasOne("NexoRuta.Domain.Administracion.Usuario", null)
+                        .WithMany()
+                        .HasForeignKey("CreadaPorUsuarioId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("NexoRuta.Domain.Administracion.Operador", null)
+                        .WithMany()
+                        .HasForeignKey("OperadorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("NexoRuta.Domain.Administracion.Usuario", null)
+                        .WithMany()
+                        .HasForeignKey("PublicadaPorUsuarioId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
             modelBuilder.Entity("NexoRuta.Domain.ZonasCobertura.FranjaEntrega", b =>
                 {
                     b.HasOne("NexoRuta.Domain.ZonasCobertura.ZonaCobertura", null)
@@ -1503,6 +1744,16 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                         .HasPrincipalKey("OperadorId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("NexoRuta.Domain.Tarifas.TarifaZonaModalidad", b =>
+                {
+                    b.Navigation("Ajustes");
+                });
+
+            modelBuilder.Entity("NexoRuta.Domain.Tarifas.VersionTarifario", b =>
+                {
+                    b.Navigation("Tarifas");
                 });
 
             modelBuilder.Entity("NexoRuta.Domain.ZonasCobertura.ZonaCobertura", b =>
