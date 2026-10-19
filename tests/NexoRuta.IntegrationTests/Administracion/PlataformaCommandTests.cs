@@ -14,7 +14,7 @@ public sealed class PlataformaCommandTests
             RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,
             UseShellExecute = false, CreateNoWindow = true
         };
-        info.ArgumentList.Add(typeof(Program).Assembly.Location);
+        info.ArgumentList.Add(typeof(NexoRuta.Api.Controllers.AuthController).Assembly.Location);
         info.ArgumentList.Add("platform-admin");
         info.ArgumentList.Add("create");
         if (invalidArguments) info.ArgumentList.Add("--password");

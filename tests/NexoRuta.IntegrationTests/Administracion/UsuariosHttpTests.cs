@@ -31,7 +31,7 @@ public sealed class UsuariosHttpTests(PostgresFixture postgres) : IClassFixture<
         var role = await db.Roles.SingleAsync(x => operador
             ? x.OperadorId == owner.OperadorId && x.Id != owner.RolId
             : x.ComercioId == owner.ComercioId && x.Id != owner.RolId);
-        var original = $"employee-{Guid.NewGuid():N}@example.test";
+        var original = $"employee's-{Guid.NewGuid():N}@example.test";
         using var creation = await client.PostAsJsonAsync("/api/usuarios", new { Email = original, Password = NewUserPassword, RolId = role.Id });
         Assert.Equal(HttpStatusCode.Created, creation.StatusCode);
         var employee = (await creation.Content.ReadFromJsonAsync<UsuarioOrganizacionResumen>())!;
@@ -98,6 +98,24 @@ public sealed class UsuariosHttpTests(PostgresFixture postgres) : IClassFixture<
             await LoginAsync(client, (await ReadUserAsync(database, employeeId)).Email, NewUserPassword));
         Assert.Equal(HttpStatusCode.Forbidden, (await client.PatchAsJsonAsync($"/api/usuarios/{protectedUser.UsuarioId}/email",
             new { Email = "without-permission@example.test", Version = 0 })).StatusCode);
+    }
+
+    [Fact]
+    public async Task EmailEditAcceptsAnApostrophePreviouslyAllowedByApplicationValidation()
+    {
+        var database = await postgres.CreateDatabaseAsync();
+        using var factory = database.CreateApiFactory();
+        using var client = factory.CreateHttpClient();
+        await using var db = database.CreateDbContext();
+        var actor = await AuthenticateOperatorAdminAsync(db, client);
+        var employeeId = await CreateOperatorUserAsync(client, db, actor, $"employee-{Guid.NewGuid():N}@example.test");
+        var employee = await ReadUserAsync(database, employeeId);
+        var email = $"o'connor-{Guid.NewGuid():N}@example.test";
+
+        using var update = await client.PatchAsJsonAsync($"/api/usuarios/{employeeId}/email", new { Email = email, Version = employee.Version });
+
+        Assert.Equal(HttpStatusCode.NoContent, update.StatusCode);
+        Assert.Equal(email, (await ReadUserAsync(database, employeeId)).Email);
     }
 
     [Theory]

@@ -119,6 +119,7 @@ public sealed class GenerarSeguimientoConsumerExitoTests(
             tipo = mensaje.Tipo;
             contenido = Encoding.UTF8.GetBytes(mensaje.Payload);
         }
+        await PublishedTrackingJobTestData.PublishPendingAsync(database, messageId);
 
         var uri = new Uri(rabbitMq.GetConnectionString());
         var credenciales = uri.UserInfo.Split(':', 2);
@@ -160,7 +161,7 @@ public sealed class GenerarSeguimientoConsumerExitoTests(
             });
 
         builder.Services.AddDbContext<NexoRutaDbContext>(
-            options => options.UseNpgsql(cadenaPostgres));
+            options => options.UseNexoRutaPostgres(cadenaPostgres));
 
         builder.Services.AddScoped<
             IConsultaEstadoEnvio,

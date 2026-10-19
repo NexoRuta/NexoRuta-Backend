@@ -1,24 +1,20 @@
 
 using Microsoft.AspNetCore.Identity;
 using NexoRuta.Application.Administracion.Interfaces;
+using NexoRuta.Domain.Administracion;
 
 namespace NexoRuta.Infrastructure.Administracion.Autenticacion;
 
 public sealed class VerificadorPassword(
-    IPasswordHasher<string> passwordHasher) : IVerificadorPassword
+    UserManager<Usuario> users) : IVerificadorPassword
 {
-    public bool Verificar(
-        string email,
-        string passwordHash,
-        string password)
+    public async Task<long?> VerificarYObtenerVersionCredencialAsync(Guid usuarioId, string password, CancellationToken cancellationToken = default)
     {
-        var resultado = passwordHasher.VerifyHashedPassword(
-            email,
-            passwordHash,
-            password);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (usuarioId == Guid.Empty || string.IsNullOrWhiteSpace(password))
+            return null;
 
-        return resultado is
-            PasswordVerificationResult.Success
-            or PasswordVerificationResult.SuccessRehashNeeded;
+        var user = await users.FindByIdAsync(usuarioId.ToString());
+        return user is not null && await users.CheckPasswordAsync(user, password) ? user.VersionCredencial : null;
     }
 }

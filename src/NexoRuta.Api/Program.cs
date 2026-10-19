@@ -14,6 +14,9 @@ using Microsoft.IdentityModel.Tokens;
 using NexoRuta.Application.Administracion.Context;
 using NexoRuta.Application.Administracion.Repositories;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.DataProtection;
+using NexoRuta.Infrastructure.Administracion.Autenticacion;
+using NexoRuta.Infrastructure.ZonasCobertura;
 var platformCommand = args.FirstOrDefault() == "platform-admin";
 if (platformCommand && !args.SequenceEqual(["platform-admin", "create"]))
 {
@@ -21,17 +24,73 @@ if (platformCommand && !args.SequenceEqual(["platform-admin", "create"]))
     Environment.ExitCode = 2;
     return;
 }
-var builder = WebApplication.CreateBuilder(platformCommand ? [] : args);
+var localBootstrapCommand = args.SequenceEqual(["local-bootstrap"]);
+var migrationCommand = args.SequenceEqual(["database-migrate"]);
+var catalogImportCommand = args.Length > 0 && args[0] == DepartamentoCatalogImporter.ImportCommandName;
+var catalogImportUpdate = args.Length == 2 && args[1] == DepartamentoCatalogImporter.AllowUpdateOption;
+if (catalogImportCommand && (args.Length > 2 || (args.Length == 2 && !catalogImportUpdate)))
+{
+    Console.Error.WriteLine($"Usage: {DepartamentoCatalogImporter.ImportCommandName} [{DepartamentoCatalogImporter.AllowUpdateOption}]");
+    Environment.ExitCode = 2;
+    return;
+}
+var commandMode = platformCommand || localBootstrapCommand || migrationCommand || catalogImportCommand;
+var builder = WebApplication.CreateBuilder(commandMode ? [] : args);
+if (localBootstrapCommand)
+{
+    builder.Configuration["DatabaseInitialization:SeedData"] = "true";
+    builder.Configuration["PlatformInitialization:Enabled"] = "true";
+}
 
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 builder.Services.AddNexoRutaPersistence(builder.Configuration);
+var dataProtection = builder.Services.AddDataProtection().SetApplicationName(PasswordRecoveryDataProtection.ApplicationName);
+var dataProtectionKeys = builder.Configuration[PasswordRecoveryDataProtection.KeysDirectoryConfigurationKey];
+if (!string.IsNullOrWhiteSpace(dataProtectionKeys))
+    dataProtection.PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeys));
+else if (builder.Environment.IsProduction() && !platformCommand && !localBootstrapCommand && !migrationCommand && !catalogImportCommand)
+    throw new InvalidOperationException("Production requires a persistent DataProtection:KeysDirectory.");
+builder.Services.AddOptions<PasswordRecoveryOptions>()
+    .Bind(builder.Configuration.GetSection("PasswordRecovery"))
+    .Validate(options => options.TokenLifespanSeconds is > 0 and <= 3600
+        && Uri.TryCreate(options.ResetPageUrl, UriKind.Absolute, out var url)
+        && url.Scheme is "https" or "http"
+        && (builder.Environment.IsDevelopment() || builder.Environment.IsEnvironment("Testing") || url.Scheme == "https")
+        && string.IsNullOrEmpty(url.UserInfo) && string.IsNullOrEmpty(url.Query) && string.IsNullOrEmpty(url.Fragment),
+        "Password recovery requires an absolute trusted HTTPS reset page URL (HTTP only in Development) and a token lifespan under one hour.")
+    .ValidateOnStart();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IUsuarioActual, UsuarioActualHttp>();
 if (platformCommand)
 {
     await using var commandApp = builder.Build();
     Environment.ExitCode = await NexoRuta.Api.Features.Plataforma.InicializarPlataformaCommand.EjecutarAsync(commandApp.Services);
+    return;
+}
+if (localBootstrapCommand)
+{
+    await using var commandApp = builder.Build();
+    await using var scope = commandApp.Services.CreateAsyncScope();
+    var seeder = scope.ServiceProvider.GetRequiredService<DatosInicialesSeeder>();
+    await seeder.SeedPlataformaAsync();
+    await seeder.SeedAsync();
+    return;
+}
+if (migrationCommand)
+{
+    await using var commandApp = builder.Build();
+    await using var scope = commandApp.Services.CreateAsyncScope();
+    await scope.ServiceProvider.GetRequiredService<NexoRutaDbContext>().Database.MigrateAsync();
+    return;
+}
+if (catalogImportCommand)
+{
+    await using var commandApp = builder.Build();
+    await using var scope = commandApp.Services.CreateAsyncScope();
+    var result = await scope.ServiceProvider.GetRequiredService<DepartamentoCatalogImporter>()
+        .ImportarCatalogoIncluidoAsync(catalogImportUpdate);
+    Console.WriteLine($"Department catalog: {result.DepartmentCount} rows, {result.VersionFuente}, alreadyImported={result.AlreadyImported}.");
     return;
 }
 
@@ -172,19 +231,28 @@ builder.Services.AddRateLimiter(options =>
                 }));
     }
 
+    options.AddPolicy("auth-password-recovery", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "sin-ip",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 5,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
+
 });
 
 
 
 var app = builder.Build();
-
 {
     await using var scope = app.Services.CreateAsyncScope();
     if (app.Configuration.GetValue<bool>("DatabaseInitialization:ApplyMigrations"))
         await scope.ServiceProvider.GetRequiredService<NexoRutaDbContext>().Database.MigrateAsync();
     if (app.Configuration.GetValue<bool>("DatabaseInitialization:SeedData"))
         await scope.ServiceProvider.GetRequiredService<DatosInicialesSeeder>().SeedAsync();
-    await scope.ServiceProvider.GetRequiredService<DatosInicialesSeeder>().SeedPlataformaAsync();
 }
 
 if (app.Environment.IsDevelopment())
@@ -193,6 +261,7 @@ if (app.Environment.IsDevelopment())
 app.UseRouting();
 app.UseRateLimiter();
 app.UseAuthentication();
+app.UseMiddleware<RlsTransactionMiddleware>();
 app.UseAuthorization();
 app.MapControllers();
 app.MapHealthChecks("/health/ready");

@@ -136,7 +136,9 @@ public sealed class AltaPropiaHttpTests(PostgresFixture postgres) : IClassFixtur
         var results = await Task.WhenAll(new[] { first, second }.Select(kind => client.PostAsJsonAsync($"/api/alta-propia/{kind}", new { Nombre = "Race" })));
         Assert.Equal(new[] { HttpStatusCode.Created, HttpStatusCode.Conflict }, results.Select(x => x.StatusCode).Order());
         await using var final = database.CreateDbContext();
-        Assert.Equal(1, await final.Comercios.CountAsync() + await final.Operadores.CountAsync());
+        var organizations = (await final.Comercios.Select(x => $"commerce:{x.Nombre}").ToArrayAsync())
+            .Concat(await final.Operadores.Select(x => $"operator:{x.Nombre}").ToArrayAsync()).ToArray();
+        Assert.True(organizations.Length == 1, $"Unexpected persisted organizations: {string.Join(", ", organizations)}");
         Assert.Equal(1, await final.Usuarios.CountAsync());
         Assert.Equal(1, await final.AccesosUsuario.CountAsync());
         Assert.Equal(1, await final.Roles.CountAsync());

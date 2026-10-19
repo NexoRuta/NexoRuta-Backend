@@ -100,5 +100,7 @@ public sealed class CrearEnlaceSeguimientoUseCaseTests
 
         return Task.FromResult(resultado);
     }
+    public Task<EstadoEnvio?> ObtenerEstadoPublicoAsync(string token, CancellationToken cancellationToken = default)
+        => Task.FromResult<EstadoEnvio?>(null);
     }
 }

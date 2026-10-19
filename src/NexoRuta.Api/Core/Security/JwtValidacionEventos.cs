@@ -2,13 +2,15 @@ using System.Globalization;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Identity;
 using NexoRuta.Application.Administracion.Context;
 using NexoRuta.Application.Administracion.Repositories;
+using NexoRuta.Domain.Administracion;
 namespace NexoRuta.Api.Core.Security;
 
 public sealed class JwtValidacionEventos(
     IAccesosUsuarioRepository accesos, IPlataformaRepository plataforma, IRegistroRepository identidades,
-    ISesionesMovilesRepository sesiones, TimeProvider reloj) : JwtBearerEvents
+    UserManager<Usuario> users) : JwtBearerEvents
 {
     public override async Task TokenValidated(
         TokenValidatedContext context)
@@ -22,6 +24,25 @@ public sealed class JwtValidacionEventos(
         if (!Guid.TryParse(usuarioClaim, out var usuarioId) || usuarioId == Guid.Empty)
         {
             context.Fail("Identidad inválida.");
+            return;
+        }
+
+        var credentialVersionClaim = context.Principal?.FindFirst(JwtSesionClaims.VersionCredencial)?.Value;
+        var credentialVersion = 0L; // Existing JWTs predate the global credential-version claim.
+        if (credentialVersionClaim is not null && !long.TryParse(
+                credentialVersionClaim,
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out credentialVersion))
+        {
+            context.Fail("Credential session version is invalid.");
+            return;
+        }
+
+        var account = await users.FindByIdAsync(usuarioId.ToString());
+        if (account is null || account.VersionCredencial != credentialVersion)
+        {
+            context.Fail("The credential session is no longer available.");
             return;
         }
 

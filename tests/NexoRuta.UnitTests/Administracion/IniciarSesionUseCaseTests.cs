@@ -12,13 +12,13 @@ public sealed class IniciarSesionUseCaseTests
     [InlineData(false)]
     public async Task LoginChecksPasswordAndReturnsOnlyCurrentIdentity(bool valid)
     {
-        var user = new UsuarioLogin(Guid.NewGuid(), Guid.NewGuid(), "user@example.test", "stored-hash", 7);
+        var user = new UsuarioLogin(Guid.NewGuid(), Guid.NewGuid(), "user@example.test", 7);
         var repository = new Users(user);
-        var verifier = new PasswordVerifier(valid);
+        var verifier = new PasswordVerifier(valid, 4);
         var result = await new IniciarSesionUseCase(repository, verifier)
             .EjecutarAsync(" user@example.test ", " password-with-spaces ");
         Assert.Equal("user@example.test", repository.Email);
-        Assert.Equal((user.Email, user.PasswordHash, " password-with-spaces "), verifier.Input);
+        Assert.Equal((user.UsuarioId, " password-with-spaces "), verifier.Input);
         Assert.Equal(1, verifier.Calls);
         if (valid)
         {
@@ -27,6 +27,7 @@ public sealed class IniciarSesionUseCaseTests
             Assert.Equal(user.AccesoId, result.AccesoId);
             Assert.Equal(user.Email, result.Email);
             Assert.Equal(user.VersionSesion, result.VersionSesion);
+            Assert.Equal(4, result.VersionCredencial);
         }
         else Assert.Null(result);
     }
@@ -73,7 +74,7 @@ public sealed class IniciarSesionUseCaseTests
     [Fact]
     public async Task LoginWithoutMembershipHasExplicitIdentityOnlyState()
     {
-        var user = new UsuarioLogin(Guid.NewGuid(), null, "person@example.test", "stored-hash", 0);
+        var user = new UsuarioLogin(Guid.NewGuid(), null, "person@example.test", 0);
         var session = await new IniciarSesionUseCase(new Users(user), new PasswordVerifier(true))
             .EjecutarAsync(user.Email, "valid-password");
         Assert.NotNull(session);
@@ -96,14 +97,15 @@ public sealed class IniciarSesionUseCaseTests
         }
     }
 
-    private sealed class PasswordVerifier(bool valid) : IVerificadorPassword
+    private sealed class PasswordVerifier(bool valid, long version = 0) : IVerificadorPassword
     {
         public int Calls { get; private set; }
-        public (string Email, string Hash, string Password)? Input { get; private set; }
-        public bool Verificar(string email, string passwordHash, string password)
+        public (Guid UsuarioId, string Password)? Input { get; private set; }
+        public Task<long?> VerificarYObtenerVersionCredencialAsync(Guid usuarioId, string password, CancellationToken cancellationToken = default)
         {
-            Calls++; Input = (email, passwordHash, password);
-            return valid;
+            Calls++; Input = (usuarioId, password);
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(valid ? version : (long?)null);
         }
     }
 }

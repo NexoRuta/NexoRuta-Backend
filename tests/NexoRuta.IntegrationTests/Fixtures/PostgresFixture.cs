@@ -11,31 +11,41 @@ public sealed class PostgresFixture : IAsyncLifetime
 {
     private readonly string initialDatabase = $"integration_{Guid.NewGuid():N}";
     private readonly string username = $"test_{Guid.NewGuid():N}";
-    private PostgreSqlContainer container = null!;
+    private PostgreSqlContainer? container;
 
     public async Task InitializeAsync()
     {
-        container = new PostgreSqlBuilder("postgres:18-alpine")
+        var createdContainer = new PostgreSqlBuilder("postgis/postgis:18-3.6-alpine")
             .WithDatabase(initialDatabase)
             .WithUsername(username)
             .WithPassword(Convert.ToHexString(RandomNumberGenerator.GetBytes(32)))
             .Build();
+        container = createdContainer;
         try
         {
-            await container.StartAsync();
+            await createdContainer.StartAsync();
         }
-        catch
+        catch (Exception startException)
         {
-            await container.DisposeAsync();
+            container = null;
+            try
+            {
+                await createdContainer.DisposeAsync();
+            }
+            catch (Exception cleanupException)
+            {
+                startException.Data["PostgresFixture.CleanupFailureType"] = cleanupException.GetType().FullName;
+            }
             throw;
         }
     }
 
-    public async Task<IntegrationDatabase> CreateDatabaseAsync()
+    public async Task<IntegrationDatabase> CreateDatabaseAsync(string? targetMigration = null)
     {
-        Assert.False(string.IsNullOrWhiteSpace(container.Id));
-        Assert.Equal("Running", container.State.ToString());
-        var source = new NpgsqlConnectionStringBuilder(container.GetConnectionString());
+        var startedContainer = container ?? throw new InvalidOperationException("The PostgreSQL fixture did not start.");
+        Assert.False(string.IsNullOrWhiteSpace(startedContainer.Id));
+        Assert.Equal("Running", startedContainer.State.ToString());
+        var source = new NpgsqlConnectionStringBuilder(startedContainer.GetConnectionString());
         Assert.Equal(initialDatabase, source.Database);
         Assert.Equal(username, source.Username);
         await using var owned = new NpgsqlConnection(source.ConnectionString);
@@ -68,12 +78,17 @@ public sealed class PostgresFixture : IAsyncLifetime
         }
         var database = new IntegrationDatabase(connection.ConnectionString);
         await using var db = database.CreateDbContext();
-        await db.Database.MigrateAsync();
+        await db.Database.MigrateAsync(targetMigration);
         return database;
     }
 
     // All per-test databases disappear with the owned container. No database deletion SQL.
-    public Task DisposeAsync() => container.DisposeAsync().AsTask();
+    public Task DisposeAsync()
+    {
+        var current = container;
+        container = null;
+        return current is null ? Task.CompletedTask : current.DisposeAsync().AsTask();
+    }
 }
 
 public sealed class IntegrationDatabase
@@ -83,7 +98,7 @@ public sealed class IntegrationDatabase
     internal IntegrationDatabase(string connectionString)
     {
         options = new DbContextOptionsBuilder<NexoRutaDbContext>()
-            .UseNpgsql(connectionString)
+            .UseNexoRutaPostgres(connectionString)
             .Options;
         ConnectionString = connectionString;
     }

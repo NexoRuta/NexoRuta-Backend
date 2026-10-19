@@ -7,7 +7,7 @@ namespace NexoRuta.Worker;
 
 public sealed class Worker(
     IServiceScopeFactory scopeFactory,
-    RabbitMqSeguimientoPublisher publisher,
+    OutboxHandlerRegistry handlers,
     ILogger<Worker> logger) : BackgroundService
 {
     private readonly Guid procesadorId = Guid.NewGuid();
@@ -52,7 +52,7 @@ public sealed class Worker(
                 // 2. Intentar publicar el mensaje.
                 try
                 {
-                    await publisher.PublicarAsync(
+                    await handlers.HandleAsync(
                         mensaje,
                         stoppingToken);
                 }

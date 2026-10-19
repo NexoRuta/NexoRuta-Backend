@@ -417,7 +417,7 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
     }
 
     private static EfPlataformaRepository Repository(NexoRutaDbContext db)
-        => new(db, new GeneradorPasswordHash(new PasswordHasher<string>()));
+        => new(db, AuthenticationTestData.UserManager(db));
     private static async Task Initialize(IntegrationDatabase database)
     {
         await using var db = database.CreateDbContext();

@@ -10,7 +10,8 @@ public sealed record SesionIniciada(
     long VersionSesion,
     bool EsPlataforma = false,
     TipoAccesoUsuario? TipoOrganizacion = null,
-    bool OrganizacionSuspendida = false)
+    bool OrganizacionSuspendida = false,
+    long VersionCredencial = 0)
 {
     public bool SinOrganizacion => AccesoId is null && !EsPlataforma;
 }

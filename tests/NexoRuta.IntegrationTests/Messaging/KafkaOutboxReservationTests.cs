@@ -1,3 +1,5 @@
+using System.Text.Json;
+using NexoRuta.Infrastructure.Administracion.Autenticacion;
 using NexoRuta.Infrastructure.Outbox;
 using NexoRuta.IntegrationTests.Fixtures;
 using NexoRuta.IntegrationTests.Seguimiento;
@@ -13,7 +15,7 @@ public sealed class KafkaOutboxReservationTests(PostgresFixture postgres) : ICla
         var database = await postgres.CreateDatabaseAsync();
         await using var db = database.CreateDbContext();
         var envio = await SeguimientoTestData.CreateEnvioAsync(db);
-        var evento = new OutboxMessage(envio.OperadorId, envio.Id, "EnvioCreado",
+        var evento = OutboxMessage.ForShipment(envio.OperadorId, envio.Id, OutboxMessageTypes.ShipmentCreated,
             OutboxDestino.Kafka, "{}");
         db.OutboxMessages.Add(evento);
         await db.SaveChangesAsync();
@@ -29,8 +31,8 @@ public sealed class KafkaOutboxReservationTests(PostgresFixture postgres) : ICla
         await using (var db = database.CreateDbContext())
         {
             var envio = await SeguimientoTestData.CreateEnvioAsync(db);
-            db.OutboxMessages.Add(new OutboxMessage(envio.OperadorId, envio.Id,
-                "EnvioCreado", OutboxDestino.Kafka, "{}"));
+            db.OutboxMessages.Add(OutboxMessage.ForShipment(envio.OperadorId, envio.Id,
+                OutboxMessageTypes.ShipmentCreated, OutboxDestino.Kafka, "{}"));
             await db.SaveChangesAsync();
         }
         await using var primero = database.CreateDbContext();
@@ -49,7 +51,7 @@ public sealed class KafkaOutboxReservationTests(PostgresFixture postgres) : ICla
         var database = await postgres.CreateDatabaseAsync();
         await using var db = database.CreateDbContext();
         var envio = await SeguimientoTestData.CreateEnvioAsync(db);
-        var evento = new OutboxMessage(envio.OperadorId, envio.Id, "EnvioCreado", OutboxDestino.Kafka, "{}");
+        var evento = OutboxMessage.ForShipment(envio.OperadorId, envio.Id, OutboxMessageTypes.ShipmentCreated, OutboxDestino.Kafka, "{}");
         db.OutboxMessages.Add(evento);
         await db.SaveChangesAsync();
         var repo = new EfOutboxRepository(db);
@@ -73,13 +75,71 @@ public sealed class KafkaOutboxReservationTests(PostgresFixture postgres) : ICla
         await using var db = database.CreateDbContext();
         var envio = await SeguimientoTestData.CreateEnvioAsync(db);
         db.OutboxMessages.AddRange(
-            new OutboxMessage(envio.OperadorId, envio.Id, "EnvioCreado", OutboxDestino.Kafka, "{}"),
-            new OutboxMessage(envio.OperadorId, envio.Id, "GenerarSeguimiento", OutboxDestino.RabbitMq, "{}"));
+            OutboxMessage.ForShipment(envio.OperadorId, envio.Id, OutboxMessageTypes.ShipmentCreated, OutboxDestino.Kafka, "{}"),
+            OutboxMessage.ForShipment(envio.OperadorId, envio.Id, OutboxMessageTypes.TrackingRequested, OutboxDestino.RabbitMq, "{}"));
         await db.SaveChangesAsync();
         var repo = new EfOutboxRepository(db);
-        Assert.Equal(OutboxDestino.Kafka, (await repo.ReservarSiguienteAsync(Guid.NewGuid(), OutboxDestino.Kafka))!.Destino);
+        Assert.Equal(nameof(OutboxDestino.Kafka), (await repo.ReservarSiguienteAsync(Guid.NewGuid(), OutboxDestino.Kafka))!.Destino);
         Assert.Null(await repo.ReservarSiguienteAsync(Guid.NewGuid(), OutboxDestino.Kafka));
-        Assert.Equal(OutboxDestino.RabbitMq, (await repo.ReservarSiguienteAsync(Guid.NewGuid(), OutboxDestino.RabbitMq))!.Destino);
+        Assert.Equal(nameof(OutboxDestino.RabbitMq), (await repo.ReservarSiguienteAsync(Guid.NewGuid(), OutboxDestino.RabbitMq))!.Destino);
         Assert.Null(await repo.ReservarSiguienteAsync(Guid.NewGuid(), OutboxDestino.RabbitMq));
+    }
+
+    [Fact]
+    public async Task PriorityAging_PromotesOldLowPriorityBeforeNewNormalWork()
+    {
+        var database = await postgres.CreateDatabaseAsync();
+        await using var db = database.CreateDbContext();
+        var shipment = await SeguimientoTestData.CreateEnvioAsync(db);
+        var userId = await db.Usuarios.Select(x => x.Id).FirstAsync();
+        var eventId = Guid.CreateVersion7();
+        var recovery = OutboxMessage.ForIdentity(userId, OutboxMessageTypes.PasswordRecoveryRequested, OutboxDestino.Kafka,
+            JsonSerializer.Serialize(new PasswordRecoveryRequestedV1(eventId, userId, DateTimeOffset.UtcNow), PasswordRecoveryJson.Options), id: eventId);
+        var normal = OutboxMessage.ForShipment(shipment.OperadorId, shipment.Id,
+            OutboxMessageTypes.ShipmentCreated, OutboxDestino.Kafka, "{}");
+        db.OutboxMessages.AddRange(recovery, normal);
+        await db.SaveChangesAsync();
+        var agedAt = DateTimeOffset.UtcNow.AddMinutes(-11);
+        await db.OutboxMessages.Where(x => x.Id == recovery.Id).ExecuteUpdateAsync(update => update
+            .SetProperty(x => x.CreadoEnUtc, agedAt)
+            .SetProperty(x => x.ProximoIntentoEnUtc, agedAt));
+
+        var claimed = await new EfOutboxRepository(db).ReservarSiguienteAsync(Guid.CreateVersion7(), OutboxDestino.Kafka);
+
+        Assert.NotNull(claimed);
+        Assert.Equal(recovery.Id, claimed.Id);
+        Assert.Equal(OutboxPriority.Baja.ToString(), claimed.Prioridad);
+    }
+
+    [Fact]
+    public async Task KafkaPriorityNeverLetsLaterMessageOvertakeSameIdentityKey()
+    {
+        var database = await postgres.CreateDatabaseAsync();
+        await using var db = database.CreateDbContext();
+        await SeguimientoTestData.CreateEnvioAsync(db);
+        var userId = await db.Usuarios.Select(x => x.Id).FirstAsync();
+        var firstId = Guid.CreateVersion7();
+        var secondId = Guid.CreateVersion7();
+        OutboxMessage Request(Guid id) => OutboxMessage.ForIdentity(userId,
+            OutboxMessageTypes.PasswordRecoveryRequested, OutboxDestino.Kafka,
+            JsonSerializer.Serialize(new PasswordRecoveryRequestedV1(id, userId, DateTimeOffset.UtcNow), PasswordRecoveryJson.Options), id: id);
+        var first = Request(firstId);
+        var second = Request(secondId);
+        db.OutboxMessages.AddRange(first, second);
+        await db.SaveChangesAsync();
+        var earlier = DateTimeOffset.UtcNow.AddMinutes(-2);
+        await db.OutboxMessages.Where(x => x.Id == firstId).ExecuteUpdateAsync(update => update
+            .SetProperty(x => x.CreadoEnUtc, earlier)
+            .SetProperty(x => x.ProximoIntentoEnUtc, earlier));
+        await db.OutboxMessages.Where(x => x.Id == secondId)
+            .ExecuteUpdateAsync(update => update.SetProperty(x => x.Prioridad, OutboxPriority.Alta));
+
+        var repository = new EfOutboxRepository(db);
+        var processor = Guid.CreateVersion7();
+        var firstClaim = await repository.ReservarSiguienteAsync(processor, OutboxDestino.Kafka);
+        Assert.Equal(firstId, firstClaim?.Id);
+        Assert.Null(await repository.ReservarSiguienteAsync(Guid.CreateVersion7(), OutboxDestino.Kafka));
+        Assert.True(await repository.MarcarPublicadoAsync(firstId, processor));
+        Assert.Equal(secondId, (await repository.ReservarSiguienteAsync(Guid.CreateVersion7(), OutboxDestino.Kafka))?.Id);
     }
 }

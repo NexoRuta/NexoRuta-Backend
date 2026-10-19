@@ -5,159 +5,64 @@ namespace NexoRuta.Infrastructure.Outbox;
 
 public sealed class EfOutboxRepository(NexoRutaDbContext db)
 {
-    public async Task<OutboxMessage?> ReservarSiguienteAsync(
-        Guid procesadorId,
-        OutboxDestino destino,
+    public async Task<bool> EnqueuePasswordRecoveryAsync(
+        Guid userId, Guid emailMessageId, Guid eventId, string protectedEmailPayload, string eventPayload,
         CancellationToken cancellationToken = default)
     {
+        if (userId == Guid.Empty || emailMessageId == Guid.Empty || eventId == Guid.Empty || emailMessageId == eventId)
+            throw new ArgumentException("Password recovery message identities must be distinct and non-empty.");
+        ArgumentException.ThrowIfNullOrWhiteSpace(protectedEmailPayload);
+        ArgumentException.ThrowIfNullOrWhiteSpace(eventPayload);
+        return await db.Database.SqlQueryRaw<bool>(
+            "SELECT " + RlsSqlFunctionContract.EnqueuePasswordRecovery + "({0}, {1}, {2}, {3}::jsonb, {4}::jsonb) AS \"Value\"",
+            userId, emailMessageId, eventId, protectedEmailPayload, eventPayload)
+            .SingleAsync(cancellationToken);
+    }
+
+    public async Task<OutboxClaim?> ReservarSiguienteAsync(
+        Guid procesadorId, OutboxDestino destino, CancellationToken cancellationToken = default)
+    {
         if (procesadorId == Guid.Empty)
-            throw new ArgumentException(
-                "El identificador del procesador es obligatorio.",
-                nameof(procesadorId));
-
-        if (!Enum.IsDefined(destino))
-            throw new ArgumentOutOfRangeException(nameof(destino));
-
-        var ahora = DateTimeOffset.UtcNow;
-        var reservaHasta = ahora.AddMinutes(2);
-
-        // Each dispatcher only leases messages for its own transport.
-        var candidatos = await db.OutboxMessages
-            .AsNoTracking()
-            .Where(x =>
-                x.Destino == destino &&
-                (
-                    (
-                        (x.Estado == OutboxEstado.Pendiente ||
-                         x.Estado == OutboxEstado.Error) &&
-                        x.ProximoIntentoEnUtc <= ahora
-                    ) ||
-                    (
-                        x.Estado == OutboxEstado.Procesando &&
-                        x.ReservaHastaUtc <= ahora
-                    )
-                ))
-            .OrderBy(x => x.CreadoEnUtc)
-            .Select(x => x.Id)
-            .Take(10)
-            .ToListAsync(cancellationToken);
-
-        foreach (var id in candidatos)
-        {
-            // UPDATE condicional: solo uno de los Workers gana.
-            var actualizados = await db.OutboxMessages
-                .Where(x =>
-                    x.Id == id &&
-                    x.Destino == destino &&
-                    (
-                        (
-                            (x.Estado == OutboxEstado.Pendiente ||
-                             x.Estado == OutboxEstado.Error) &&
-                            x.ProximoIntentoEnUtc <= ahora
-                        ) ||
-                        (
-                            x.Estado == OutboxEstado.Procesando &&
-                            x.ReservaHastaUtc <= ahora
-                        )
-                    ))
-                .ExecuteUpdateAsync(setters => setters
-                    .SetProperty(
-                        x => x.Estado,
-                        OutboxEstado.Procesando)
-                    .SetProperty(
-                        x => x.ProcesadorId,
-                        (Guid?)procesadorId)
-                    .SetProperty(
-                        x => x.ReservaHastaUtc,
-                        (DateTimeOffset?)reservaHasta)
-                    .SetProperty(
-                        x => x.Intentos,
-                        x => x.Intentos < int.MaxValue ? x.Intentos + 1 : x.Intentos),
-                    cancellationToken);
-
-            if (actualizados == 1)
-            {
-                return await db.OutboxMessages
-                    .AsNoTracking()
-                    .SingleAsync(
-                        x => x.Id == id,
-                        cancellationToken);
-            }
-        }
-
-        return null;
+            throw new ArgumentException("El identificador del procesador es obligatorio.", nameof(procesadorId));
+        if (!Enum.IsDefined(destino)) throw new ArgumentOutOfRangeException(nameof(destino));
+        return await db.Database.SqlQueryRaw<OutboxClaim>(
+                "SELECT * FROM " + RlsSqlFunctionContract.ClaimOutbox + "({0}, {1})", procesadorId, destino.ToString())
+            .AsNoTracking().SingleOrDefaultAsync(cancellationToken);
     }
-    public async Task<bool> MarcarPublicadoAsync(
-    Guid mensajeId,
-    Guid procesadorId,
-    CancellationToken cancellationToken = default)
+
+    public Task<bool> MarcarPublicadoAsync(Guid mensajeId, Guid procesadorId, CancellationToken cancellationToken = default)
+        => EjecutarFinalizacionAsync(mensajeId, procesadorId, true, null, cancellationToken);
+
+    public Task<bool> MarcarErrorAsync(Guid mensajeId, Guid procesadorId, string error, CancellationToken cancellationToken = default)
     {
-        var ahora = DateTimeOffset.UtcNow;
-
-        var actualizados = await db.OutboxMessages
-            .Where(x =>
-                x.Id == mensajeId &&
-                x.Estado == OutboxEstado.Procesando &&
-                x.ProcesadorId == procesadorId &&
-                x.ReservaHastaUtc > ahora)
-            .ExecuteUpdateAsync(setters => setters
-                .SetProperty(
-                    x => x.Estado,
-                    OutboxEstado.Publicado)
-                .SetProperty(
-                    x => x.PublicadoEnUtc,
-                    (DateTimeOffset?)ahora)
-                .SetProperty(
-                    x => x.ProcesadorId,
-                    (Guid?)null)
-                .SetProperty(
-                    x => x.ReservaHastaUtc,
-                    (DateTimeOffset?)null)
-                .SetProperty(
-                    x => x.UltimoError,
-                    (string?)null),
-                cancellationToken);
-
-
-        return actualizados == 1;
+        var safeError = string.IsNullOrWhiteSpace(error) ? "Publication failed" : error[..Math.Min(error.Length, 200)];
+        return EjecutarFinalizacionAsync(mensajeId, procesadorId, false, safeError, cancellationToken);
     }
-    public async Task<bool> MarcarErrorAsync(
-    Guid mensajeId,
-    Guid procesadorId,
-    string error,
-    CancellationToken cancellationToken = default, TimeSpan? demora = null)
+
+    public async Task<bool> MarkEmailDeliveryAsync(
+        Guid messageId, OutboxEmailDeliveryState state, CancellationToken cancellationToken = default)
     {
-        var ahora = DateTimeOffset.UtcNow;
-        var proximoIntento = ahora.Add(demora ?? TimeSpan.FromSeconds(30));
+        if (messageId == Guid.Empty || !Enum.IsDefined(state)) return false;
+        return await db.Database.SqlQueryRaw<bool>(
+            "SELECT " + RlsSqlFunctionContract.MarkEmailDelivery + "({0}, {1}) AS \"Value\"",
+            messageId, state.ToString()).SingleAsync(cancellationToken);
+    }
 
-        var mensajeError = string.IsNullOrWhiteSpace(error)
-            ? "Error de publicación"
-            : error[..Math.Min(error.Length, 2000)];
+    public Task<string?> GetEmailDeliveryStateAsync(Guid messageId, CancellationToken cancellationToken = default)
+    {
+        if (messageId == Guid.Empty) throw new ArgumentException("Message ID is required.", nameof(messageId));
+        return db.Database.SqlQueryRaw<string?>(
+            "SELECT " + RlsSqlFunctionContract.GetEmailDeliveryState + "({0}) AS \"Value\"",
+            messageId).SingleOrDefaultAsync(cancellationToken);
+    }
 
-        var actualizados = await db.OutboxMessages
-            .Where(x =>
-                x.Id == mensajeId &&
-                x.Estado == OutboxEstado.Procesando &&
-                x.ProcesadorId == procesadorId &&
-                x.ReservaHastaUtc > ahora)
-            .ExecuteUpdateAsync(setters => setters
-                .SetProperty(
-                    x => x.Estado,
-                    OutboxEstado.Error)
-                .SetProperty(
-                    x => x.ProximoIntentoEnUtc,
-                    proximoIntento)
-                .SetProperty(
-                    x => x.UltimoError,
-                    mensajeError)
-                .SetProperty(
-                    x => x.ProcesadorId,
-                    (Guid?)null)
-                .SetProperty(
-                    x => x.ReservaHastaUtc,
-                    (DateTimeOffset?)null),
-                cancellationToken);
-
-        return actualizados == 1;
+    private async Task<bool> EjecutarFinalizacionAsync(
+        Guid mensajeId, Guid procesadorId, bool correcto, string? error, CancellationToken cancellationToken)
+    {
+        if (mensajeId == Guid.Empty || procesadorId == Guid.Empty) return false;
+        return await db.Database.SqlQueryRaw<bool>(
+            "SELECT " + RlsSqlFunctionContract.FinishOutbox + "({0}, {1}, {2}, {3}) AS \"Value\"",
+            mensajeId, procesadorId, correcto, error!)
+            .SingleAsync(cancellationToken);
     }
 }

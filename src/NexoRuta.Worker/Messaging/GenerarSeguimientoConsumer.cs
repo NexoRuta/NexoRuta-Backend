@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
+using NexoRuta.Infrastructure.Outbox;
 using NexoRuta.Infrastructure.Seguimiento.Processing;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
@@ -31,36 +32,9 @@ public sealed class GenerarSeguimientoConsumer(
     protected override async Task ExecuteAsync(
         CancellationToken stoppingToken)
     {
-        var usuario = configuration["RabbitMq:Username"];
-        var password = configuration["RabbitMq:Password"];
-
-        if (string.IsNullOrWhiteSpace(usuario) ||
-            string.IsNullOrWhiteSpace(password))
-        {
-            throw new InvalidOperationException(
-                "Faltan las credenciales de RabbitMQ.");
-        }
-
-        var factory = new ConnectionFactory
-        {
-            HostName = configuration["RabbitMq:Host"]
-                ?? "127.0.0.1",
-
-            Port = int.TryParse(
-                configuration["RabbitMq:Port"],
-                out var puerto)
-                    ? puerto
-                    : 5672,
-
-            UserName = usuario,
-            Password = password,
-
-            AutomaticRecoveryEnabled = true,
-            ConsumerDispatchConcurrency = 1
-        };
-
+        var factory = RabbitMqWorkerConnection.CreateFactory(configuration);
         await using var connection =
-            await factory.CreateConnectionAsync(stoppingToken);
+            await RabbitMqWorkerConnection.ConnectWithRetryAsync(factory, logger, stoppingToken);
 
         connection.ConnectionShutdownAsync += (_, cierre) =>
         {
@@ -134,8 +108,7 @@ public sealed class GenerarSeguimientoConsumer(
                             "MessageId inválido.");
                     }
 
-                    if (entrega.BasicProperties.Type !=
-                        "GenerarSeguimiento")
+                    if (entrega.BasicProperties.Type != OutboxMessageTypes.TrackingRequested)
                     {
                         throw new InvalidDataException(
                             "Tipo de mensaje incorrecto.");

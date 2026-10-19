@@ -194,17 +194,21 @@ public sealed class KafkaOutboxTests(PostgresFixture postgres, KafkaFixture kafk
         {
             ["Kafka:BootstrapServers"] = kafka.BootstrapServers, ["Kafka:MessageTimeoutMs"] = "5000"
         });
-        builder.Services.AddDbContext<NexoRutaDbContext>(options => options.UseNpgsql(database.ConnectionString));
+        builder.Services.AddDbContext<NexoRutaDbContext>(options => options.UseNexoRutaPostgres(database.ConnectionString));
         builder.Services.AddScoped<EfOutboxRepository>();
         if (rabbitSettings is null)
         {
             builder.Services.AddSingleton<KafkaEnvioCreadoPublisher>();
+            builder.Services.AddSingleton<IOutboxMessageHandler, KafkaShipmentCreatedOutboxHandler>();
+            builder.Services.AddSingleton<OutboxHandlerRegistry>();
             builder.Services.AddHostedService<KafkaOutboxWorker>();
         }
         else
         {
             builder.Configuration.AddInMemoryCollection(rabbitSettings);
-            builder.Services.AddSingleton<RabbitMqSeguimientoPublisher>();
+            builder.Services.AddSingleton<RabbitMqOutboxPublisher>();
+            builder.Services.AddSingleton<IOutboxMessageHandler, RabbitTrackingOutboxHandler>();
+            builder.Services.AddSingleton<OutboxHandlerRegistry>();
             builder.Services.AddHostedService<NexoRuta.Worker.Worker>();
         }
         return builder.Build();
@@ -271,13 +275,13 @@ public sealed class KafkaOutboxTests(PostgresFixture postgres, KafkaFixture kafk
     private static void AssertContract(OutboxMessage evento, ConsumeResult<string, string> record)
     {
         Assert.Equal(KafkaEnvioCreadoPublisher.Topic, record.Topic);
-        Assert.Equal(evento.EnvioId.ToString("D"), record.Message.Key);
+        Assert.Equal(evento.EnvioId!.Value.ToString("D"), record.Message.Key);
         Assert.Equal(evento.Payload, record.Message.Value);
         var expected = new Dictionary<string, string>
         {
             ["eventId"] = evento.Id.ToString("D"), ["eventType"] = "EnvioCreado", ["eventVersion"] = "1",
             ["occurredAt"] = evento.CreadoEnUtc.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
-            ["operadorId"] = evento.OperadorId.ToString("D"), ["contentType"] = "application/json"
+            ["operadorId"] = evento.OperadorId!.Value.ToString("D"), ["contentType"] = "application/json"
         };
         Assert.Equal(expected.Count, record.Message.Headers.Count);
         foreach (var (key, value) in expected)

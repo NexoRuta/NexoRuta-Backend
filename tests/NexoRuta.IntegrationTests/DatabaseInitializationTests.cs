@@ -29,7 +29,7 @@ public sealed class DatabaseInitializationTests
         }
     }
 
-    private sealed class StartupFactory(string? migrations, string? seed) : WebApplicationFactory<Program>
+    private sealed class StartupFactory(string? migrations, string? seed) : WebApplicationFactory<NexoRuta.Api.Controllers.AuthController>
     {
         protected override IHost CreateHost(IHostBuilder builder)
         {
@@ -41,6 +41,11 @@ public sealed class DatabaseInitializationTests
                     // ponytail: a closed loopback port proves startup does not require a database.
                     ["ConnectionStrings:Postgres"] = "Host=127.0.0.1;Port=1;Database=unused;Username=unused;Password=unused;Timeout=1;Pooling=false",
                     ["OpenTelemetry:Enabled"] = "false",
+                    ["PasswordRecovery:ResetPageUrl"] = "https://commerce.example.test/restablecer-contrasena",
+                    ["PasswordRecovery:TokenLifespanSeconds"] = "900",
+                    ["Email:Smtp:Host"] = "mailpit.integration.test",
+                    ["Email:Smtp:Port"] = "1025",
+                    ["Email:Smtp:FromAddress"] = "noreply@example.test",
                     ["AccesoInicial:UsuarioEmail"] = "owner@example.test",
                     ["AccesoInicial:OperadorUsuarioEmail"] = "operator@example.test",
                     ["AccesoInicial:OperadorNombre"] = "Operator",

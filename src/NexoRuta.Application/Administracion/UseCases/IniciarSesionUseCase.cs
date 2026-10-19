@@ -27,12 +27,12 @@ public sealed class IniciarSesionUseCase(
         if (usuario is null)
             return null;
 
-        var passwordValida = verificador.Verificar(
-            usuario.Email,
-            usuario.PasswordHash,
-            password);
+        var versionCredencial = await verificador.VerificarYObtenerVersionCredencialAsync(
+            usuario.UsuarioId,
+            password,
+            cancellationToken);
 
-        if (!passwordValida)
+        if (versionCredencial is null)
             return null;
 
         return new SesionIniciada(
@@ -42,6 +42,7 @@ public sealed class IniciarSesionUseCase(
             usuario.VersionSesion,
             usuario.EsPlataforma,
             usuario.TipoOrganizacion,
-            usuario.EstadoOrganizacion == NexoRuta.Domain.Administracion.EstadoOrganizacion.Suspendida);
+            usuario.EstadoOrganizacion == NexoRuta.Domain.Administracion.EstadoOrganizacion.Suspendida,
+            versionCredencial.Value);
     }
 }

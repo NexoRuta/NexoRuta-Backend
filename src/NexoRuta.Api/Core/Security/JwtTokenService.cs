@@ -28,6 +28,9 @@ public sealed class JwtTokenService(JwtConfiguracion config, TimeProvider reloj)
             new Claim(
                 JwtSesionClaims.VersionSesion,
                 sesion.VersionSesion.ToString(CultureInfo.InvariantCulture)),
+            new Claim(
+                JwtSesionClaims.VersionCredencial,
+                sesion.VersionCredencial.ToString(CultureInfo.InvariantCulture)),
         };
 
         if (sesionMovilId is { } id)

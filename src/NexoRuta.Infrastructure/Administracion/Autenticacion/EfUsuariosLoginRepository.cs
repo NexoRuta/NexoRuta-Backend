@@ -15,38 +15,20 @@ public sealed class EfUsuariosLoginRepository(
         CancellationToken cancellationToken = default)
     {
         var emailNormalizado = email.Trim().ToLowerInvariant();
-
-        var organization = await (
-            from usuario in db.Usuarios.AsNoTracking()
-            join acceso in db.AccesosUsuario.AsNoTracking()
-                on usuario.Id equals acceso.UsuarioId
-            where usuario.Email.ToLower() == emailNormalizado && usuario.PasswordHash != null && usuario.PasswordHash != "" && acceso.RolId != null && acceso.Activo
-
-            select new UsuarioLogin(
-                usuario.Id,
-                acceso.Id,
-                usuario.Email,
-                usuario.PasswordHash!,
-                acceso.VersionSesion,
-                false,
-                acceso.OperadorId != null ? TipoAccesoUsuario.Operador : TipoAccesoUsuario.Comercio,
-                acceso.OperadorId != null
-                    ? db.Operadores.Where(x => x.Id == acceso.OperadorId).Select(x => (EstadoOrganizacion?)x.Estado).SingleOrDefault()
-                    : db.Comercios.Where(x => x.Id == acceso.ComercioId).Select(x => (EstadoOrganizacion?)x.Estado).SingleOrDefault())
-        ).SingleOrDefaultAsync(cancellationToken);
-        if (organization is not null) return organization;
-        var platform = await (from user in db.Usuarios.AsNoTracking()
-                      join access in db.AccesosPlataforma on user.Id equals access.UsuarioId
-                      join role in db.RolesPlataforma on access.RolId equals role.Id
-                      where user.Email.ToLower() == emailNormalizado && user.PasswordHash != null && user.PasswordHash != "" && access.Activo
-                      select new UsuarioLogin(user.Id, access.AccesoId, user.Email, user.PasswordHash!, access.VersionSesion, true))
+        var row = await db.Database.SqlQueryRaw<LoginLookupRow>(
+            "SELECT * FROM " + RlsSqlFunctionContract.LoginLookup + "({0})", emailNormalizado)
             .SingleOrDefaultAsync(cancellationToken);
-        if (platform is not null) return platform;
-        // Never turn an inactive, role-less or revoked account into an unassigned identity.
-        return await db.Usuarios.AsNoTracking()
-            .Where(x => x.Email.Trim().ToLower() == emailNormalizado && x.PasswordHash != null && x.PasswordHash != "" &&
-                !db.AccesosUsuario.Any(a => a.UsuarioId == x.Id) && !db.AccesosPlataforma.Any(a => a.UsuarioId == x.Id))
-            .Select(x => new UsuarioLogin(x.Id, null, x.Email, x.PasswordHash!, 0, false))
-            .SingleOrDefaultAsync(cancellationToken);
+        if (row is null) return null;
+        return new UsuarioLogin(
+            row.UsuarioId,
+            row.AccesoId,
+            row.Email,
+            row.VersionSesion,
+            row.EsPlataforma,
+            Enum.TryParse<TipoAccesoUsuario>(row.TipoOrganizacion, out var tipo) ? tipo : null,
+            Enum.TryParse<EstadoOrganizacion>(row.EstadoOrganizacion, out var estado) ? estado : null);
     }
+
+    private sealed record LoginLookupRow(Guid UsuarioId, Guid? AccesoId, string Email, long VersionSesion,
+        bool EsPlataforma, string? TipoOrganizacion, string? EstadoOrganizacion);
 }
