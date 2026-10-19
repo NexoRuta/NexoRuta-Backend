@@ -23,6 +23,9 @@ using NexoRuta.Infrastructure.Correo;
 using NexoRuta.Application.ZonasCobertura.Repositories;
 using NexoRuta.Infrastructure.ZonasCobertura;
 using NexoRuta.Application.ZonasCobertura.UseCases;
+using NexoRuta.Application.Tarifas.Repositories;
+using NexoRuta.Application.Tarifas.UseCases;
+using NexoRuta.Infrastructure.Tarifas;
 namespace NexoRuta.Infrastructure.Persistence;
 
 public static class DependencyInjection
@@ -89,6 +92,12 @@ public static class DependencyInjection
         services.AddScoped<NexoRuta.Application.Envios.Repositories.ICancelacionesEnvioRepository, NexoRuta.Infrastructure.Envios.Repositories.EfCancelacionesEnvioRepository>();
         services.AddScoped<NexoRuta.Application.Envios.UseCases.CancelarEnvioUseCase>();
         services.AddScoped<IZonasCoberturaRepository, EfZonasCoberturaRepository>();
+        services.AddScoped<ITarifariosRepository, EfTarifariosRepository>();
+        services.AddScoped<ConsultarTarifarioUseCase>();
+        services.AddScoped<CrearBorradorTarifarioUseCase>();
+        services.AddScoped<EditarBorradorTarifarioUseCase>();
+        services.AddScoped<PublicarBorradorTarifarioUseCase>();
+        services.AddScoped<SimularTarifaUseCase>();
         services.AddScoped<DepartamentoCatalogImporter>();
         services.AddScoped<RequerirOperadorCoberturaUseCase>();
         services.AddScoped<ValidarTerritorioUruguayUseCase>();
