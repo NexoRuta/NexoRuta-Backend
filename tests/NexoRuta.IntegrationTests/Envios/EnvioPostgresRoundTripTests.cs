@@ -32,7 +32,7 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
     {
         var database = await postgres.CreateDatabaseAsync();
         options = new DbContextOptionsBuilder<NexoRutaDbContext>()
-            .UseNpgsql(database.ConnectionString).Options;
+            .UseNexoRutaPostgres(database.ConnectionString).Options;
     }
 
     public Task DisposeAsync() => Task.CompletedTask;
@@ -63,7 +63,7 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
 
         var lockObserver = new ShipmentLockObserver();
         var optionsWithObserver = new DbContextOptionsBuilder<NexoRutaDbContext>()
-            .UseNpgsql(suspension.Database.GetConnectionString())
+            .UseNexoRutaPostgres(suspension.Database.GetConnectionString())
             .AddInterceptors(lockObserver)
             .Options;
         await using var shipmentDb = new NexoRutaDbContext(optionsWithObserver);

@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
+using NetTopologySuite.Geometries;
 using NexoRuta.Infrastructure.Persistence;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -21,6 +22,7 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                 .HasAnnotation("ProductVersion", "10.0.12")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
+            NpgsqlModelBuilderExtensions.HasPostgresExtension(modelBuilder, "postgis");
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserClaim<System.Guid>", b =>
@@ -841,6 +843,208 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                     b.ToTable("EnlacesSeguimiento", (string)null);
                 });
 
+            modelBuilder.Entity("NexoRuta.Domain.ZonasCobertura.DepartamentoReferencia", b =>
+                {
+                    b.Property<string>("Codigo")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("VersionFuente")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<string>("Atribucion")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<MultiPolygon>("Geometria")
+                        .IsRequired()
+                        .HasColumnType("geometry(MultiPolygon,4326)");
+
+                    b.Property<DateTimeOffset>("ImportadaUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Licencia")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<string>("Nombre")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("UrlFuente")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.HasKey("Codigo", "VersionFuente");
+
+                    b.HasIndex("Geometria")
+                        .HasDatabaseName("IX_DepartamentosReferencia_Geometria_Gist");
+
+                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("Geometria"), "gist");
+
+                    b.ToTable("DepartamentosReferencia", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_DepartamentosReferencia_Geometria", "NOT ST_IsEmpty(\"Geometria\") AND ST_NDims(\"Geometria\") = 2 AND ST_IsValid(\"Geometria\") AND ST_XMin(Box3D(\"Geometria\")) >= -180 AND ST_XMax(Box3D(\"Geometria\")) <= 180 AND ST_YMin(Box3D(\"Geometria\")) >= -90 AND ST_YMax(Box3D(\"Geometria\")) <= 90");
+                        });
+                });
+
+            modelBuilder.Entity("NexoRuta.Domain.ZonasCobertura.FranjaEntrega", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<short>("DiaSemanaIso")
+                        .HasColumnType("smallint");
+
+                    b.Property<string>("Estado")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<TimeOnly>("HoraFin")
+                        .HasColumnType("time(6) without time zone");
+
+                    b.Property<TimeOnly>("HoraInicio")
+                        .HasColumnType("time(6) without time zone");
+
+                    b.Property<Guid>("OperadorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ZonaId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OperadorId", "ZonaId", "DiaSemanaIso", "HoraInicio");
+
+                    b.ToTable("FranjasEntrega", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_FranjasEntrega_Day", "\"DiaSemanaIso\" BETWEEN 1 AND 7");
+
+                            t.HasCheckConstraint("CK_FranjasEntrega_State", "\"Estado\" IN ('Inactiva', 'Activa')");
+
+                            t.HasCheckConstraint("CK_FranjasEntrega_Time", "\"HoraInicio\" <> \"HoraFin\"");
+                        });
+                });
+
+            modelBuilder.Entity("NexoRuta.Domain.ZonasCobertura.ZonaCobertura", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("ActualizadaUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CodigoDepartamento")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTimeOffset>("CreadaUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Estado")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<MultiPolygon>("Geometria")
+                        .IsRequired()
+                        .HasColumnType("geometry(MultiPolygon,4326)");
+
+                    b.Property<string>("Nombre")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<Guid>("OperadorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("OrigenGeometria")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<int>("RevisionActual")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
+                    b.Property<string>("VersionFuente")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<string>("ZonaHoraria")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Geometria")
+                        .HasDatabaseName("IX_ZonasCobertura_Geometria_Gist");
+
+                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("Geometria"), "gist");
+
+                    b.HasIndex("CodigoDepartamento", "VersionFuente");
+
+                    b.HasIndex("OperadorId", "Estado");
+
+                    b.ToTable("ZonasCobertura", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ZonasCobertura_Geometria", "NOT ST_IsEmpty(\"Geometria\") AND ST_NDims(\"Geometria\") = 2 AND ST_IsValid(\"Geometria\") AND ST_XMin(Box3D(\"Geometria\")) >= -180 AND ST_XMax(Box3D(\"Geometria\")) <= 180 AND ST_YMin(Box3D(\"Geometria\")) >= -90 AND ST_YMax(Box3D(\"Geometria\")) <= 90");
+
+                            t.HasCheckConstraint("CK_ZonasCobertura_NameTimeZone", "length(btrim(\"Nombre\")) > 0 AND \"ZonaHoraria\" = 'America/Montevideo'");
+
+                            t.HasCheckConstraint("CK_ZonasCobertura_Origin", "(\"OrigenGeometria\" = 'Dibujada' AND \"CodigoDepartamento\" IS NULL AND \"VersionFuente\" IS NULL) OR (\"OrigenGeometria\" = 'Departamento' AND \"CodigoDepartamento\" IS NOT NULL AND \"VersionFuente\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_ZonasCobertura_State", "\"Estado\" IN ('Inactiva', 'Activa')");
+
+                            t.HasCheckConstraint("CK_ZonasCobertura_Version", "\"Version\" >= 0 AND \"RevisionActual\" > 0");
+                        });
+                });
+
+            modelBuilder.Entity("NexoRuta.Domain.ZonasCobertura.ZonaCoberturaRevision", b =>
+                {
+                    b.Property<Guid>("OperadorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ZonaId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("NumeroRevision")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("RegistradaUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("SnapshotJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<Guid>("UsuarioId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("Version")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("OperadorId", "ZonaId", "NumeroRevision");
+
+                    b.ToTable("ZonasCoberturaRevisiones", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ZonasCoberturaRevisiones_Revision", "\"NumeroRevision\" > 0 AND \"Version\" >= 0");
+
+                            t.HasCheckConstraint("CK_ZonasCoberturaRevisiones_Snapshot", "jsonb_typeof(\"SnapshotJson\") = 'object'");
+                        });
+                });
+
             modelBuilder.Entity("NexoRuta.Infrastructure.Outbox.OutboxMessage", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1248,6 +1452,40 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("NexoRuta.Domain.ZonasCobertura.FranjaEntrega", b =>
+                {
+                    b.HasOne("NexoRuta.Domain.ZonasCobertura.ZonaCobertura", null)
+                        .WithMany("Franjas")
+                        .HasForeignKey("OperadorId", "ZonaId")
+                        .HasPrincipalKey("OperadorId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NexoRuta.Domain.ZonasCobertura.ZonaCobertura", b =>
+                {
+                    b.HasOne("NexoRuta.Domain.Administracion.Operador", null)
+                        .WithMany()
+                        .HasForeignKey("OperadorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("NexoRuta.Domain.ZonasCobertura.DepartamentoReferencia", null)
+                        .WithMany()
+                        .HasForeignKey("CodigoDepartamento", "VersionFuente")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("NexoRuta.Domain.ZonasCobertura.ZonaCoberturaRevision", b =>
+                {
+                    b.HasOne("NexoRuta.Domain.ZonasCobertura.ZonaCobertura", null)
+                        .WithMany()
+                        .HasForeignKey("OperadorId", "ZonaId")
+                        .HasPrincipalKey("OperadorId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("NexoRuta.Infrastructure.Outbox.OutboxMessage", b =>
                 {
                     b.HasOne("NexoRuta.Domain.Envios.Envio", null)
@@ -1265,6 +1503,11 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                         .HasPrincipalKey("OperadorId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("NexoRuta.Domain.ZonasCobertura.ZonaCobertura", b =>
+                {
+                    b.Navigation("Franjas");
                 });
 #pragma warning restore 612, 618
         }

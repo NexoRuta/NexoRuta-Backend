@@ -407,7 +407,7 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(AuthenticationTestData.BootstrapSettings(initial))
             .Build();
-        var options = new DbContextOptionsBuilder<NexoRutaDbContext>().UseNpgsql(restricted.ConnectionString).Options;
+        var options = new DbContextOptionsBuilder<NexoRutaDbContext>().UseNexoRutaPostgres(restricted.ConnectionString).Options;
         await using (var db = new NexoRutaDbContext(options))
         {
             var identityUsers = AuthenticationTestData.UserManager(db);
@@ -793,7 +793,7 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
         async Task ProcessAsync(RestrictedConnection worker)
         {
             var options = new DbContextOptionsBuilder<NexoRutaDbContext>()
-                .UseNpgsql(worker.ConnectionString).Options;
+                .UseNexoRutaPostgres(worker.ConnectionString).Options;
             await using var db = new NexoRutaDbContext(options);
             var createLink = new CrearEnlaceSeguimientoUseCase(
                 new EfConsultaEstadoEnvio(db), new EfEnlacesSeguimientoRepository(db));

@@ -10,7 +10,7 @@ public sealed class NexoRutaDbContextFactory
     public NexoRutaDbContext CreateDbContext(string[] args)
     {
         var options = new DbContextOptionsBuilder<NexoRutaDbContext>()
-            .UseNpgsql()
+            .UseNexoRutaPostgres()
             .Options;
 
         return new NexoRutaDbContext(options);

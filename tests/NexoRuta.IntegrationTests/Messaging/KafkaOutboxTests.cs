@@ -194,7 +194,7 @@ public sealed class KafkaOutboxTests(PostgresFixture postgres, KafkaFixture kafk
         {
             ["Kafka:BootstrapServers"] = kafka.BootstrapServers, ["Kafka:MessageTimeoutMs"] = "5000"
         });
-        builder.Services.AddDbContext<NexoRutaDbContext>(options => options.UseNpgsql(database.ConnectionString));
+        builder.Services.AddDbContext<NexoRutaDbContext>(options => options.UseNexoRutaPostgres(database.ConnectionString));
         builder.Services.AddScoped<EfOutboxRepository>();
         if (rabbitSettings is null)
         {

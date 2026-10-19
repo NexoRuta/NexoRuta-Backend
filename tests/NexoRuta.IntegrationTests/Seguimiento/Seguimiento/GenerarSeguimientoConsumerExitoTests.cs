@@ -161,7 +161,7 @@ public sealed class GenerarSeguimientoConsumerExitoTests(
             });
 
         builder.Services.AddDbContext<NexoRutaDbContext>(
-            options => options.UseNpgsql(cadenaPostgres));
+            options => options.UseNexoRutaPostgres(cadenaPostgres));
 
         builder.Services.AddScoped<
             IConsultaEstadoEnvio,
