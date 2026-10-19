@@ -25,7 +25,7 @@ if (transport is not (WorkerTransportNames.RabbitMq or WorkerTransportNames.Kafk
 
 var connectionString = builder.Configuration.GetConnectionString("Postgres")
     ?? throw new InvalidOperationException("ConnectionStrings:Postgres is required for this Worker.");
-builder.Services.AddDbContext<NexoRutaDbContext>(options => options.UseNpgsql(connectionString));
+builder.Services.AddDbContext<NexoRutaDbContext>(options => options.UseNexoRutaPostgres(connectionString));
 builder.Services.AddScoped<EfOutboxRepository>();
 
 if (transport == WorkerTransportNames.RabbitMq)

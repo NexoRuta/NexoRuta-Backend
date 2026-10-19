@@ -16,6 +16,7 @@ using NexoRuta.Application.Administracion.Repositories;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
 using NexoRuta.Infrastructure.Administracion.Autenticacion;
+using NexoRuta.Infrastructure.ZonasCobertura;
 var platformCommand = args.FirstOrDefault() == "platform-admin";
 if (platformCommand && !args.SequenceEqual(["platform-admin", "create"]))
 {
@@ -25,7 +26,16 @@ if (platformCommand && !args.SequenceEqual(["platform-admin", "create"]))
 }
 var localBootstrapCommand = args.SequenceEqual(["local-bootstrap"]);
 var migrationCommand = args.SequenceEqual(["database-migrate"]);
-var builder = WebApplication.CreateBuilder(platformCommand || localBootstrapCommand || migrationCommand ? [] : args);
+var catalogImportCommand = args.Length > 0 && args[0] == DepartamentoCatalogImporter.ImportCommandName;
+var catalogImportUpdate = args.Length == 2 && args[1] == DepartamentoCatalogImporter.AllowUpdateOption;
+if (catalogImportCommand && (args.Length > 2 || (args.Length == 2 && !catalogImportUpdate)))
+{
+    Console.Error.WriteLine($"Usage: {DepartamentoCatalogImporter.ImportCommandName} [{DepartamentoCatalogImporter.AllowUpdateOption}]");
+    Environment.ExitCode = 2;
+    return;
+}
+var commandMode = platformCommand || localBootstrapCommand || migrationCommand || catalogImportCommand;
+var builder = WebApplication.CreateBuilder(commandMode ? [] : args);
 if (localBootstrapCommand)
 {
     builder.Configuration["DatabaseInitialization:SeedData"] = "true";
@@ -39,7 +49,7 @@ var dataProtection = builder.Services.AddDataProtection().SetApplicationName(Pas
 var dataProtectionKeys = builder.Configuration[PasswordRecoveryDataProtection.KeysDirectoryConfigurationKey];
 if (!string.IsNullOrWhiteSpace(dataProtectionKeys))
     dataProtection.PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeys));
-else if (builder.Environment.IsProduction() && !platformCommand && !localBootstrapCommand && !migrationCommand)
+else if (builder.Environment.IsProduction() && !platformCommand && !localBootstrapCommand && !migrationCommand && !catalogImportCommand)
     throw new InvalidOperationException("Production requires a persistent DataProtection:KeysDirectory.");
 builder.Services.AddOptions<PasswordRecoveryOptions>()
     .Bind(builder.Configuration.GetSection("PasswordRecovery"))
@@ -72,6 +82,15 @@ if (migrationCommand)
     await using var commandApp = builder.Build();
     await using var scope = commandApp.Services.CreateAsyncScope();
     await scope.ServiceProvider.GetRequiredService<NexoRutaDbContext>().Database.MigrateAsync();
+    return;
+}
+if (catalogImportCommand)
+{
+    await using var commandApp = builder.Build();
+    await using var scope = commandApp.Services.CreateAsyncScope();
+    var result = await scope.ServiceProvider.GetRequiredService<DepartamentoCatalogImporter>()
+        .ImportarCatalogoIncluidoAsync(catalogImportUpdate);
+    Console.WriteLine($"Department catalog: {result.DepartmentCount} rows, {result.VersionFuente}, alreadyImported={result.AlreadyImported}.");
     return;
 }
 

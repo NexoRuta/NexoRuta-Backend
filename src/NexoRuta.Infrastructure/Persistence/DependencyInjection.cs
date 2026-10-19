@@ -19,6 +19,9 @@ using NexoRuta.Infrastructure.Administracion.Autenticacion;
 using NexoRuta.Domain.Administracion;
 using System.Net.Mail;
 using NexoRuta.Infrastructure.Correo;
+using NexoRuta.Application.ZonasCobertura.Repositories;
+using NexoRuta.Infrastructure.ZonasCobertura;
+using NexoRuta.Application.ZonasCobertura.UseCases;
 namespace NexoRuta.Infrastructure.Persistence;
 
 public static class DependencyInjection
@@ -31,7 +34,8 @@ public static class DependencyInjection
         var connectionString = configuration.GetConnectionString(connectionStringName)
             ?? throw new InvalidOperationException($"Falta ConnectionStrings:{connectionStringName}.");
 
-        services.AddDbContext<NexoRutaDbContext>(options => options.UseNpgsql(connectionString));
+        services.AddDbContext<NexoRutaDbContext>(options => options.UseNexoRutaPostgres(connectionString));
+        services.AddMemoryCache();
         services.AddDataProtection();
         services.AddIdentityCore<Usuario>(options =>
             {
@@ -80,6 +84,13 @@ public static class DependencyInjection
         services.AddScoped<IOperadoresRepository, EfOperadoresRepository>();
         services.AddScoped<IComerciosRepository, EfComerciosRepository>();
         services.AddScoped<IEnviosRepository, EfEnviosRepository>();
+        services.AddScoped<IZonasCoberturaRepository, EfZonasCoberturaRepository>();
+        services.AddScoped<DepartamentoCatalogImporter>();
+        services.AddScoped<RequerirOperadorCoberturaUseCase>();
+        services.AddScoped<ValidarTerritorioUruguayUseCase>();
+        services.AddScoped<GestionarZonasCoberturaUseCase>();
+        services.AddScoped<CrearZonaCoberturaUseCase>();
+        services.AddScoped<ConsultarCoberturaUseCase>();
         services.AddScoped<IUsuariosOrganizacionRepository, EfUsuariosOrganizacionRepository>();
         services.AddScoped<IOrganizacionPropiaRepository, EfOrganizacionPropiaRepository>();
         services.AddScoped<IOrganizacionLifecycleRepository, EfOrganizacionLifecycleRepository>();

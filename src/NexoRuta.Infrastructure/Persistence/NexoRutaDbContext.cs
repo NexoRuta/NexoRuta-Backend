@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using NexoRuta.Domain.Administracion;
 using NexoRuta.Domain.Envios;
 using NexoRuta.Domain.Seguimiento;
+using NexoRuta.Domain.ZonasCobertura;
 using NexoRuta.Infrastructure.Seguimiento.Persistence;
 using NexoRuta.Infrastructure.Outbox;
 
@@ -33,6 +34,11 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
 
     public DbSet<EntregaSeguimiento> EntregasSeguimiento => Set<EntregaSeguimiento>();
 
+    public DbSet<ZonaCobertura> ZonasCobertura => Set<ZonaCobertura>();
+    public DbSet<FranjaEntrega> FranjasEntrega => Set<FranjaEntrega>();
+    public DbSet<ZonaCoberturaRevision> ZonasCoberturaRevisiones => Set<ZonaCoberturaRevision>();
+    public DbSet<DepartamentoReferencia> DepartamentosReferencia => Set<DepartamentoReferencia>();
+
     public DbSet<Rol> Roles => Set<Rol>();
     public DbSet<Permiso> Permisos => Set<Permiso>();
     public DbSet<RolPermiso> RolesPermisos => Set<RolPermiso>();
@@ -41,6 +47,7 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
     {
         base.OnModelCreating(modelBuilder);
         modelBuilder.HasAnnotation("NexoRuta:RlsVersion", 1);
+        modelBuilder.HasPostgresExtension("postgis");
         modelBuilder.Entity<RolPlataformaPermiso>(entity =>
         {
             entity.ToTable("RolesPlataformaPermisos");
@@ -445,5 +452,101 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
         });
 
         modelBuilder.ApplyConfiguration(new EnlaceSeguimientoConfiguration());
+
+        modelBuilder.Entity<ZonaCobertura>(entity =>
+        {
+            entity.ToTable("ZonasCobertura", table =>
+            {
+                table.HasCheckConstraint("CK_ZonasCobertura_State", "\"Estado\" IN ('Inactiva', 'Activa')");
+                table.HasCheckConstraint("CK_ZonasCobertura_NameTimeZone",
+                    "length(btrim(\"Nombre\")) > 0 AND \"ZonaHoraria\" = 'America/Montevideo'");
+                table.HasCheckConstraint("CK_ZonasCobertura_Origin",
+                    "(\"OrigenGeometria\" = 'Dibujada' AND \"CodigoDepartamento\" IS NULL AND \"VersionFuente\" IS NULL) OR " +
+                    "(\"OrigenGeometria\" = 'Departamento' AND \"CodigoDepartamento\" IS NOT NULL AND \"VersionFuente\" IS NOT NULL)");
+                table.HasCheckConstraint("CK_ZonasCobertura_Version", "\"Version\" >= 0 AND \"RevisionActual\" > 0");
+                table.HasCheckConstraint("CK_ZonasCobertura_Geometria",
+                    "NOT ST_IsEmpty(\"Geometria\") AND ST_NDims(\"Geometria\") = 2 AND ST_IsValid(\"Geometria\") AND " +
+                    "ST_XMin(Box3D(\"Geometria\")) >= -180 AND ST_XMax(Box3D(\"Geometria\")) <= 180 AND " +
+                    "ST_YMin(Box3D(\"Geometria\")) >= -90 AND ST_YMax(Box3D(\"Geometria\")) <= 90");
+            });
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).ValueGeneratedNever();
+            entity.HasAlternateKey(x => new { x.OperadorId, x.Id });
+            entity.Property(x => x.Nombre).HasMaxLength(120).IsRequired();
+            entity.Property(x => x.Estado).HasConversion<string>().HasMaxLength(16).IsRequired();
+            entity.Property(x => x.Geometria).HasColumnType("geometry(MultiPolygon,4326)").IsRequired();
+            entity.Property(x => x.ZonaHoraria).HasMaxLength(64).IsRequired();
+            entity.Property(x => x.Version).HasDefaultValue(0L).IsConcurrencyToken().ValueGeneratedNever();
+            entity.Property(x => x.RevisionActual).IsRequired();
+            entity.Property(x => x.OrigenGeometria).HasConversion<string>().HasMaxLength(20).IsRequired();
+            entity.Property(x => x.CodigoDepartamento).HasMaxLength(16);
+            entity.Property(x => x.VersionFuente).HasMaxLength(80);
+            entity.Property(x => x.CreadaUtc).IsRequired();
+            entity.Property(x => x.ActualizadaUtc).IsRequired();
+            entity.HasIndex(x => new { x.OperadorId, x.Estado });
+            entity.HasIndex(x => x.Geometria).HasMethod("gist").HasDatabaseName("IX_ZonasCobertura_Geometria_Gist");
+            entity.HasOne<Operador>().WithMany().HasForeignKey(x => x.OperadorId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<DepartamentoReferencia>().WithMany()
+                .HasForeignKey(x => new { x.CodigoDepartamento, x.VersionFuente })
+                .HasPrincipalKey(x => new { x.Codigo, x.VersionFuente })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasMany(x => x.Franjas).WithOne()
+                .HasForeignKey(x => new { x.OperadorId, x.ZonaId })
+                .HasPrincipalKey(x => new { x.OperadorId, x.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.Navigation(x => x.Franjas).UsePropertyAccessMode(PropertyAccessMode.Field);
+        });
+
+        modelBuilder.Entity<FranjaEntrega>(entity =>
+        {
+            entity.ToTable("FranjasEntrega", table =>
+            {
+                table.HasCheckConstraint("CK_FranjasEntrega_Day", "\"DiaSemanaIso\" BETWEEN 1 AND 7");
+                table.HasCheckConstraint("CK_FranjasEntrega_Time", "\"HoraInicio\" <> \"HoraFin\"");
+                table.HasCheckConstraint("CK_FranjasEntrega_State", "\"Estado\" IN ('Inactiva', 'Activa')");
+            });
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).ValueGeneratedNever();
+            entity.Property(x => x.DiaSemanaIso).HasConversion<short>().HasColumnType("smallint").IsRequired();
+            entity.Property(x => x.HoraInicio).HasColumnType("time(6) without time zone").IsRequired();
+            entity.Property(x => x.HoraFin).HasColumnType("time(6) without time zone").IsRequired();
+            entity.Property(x => x.Estado).HasConversion<string>().HasMaxLength(16).IsRequired();
+            entity.HasIndex(x => new { x.OperadorId, x.ZonaId, x.DiaSemanaIso, x.HoraInicio });
+        });
+
+        modelBuilder.Entity<ZonaCoberturaRevision>(entity =>
+        {
+            entity.ToTable("ZonasCoberturaRevisiones", table =>
+            {
+                table.HasCheckConstraint("CK_ZonasCoberturaRevisiones_Revision", "\"NumeroRevision\" > 0 AND \"Version\" >= 0");
+                table.HasCheckConstraint("CK_ZonasCoberturaRevisiones_Snapshot", "jsonb_typeof(\"SnapshotJson\") = 'object'");
+            });
+            entity.HasKey(x => new { x.OperadorId, x.ZonaId, x.NumeroRevision });
+            entity.Property(x => x.RegistradaUtc).IsRequired();
+            entity.Property(x => x.SnapshotJson).HasColumnType("jsonb").IsRequired();
+            entity.HasOne<ZonaCobertura>().WithMany()
+                .HasForeignKey(x => new { x.OperadorId, x.ZonaId })
+                .HasPrincipalKey(x => new { x.OperadorId, x.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<DepartamentoReferencia>(entity =>
+        {
+            entity.ToTable("DepartamentosReferencia", table =>
+                table.HasCheckConstraint("CK_DepartamentosReferencia_Geometria",
+                    "NOT ST_IsEmpty(\"Geometria\") AND ST_NDims(\"Geometria\") = 2 AND ST_IsValid(\"Geometria\") AND " +
+                    "ST_XMin(Box3D(\"Geometria\")) >= -180 AND ST_XMax(Box3D(\"Geometria\")) <= 180 AND " +
+                    "ST_YMin(Box3D(\"Geometria\")) >= -90 AND ST_YMax(Box3D(\"Geometria\")) <= 90"));
+            entity.HasKey(x => new { x.Codigo, x.VersionFuente });
+            entity.Property(x => x.Codigo).HasMaxLength(16).IsRequired();
+            entity.Property(x => x.VersionFuente).HasMaxLength(80).IsRequired();
+            entity.Property(x => x.Nombre).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.Geometria).HasColumnType("geometry(MultiPolygon,4326)").IsRequired();
+            entity.Property(x => x.UrlFuente).HasMaxLength(500).IsRequired();
+            entity.Property(x => x.Atribucion).HasMaxLength(300).IsRequired();
+            entity.Property(x => x.Licencia).HasMaxLength(160).IsRequired();
+            entity.Property(x => x.ImportadaUtc).IsRequired();
+            entity.HasIndex(x => x.Geometria).HasMethod("gist").HasDatabaseName("IX_DepartamentosReferencia_Geometria_Gist");
+        });
     }
 }
