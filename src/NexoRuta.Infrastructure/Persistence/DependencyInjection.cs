@@ -25,6 +25,9 @@ using NexoRuta.Application.ZonasCobertura.UseCases;
 using NexoRuta.Application.Tarifas.Repositories;
 using NexoRuta.Application.Tarifas.UseCases;
 using NexoRuta.Infrastructure.Tarifas;
+using NexoRuta.Application.ReglasOperativas.Repositories;
+using NexoRuta.Application.ReglasOperativas.UseCases;
+using NexoRuta.Infrastructure.ReglasOperativas;
 namespace NexoRuta.Infrastructure.Persistence;
 
 public static class DependencyInjection
@@ -89,6 +92,11 @@ public static class DependencyInjection
         services.AddScoped<IEnviosRepository, EfEnviosRepository>();
         services.AddScoped<IZonasCoberturaRepository, EfZonasCoberturaRepository>();
         services.AddScoped<ITarifariosRepository, EfTarifariosRepository>();
+        services.AddScoped<IReglasOperativasRepository, EfReglasOperativasRepository>();
+        services.AddScoped<ConsultarReglasOperativasUseCase>();
+        services.AddScoped<CrearBorradorReglasOperativasUseCase>();
+        services.AddScoped<EditarBorradorReglasOperativasUseCase>();
+        services.AddScoped<PublicarBorradorReglasOperativasUseCase>();
         services.AddScoped<ConsultarTarifarioUseCase>();
         services.AddScoped<CrearBorradorTarifarioUseCase>();
         services.AddScoped<EditarBorradorTarifarioUseCase>();
