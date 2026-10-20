@@ -6,6 +6,7 @@ using NexoRuta.Domain.Envios;
 using NexoRuta.Domain.Seguimiento;
 using NexoRuta.Domain.ZonasCobertura;
 using NexoRuta.Domain.Tarifas;
+using NexoRuta.Domain.ReglasOperativas;
 using NexoRuta.Infrastructure.Seguimiento.Persistence;
 using NexoRuta.Infrastructure.Outbox;
 using NexoRuta.Infrastructure.Administracion.Autenticacion;
@@ -59,6 +60,10 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
     public DbSet<VersionTarifario> VersionesTarifario => Set<VersionTarifario>();
     public DbSet<TarifaZonaModalidad> TarifasZonaModalidad => Set<TarifaZonaModalidad>();
     public DbSet<AjusteTarifario> AjustesTarifario => Set<AjusteTarifario>();
+    public DbSet<ReglasOperativasOperador> ReglasOperativasOperadores => Set<ReglasOperativasOperador>();
+    public DbSet<VersionReglasOperativas> VersionesReglasOperativas => Set<VersionReglasOperativas>();
+    public DbSet<RequisitoPruebaEntrega> RequisitosPruebaEntrega => Set<RequisitoPruebaEntrega>();
+    public DbSet<MotivoNoEntregaVersion> MotivosNoEntregaVersion => Set<MotivoNoEntregaVersion>();
 
     public DbSet<Rol> Roles => Set<Rol>();
     public DbSet<Permiso> Permisos => Set<Permiso>();
@@ -698,6 +703,95 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
                 .HasForeignKey(x => new { x.OperadorId, x.VersionId, x.ZonaId, x.Modalidad })
                 .HasPrincipalKey(x => new { x.OperadorId, x.VersionId, x.ZonaId, x.Modalidad })
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ReglasOperativasOperador>(entity =>
+        {
+            entity.ToTable("ReglasOperativasOperador", table => table.HasCheckConstraint(
+                "CK_ReglasOperativasOperador_PublicationCounter", "\"UltimoNumeroPublicacion\" >= 0"));
+            entity.HasKey(x => x.OperadorId);
+            entity.Property(x => x.UltimoNumeroPublicacion).HasDefaultValue(0).IsRequired();
+            entity.Property(x => x.ActualizadoUtc).IsRequired();
+            entity.HasOne<Operador>().WithMany().HasForeignKey(x => x.OperadorId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<VersionReglasOperativas>().WithMany()
+                .HasForeignKey(x => new { x.OperadorId, x.VersionVigenteId })
+                .HasPrincipalKey(x => new { x.OperadorId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<VersionReglasOperativas>(entity =>
+        {
+            entity.ToTable("VersionesReglasOperativas", table =>
+            {
+                table.HasCheckConstraint("CK_VersionesReglasOperativas_State",
+                    "\"Estado\" IN ('Borrador', 'Publicada')");
+                table.HasCheckConstraint("CK_VersionesReglasOperativas_Publication",
+                    "(\"Estado\" = 'Borrador' AND \"NumeroVersionPublicada\" IS NULL AND \"PublicadaUtc\" IS NULL AND \"PublicadaPorUsuarioId\" IS NULL) OR " +
+                    "(\"Estado\" = 'Publicada' AND \"NumeroVersionPublicada\" > 0 AND \"PublicadaUtc\" IS NOT NULL AND \"PublicadaPorUsuarioId\" IS NOT NULL)");
+                table.HasCheckConstraint("CK_VersionesReglasOperativas_Concurrency", "\"VersionConcurrencia\" >= 0");
+                table.HasCheckConstraint("CK_VersionesReglasOperativas_MaxAttempts",
+                    "\"MaxIntentosEntrega\" IS NULL OR \"MaxIntentosEntrega\" BETWEEN 1 AND 100");
+                table.HasCheckConstraint("CK_VersionesReglasOperativas_Interval",
+                    "\"IntervaloEntreIntentosMinutos\" IS NULL OR \"IntervaloEntreIntentosMinutos\" BETWEEN 1 AND 525600");
+                table.HasCheckConstraint("CK_VersionesReglasOperativas_StandardDeadline",
+                    "\"PlazoEstandarMinutos\" IS NULL OR \"PlazoEstandarMinutos\" BETWEEN 1 AND 525600");
+                table.HasCheckConstraint("CK_VersionesReglasOperativas_UrgentDeadline",
+                    "\"PlazoUrgenteMinutos\" IS NULL OR \"PlazoUrgenteMinutos\" BETWEEN 1 AND 525600");
+                table.HasCheckConstraint("CK_VersionesReglasOperativas_ReturnPolicy",
+                    "\"PoliticaDevolucionAlAgotarIntentos\" IS NULL OR \"PoliticaDevolucionAlAgotarIntentos\" IN ('DecisionOperativa', 'IniciarAutomaticamente')");
+            });
+            entity.HasKey(x => new { x.OperadorId, x.Id });
+            entity.Property(x => x.Id).ValueGeneratedNever();
+            entity.Property(x => x.Estado).HasConversion<string>().HasMaxLength(16).IsRequired();
+            entity.Property(x => x.VersionConcurrencia).HasDefaultValue(0L).IsConcurrencyToken().ValueGeneratedNever();
+            entity.Property(x => x.PoliticaDevolucionAlAgotarIntentos).HasConversion<string>().HasMaxLength(32);
+            entity.Property(x => x.CreadaUtc).IsRequired();
+            entity.HasIndex(x => x.OperadorId).IsUnique()
+                .HasFilter("\"Estado\" = 'Borrador'")
+                .HasDatabaseName("UX_VersionesReglasOperativas_OneDraftPerOperator");
+            entity.HasIndex(x => new { x.OperadorId, x.NumeroVersionPublicada }).IsUnique()
+                .HasFilter("\"NumeroVersionPublicada\" IS NOT NULL")
+                .HasDatabaseName("UX_VersionesReglasOperativas_PublicationNumber");
+            entity.HasOne<Operador>().WithMany().HasForeignKey(x => x.OperadorId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Usuario>().WithMany().HasForeignKey(x => x.CreadaPorUsuarioId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Usuario>().WithMany().HasForeignKey(x => x.PublicadaPorUsuarioId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasMany(x => x.RequisitosPrueba).WithOne()
+                .HasForeignKey(x => new { x.OperadorId, x.VersionId })
+                .HasPrincipalKey(x => new { x.OperadorId, x.Id }).OnDelete(DeleteBehavior.Cascade);
+            entity.HasMany(x => x.Motivos).WithOne()
+                .HasForeignKey(x => new { x.OperadorId, x.VersionId })
+                .HasPrincipalKey(x => new { x.OperadorId, x.Id }).OnDelete(DeleteBehavior.Cascade);
+            entity.Navigation(x => x.RequisitosPrueba).UsePropertyAccessMode(PropertyAccessMode.Field);
+            entity.Navigation(x => x.Motivos).UsePropertyAccessMode(PropertyAccessMode.Field);
+        });
+
+        modelBuilder.Entity<RequisitoPruebaEntrega>(entity =>
+        {
+            entity.ToTable("RequisitosPruebaEntrega", table => table.HasCheckConstraint(
+                "CK_RequisitosPruebaEntrega_Type",
+                "\"Tipo\" IN ('FirmaEnPantalla', 'Fotografia', 'NombreReceptor', 'DocumentoReceptor')"));
+            entity.HasKey(x => new { x.OperadorId, x.VersionId, x.Tipo });
+            entity.Property(x => x.Tipo).HasConversion<string>().HasMaxLength(32).IsRequired();
+            entity.HasOne<VersionReglasOperativas>().WithMany(x => x.RequisitosPrueba)
+                .HasForeignKey(x => new { x.OperadorId, x.VersionId })
+                .HasPrincipalKey(x => new { x.OperadorId, x.Id }).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<MotivoNoEntregaVersion>(entity =>
+        {
+            entity.ToTable("MotivosNoEntregaVersion", table =>
+            {
+                table.HasCheckConstraint("CK_MotivosNoEntregaVersion_Code",
+                    "\"Codigo\" ~ '^[A-Z][A-Z0-9_]{0,39}$'");
+                table.HasCheckConstraint("CK_MotivosNoEntregaVersion_Description",
+                    "length(btrim(\"Descripcion\")) BETWEEN 1 AND 120 AND \"Descripcion\" !~ '[[:cntrl:]]'");
+            });
+            entity.HasKey(x => new { x.OperadorId, x.VersionId, x.Codigo });
+            entity.Property(x => x.Codigo).HasMaxLength(NexoRuta.Domain.ReglasOperativas.ReglasOperativas.MotiveCodeMaxLength).IsRequired();
+            entity.Property(x => x.Descripcion).HasMaxLength(NexoRuta.Domain.ReglasOperativas.ReglasOperativas.MotiveDescriptionMaxLength).IsRequired();
+            entity.Property(x => x.Disponible).IsRequired();
+            entity.HasOne<VersionReglasOperativas>().WithMany(x => x.Motivos)
+                .HasForeignKey(x => new { x.OperadorId, x.VersionId })
+                .HasPrincipalKey(x => new { x.OperadorId, x.Id }).OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

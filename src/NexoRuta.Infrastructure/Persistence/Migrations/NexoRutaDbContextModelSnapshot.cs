@@ -905,6 +905,167 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("NexoRuta.Domain.ReglasOperativas.MotivoNoEntregaVersion", b =>
+                {
+                    b.Property<Guid>("OperadorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("VersionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Codigo")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("Descripcion")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<bool>("Disponible")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("OperadorId", "VersionId", "Codigo");
+
+                    b.ToTable("MotivosNoEntregaVersion", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_MotivosNoEntregaVersion_Code", "\"Codigo\" ~ '^[A-Z][A-Z0-9_]{0,39}$'");
+
+                            t.HasCheckConstraint("CK_MotivosNoEntregaVersion_Description", "length(btrim(\"Descripcion\")) BETWEEN 1 AND 120 AND \"Descripcion\" !~ '[[:cntrl:]]'");
+                        });
+                });
+
+            modelBuilder.Entity("NexoRuta.Domain.ReglasOperativas.ReglasOperativasOperador", b =>
+                {
+                    b.Property<Guid>("OperadorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("ActualizadoUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("UltimoNumeroPublicacion")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<Guid?>("VersionVigenteId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("OperadorId");
+
+                    b.HasIndex("OperadorId", "VersionVigenteId");
+
+                    b.ToTable("ReglasOperativasOperador", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ReglasOperativasOperador_PublicationCounter", "\"UltimoNumeroPublicacion\" >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("NexoRuta.Domain.ReglasOperativas.RequisitoPruebaEntrega", b =>
+                {
+                    b.Property<Guid>("OperadorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("VersionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Tipo")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.HasKey("OperadorId", "VersionId", "Tipo");
+
+                    b.ToTable("RequisitosPruebaEntrega", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_RequisitosPruebaEntrega_Type", "\"Tipo\" IN ('FirmaEnPantalla', 'Fotografia', 'NombreReceptor', 'DocumentoReceptor')");
+                        });
+                });
+
+            modelBuilder.Entity("NexoRuta.Domain.ReglasOperativas.VersionReglasOperativas", b =>
+                {
+                    b.Property<Guid>("OperadorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CreadaPorUsuarioId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreadaUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Estado")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<int?>("IntervaloEntreIntentosMinutos")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("MaxIntentosEntrega")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("NumeroVersionPublicada")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("PlazoEstandarMinutos")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("PlazoUrgenteMinutos")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("PoliticaDevolucionAlAgotarIntentos")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<Guid?>("PublicadaPorUsuarioId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("PublicadaUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("VersionConcurrencia")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
+                    b.HasKey("OperadorId", "Id");
+
+                    b.HasIndex("CreadaPorUsuarioId");
+
+                    b.HasIndex("OperadorId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_VersionesReglasOperativas_OneDraftPerOperator")
+                        .HasFilter("\"Estado\" = 'Borrador'");
+
+                    b.HasIndex("PublicadaPorUsuarioId");
+
+                    b.HasIndex("OperadorId", "NumeroVersionPublicada")
+                        .IsUnique()
+                        .HasDatabaseName("UX_VersionesReglasOperativas_PublicationNumber")
+                        .HasFilter("\"NumeroVersionPublicada\" IS NOT NULL");
+
+                    b.ToTable("VersionesReglasOperativas", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_VersionesReglasOperativas_Concurrency", "\"VersionConcurrencia\" >= 0");
+
+                            t.HasCheckConstraint("CK_VersionesReglasOperativas_Interval", "\"IntervaloEntreIntentosMinutos\" IS NULL OR \"IntervaloEntreIntentosMinutos\" BETWEEN 1 AND 525600");
+
+                            t.HasCheckConstraint("CK_VersionesReglasOperativas_MaxAttempts", "\"MaxIntentosEntrega\" IS NULL OR \"MaxIntentosEntrega\" BETWEEN 1 AND 100");
+
+                            t.HasCheckConstraint("CK_VersionesReglasOperativas_Publication", "(\"Estado\" = 'Borrador' AND \"NumeroVersionPublicada\" IS NULL AND \"PublicadaUtc\" IS NULL AND \"PublicadaPorUsuarioId\" IS NULL) OR (\"Estado\" = 'Publicada' AND \"NumeroVersionPublicada\" > 0 AND \"PublicadaUtc\" IS NOT NULL AND \"PublicadaPorUsuarioId\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_VersionesReglasOperativas_ReturnPolicy", "\"PoliticaDevolucionAlAgotarIntentos\" IS NULL OR \"PoliticaDevolucionAlAgotarIntentos\" IN ('DecisionOperativa', 'IniciarAutomaticamente')");
+
+                            t.HasCheckConstraint("CK_VersionesReglasOperativas_StandardDeadline", "\"PlazoEstandarMinutos\" IS NULL OR \"PlazoEstandarMinutos\" BETWEEN 1 AND 525600");
+
+                            t.HasCheckConstraint("CK_VersionesReglasOperativas_State", "\"Estado\" IN ('Borrador', 'Publicada')");
+
+                            t.HasCheckConstraint("CK_VersionesReglasOperativas_UrgentDeadline", "\"PlazoUrgenteMinutos\" IS NULL OR \"PlazoUrgenteMinutos\" BETWEEN 1 AND 525600");
+                        });
+                });
+
             modelBuilder.Entity("NexoRuta.Domain.Notificaciones.AvisoReparto", b =>
                 {
                     b.Property<Guid>("Id")
@@ -960,7 +1121,6 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                     b.ToTable("AvisosReparto", (string)null);
                 });
 
-            modelBuilder.Entity("NexoRuta.Domain.Reparto.ConfiguracionReparto", b =>
             modelBuilder.Entity("NexoRuta.Domain.Tarifas.AjusteTarifario", b =>
                 {
                     b.Property<Guid>("OperadorId")
@@ -1143,7 +1303,7 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                         });
                 });
 
-            modelBuilder.Entity("NexoRuta.Domain.ZonasCobertura.DepartamentoReferencia", b =>
+            modelBuilder.Entity("NexoRuta.Domain.Reparto.ConfiguracionReparto", b =>
                 {
                     b.Property<Guid>("OperadorId")
                         .HasColumnType("uuid");
@@ -2446,6 +2606,58 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("NexoRuta.Domain.ReglasOperativas.MotivoNoEntregaVersion", b =>
+                {
+                    b.HasOne("NexoRuta.Domain.ReglasOperativas.VersionReglasOperativas", null)
+                        .WithMany("Motivos")
+                        .HasForeignKey("OperadorId", "VersionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NexoRuta.Domain.ReglasOperativas.ReglasOperativasOperador", b =>
+                {
+                    b.HasOne("NexoRuta.Domain.Administracion.Operador", null)
+                        .WithMany()
+                        .HasForeignKey("OperadorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("NexoRuta.Domain.ReglasOperativas.VersionReglasOperativas", null)
+                        .WithMany()
+                        .HasForeignKey("OperadorId", "VersionVigenteId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("NexoRuta.Domain.ReglasOperativas.RequisitoPruebaEntrega", b =>
+                {
+                    b.HasOne("NexoRuta.Domain.ReglasOperativas.VersionReglasOperativas", null)
+                        .WithMany("RequisitosPrueba")
+                        .HasForeignKey("OperadorId", "VersionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NexoRuta.Domain.ReglasOperativas.VersionReglasOperativas", b =>
+                {
+                    b.HasOne("NexoRuta.Domain.Administracion.Usuario", null)
+                        .WithMany()
+                        .HasForeignKey("CreadaPorUsuarioId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("NexoRuta.Domain.Administracion.Operador", null)
+                        .WithMany()
+                        .HasForeignKey("OperadorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("NexoRuta.Domain.Administracion.Usuario", null)
+                        .WithMany()
+                        .HasForeignKey("PublicadaPorUsuarioId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
             modelBuilder.Entity("NexoRuta.Domain.Notificaciones.AvisoReparto", b =>
                 {
                     b.HasOne("NexoRuta.Domain.Reparto.Repartidor", null)
@@ -2828,9 +3040,18 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("NexoRuta.Domain.ReglasOperativas.VersionReglasOperativas", b =>
+                {
+                    b.Navigation("Motivos");
+
+                    b.Navigation("RequisitosPrueba");
+                });
+
             modelBuilder.Entity("NexoRuta.Domain.Reparto.HojaRuta", b =>
                 {
                     b.Navigation("Paradas");
+                });
+
             modelBuilder.Entity("NexoRuta.Domain.Tarifas.TarifaZonaModalidad", b =>
                 {
                     b.Navigation("Ajustes");

@@ -114,6 +114,13 @@ public sealed class TarifarioUseCaseTests
             return Task.FromResult(new TarifarioConsulta(null, []));
         }
 
+        public Task<(IReadOnlyList<VersionTarifario> Items, int Total)> ListarPublicacionesAsync(
+            Guid operadorId, int pagina, int tamanoPagina, CancellationToken cancellationToken = default)
+            => Task.FromResult<(IReadOnlyList<VersionTarifario> Items, int Total)>(([], 0));
+
+        public Task<VersionTarifario?> ObtenerPublicacionAsync(Guid operadorId, Guid versionId,
+            CancellationToken cancellationToken = default) => Task.FromResult<VersionTarifario?>(null);
+
         public Task<VersionTarifario> CrearBorradorAsync(Guid operadorId, Guid usuarioId,
             CancellationToken cancellationToken = default) => Mutate();
 
