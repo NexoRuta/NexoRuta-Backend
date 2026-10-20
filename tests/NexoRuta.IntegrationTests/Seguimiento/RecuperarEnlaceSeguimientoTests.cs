@@ -114,7 +114,9 @@ public sealed class RecuperarEnlaceSeguimientoTests(PostgresFixture postgres) : 
             var commerceRole = new Rol("other_commerce", "Other commerce", null, commerce.Id);
             var opAccess = new AccesoUsuario(operatorUser.Id, op.Id, null, opRole);
             var commerceAccess = new AccesoUsuario(commerceUser.Id, null, commerce.Id, commerceRole);
-            db.AddRange(op, commerce, operatorUser, commerceUser, opRole, commerceRole, opAccess, commerceAccess);
+            db.AddRange(op, commerce, operatorUser, commerceUser, opRole, commerceRole);
+            await db.SaveChangesAsync();
+            db.AddRange(opAccess, commerceAccess);
             await db.SaveChangesAsync();
             otherOperator = opAccess.Id; otherCommerce = commerceAccess.Id;
         }
@@ -213,7 +215,7 @@ public sealed class RecuperarEnlaceSeguimientoTests(PostgresFixture postgres) : 
         await using var db = database.CreateDbContext();
         var owner = await db.AccesosUsuario.SingleAsync(x => x.ComercioId != null);
         var operatorAccess = await db.AccesosUsuario.SingleAsync(x => x.OperadorId != null);
-        var recipient = new Destinatario(operatorAccess.OperadorId!.Value, "Recipient");
+        var recipient = new Destinatario(operatorAccess.OperadorId!.Value, "Recipient", "destinatario@example.test");
         var address = new Direccion(operatorAccess.OperadorId.Value, "Address");
         var shipment = new Envio(operatorAccess.OperadorId.Value, owner.ComercioId!.Value,
             owner.UsuarioId, recipient.Id, address.Id);

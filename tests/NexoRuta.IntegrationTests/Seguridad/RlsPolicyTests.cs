@@ -202,8 +202,11 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
             Assert.Equal(2L, await CountAsync(connection, transaction, "Operadores"));
             await AssertDeniedAsync(connection, transaction, $"DELETE FROM \"Envios\" WHERE \"Id\" = '{rows.ShipmentA1:D}'");
             await AssertDeniedAsync(connection, transaction, $"DELETE FROM \"Envios\" WHERE \"Id\" = '{rows.ShipmentB1:D}'");
-            await AssertDeniedAsync(connection, transaction, $"UPDATE \"Envios\" SET \"Estado\" = 'Admitido' WHERE \"Id\" = '{rows.ShipmentA1:D}'");
-            await AssertDeniedAsync(connection, transaction, $"UPDATE \"Envios\" SET \"Estado\" = 'Admitido' WHERE \"Id\" = '{rows.ShipmentB1:D}'");
+            foreach (var id in new[] { rows.ShipmentA1, rows.ShipmentB1 })
+            {
+                await using var update = new NpgsqlCommand($"UPDATE \"Envios\" SET \"Estado\" = 'Admitido' WHERE \"Id\" = '{id:D}'", connection, transaction);
+                Assert.Equal(0, await update.ExecuteNonQueryAsync());
+            }
             await AssertDeniedAsync(connection, transaction, "INSERT INTO \"Envios\" (\"Id\") VALUES (gen_random_uuid())");
             await transaction.CommitAsync();
         }
@@ -525,7 +528,7 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
 
         await using (var create = new NpgsqlCommand("""
             SELECT nexoruta_app.create_shipment(
-                @shipment, @recipient, @address_id, @parcel, @recipient_name, @address, @code,
+                @shipment, @recipient, @address_id, @parcel, @recipient_name, @recipient_email, @address, @code,
                 @weight, @length, @width, @height)
             """, connection, transaction))
         {
@@ -534,6 +537,7 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
             create.Parameters.AddWithValue("address_id", addressId);
             create.Parameters.AddWithValue("parcel", parcelId);
             create.Parameters.AddWithValue("recipient_name", "New recipient");
+            create.Parameters.AddWithValue("recipient_email", "destinatario@example.test");
             create.Parameters.AddWithValue("address", "New address");
             create.Parameters.AddWithValue("code", "NEW-1");
             create.Parameters.AddWithValue("weight", 100m);
@@ -812,13 +816,13 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
     [Fact]
     public async Task UpgradeFromThePreviousSchemaPreservesUserAccessAndShipmentGuids()
     {
-        var database = await postgres.CreateDatabaseAsync(PreviousMigration);
-        // ponytail: this fixture uses the current ORM to seed a prior schema; temporarily include the upcoming defaulted column, then let the migration add it to pre-existing rows.
-        await ExecuteSqlAsync(database, "ALTER TABLE \"Usuarios\" ADD COLUMN \"VersionCredencial\" bigint NOT NULL DEFAULT 0");
+        var database = await postgres.CreateDatabaseAsync();
         var rows = await SeedTenantGraphAsync(database);
-        await ExecuteSqlAsync(database, "ALTER TABLE \"Usuarios\" DROP COLUMN \"VersionCredencial\"");
         await using (var db = database.CreateDbContext())
-            await db.Database.MigrateAsync();
+        {
+            await db.Database.MigrateAsync(PreviousMigration);
+            await HistoricRecipientEmail.MigrateAsync(db);
+        }
 
         await using var verify = new NpgsqlConnection(database.ConnectionString);
         await verify.OpenAsync();
@@ -920,7 +924,7 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
     private static (Destinatario Recipient, Direccion Address, Envio Shipment, Bulto Parcel) Shipment(
         Guid operatorId, Guid commerceId, Guid userId)
     {
-        var recipient = new Destinatario(operatorId, "Recipient");
+        var recipient = new Destinatario(operatorId, "Recipient", "destinatario@example.test");
         var address = new Direccion(operatorId, "Address");
         var shipment = new Envio(operatorId, commerceId, userId, recipient.Id, address.Id);
         var parcel = new Bulto(operatorId, shipment.Id, "PKG", 1, 1, 1, 1);

@@ -12,9 +12,10 @@ CrearEnvioUseCase valida actor, destinatario, dirección y bulto. La escritura p
 
 ## Contrato y reglas
 
-- GET /api/comercio/operadores: catálogo de operadores disponibles para elegir; alias compatible GET /api/operadores.
-- POST /api/envios: requiere Bearer de una cuenta comercio y OperadorId, destinatario/dirección y un bulto. El contexto ComercioId proviene de la sesión. La selección del operador se valida y guarda en ese envío, no en una membresía.
+- GET /api/operadores: catálogo de operadores disponibles para elegir. Contrato único; no hay alias de compatibilidad.
+- POST /api/envios: requiere Bearer de una cuenta comercio y OperadorId, nombre y correo obligatorio del destinatario, dirección y un bulto. El contexto ComercioId proviene de la sesión. La selección del operador se valida y guarda en ese envío, no en una membresía.
 - GET /api/envios: consulta los envíos del comercio autenticado o del operador autenticado para sus asignaciones.
+- La cancelación autenticada y su aviso al repartidor se describen en [cancelación de envíos](cancelacion-envios.md); la cancelación pública requiere el código enviado al correo obligatorio del destinatario; el servicio SMTP real sigue pendiente.
 - El operador puede ser distinto en cada envío. Para los hijos de un envío el aislamiento sigue el vínculo del envío.
 - Nombre, dirección y código son obligatorios; los límites de texto y dimensiones siguen el contrato OpenAPI.
 - La cabecera X-NexoRuta-Acceso no autentica ni selecciona al actor. Las rutas de envío requieren JWT Bearer.

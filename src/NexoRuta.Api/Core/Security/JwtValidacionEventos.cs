@@ -10,7 +10,7 @@ namespace NexoRuta.Api.Core.Security;
 
 public sealed class JwtValidacionEventos(
     IAccesosUsuarioRepository accesos, IPlataformaRepository plataforma, IRegistroRepository identidades,
-    UserManager<Usuario> users) : JwtBearerEvents
+    UserManager<Usuario> users, ISesionesMovilesRepository sesiones, TimeProvider reloj) : JwtBearerEvents
 {
     public override async Task TokenValidated(
         TokenValidatedContext context)
@@ -28,12 +28,11 @@ public sealed class JwtValidacionEventos(
         }
 
         var credentialVersionClaim = context.Principal?.FindFirst(JwtSesionClaims.VersionCredencial)?.Value;
-        var credentialVersion = 0L; // Existing JWTs predate the global credential-version claim.
-        if (credentialVersionClaim is not null && !long.TryParse(
+        if (!long.TryParse(
                 credentialVersionClaim,
                 NumberStyles.None,
                 CultureInfo.InvariantCulture,
-                out credentialVersion))
+                out var credentialVersion))
         {
             context.Fail("Credential session version is invalid.");
             return;
@@ -60,6 +59,16 @@ public sealed class JwtValidacionEventos(
         }
 
         var ambito = context.Principal?.FindFirst(AccesoSeleccionado.ClaimAmbito)?.Value;
+        var claimSesion = context.Principal?.FindAll(JwtSesionClaims.SesionMovil).ToArray() ?? [];
+        if (claimSesion.Length > 0 && (claimSesion.Length != 1 || ambito is not null
+            || !Guid.TryParse(claimSesion[0].Value, out var sesionId)
+            || !Guid.TryParse(accesoClaim, out var accesoMovilId)
+            || !await sesiones.EstaVigenteAsync(sesionId, usuarioId, accesoMovilId, versionToken,
+                reloj.GetUtcNow(), context.HttpContext.RequestAborted)))
+        {
+            context.Fail("La sesión móvil ya no está disponible.");
+            return;
+        }
         if (ambito == "identidad")
         {
             var unassignedIdentity = accesoClaim is null && versionToken == 0

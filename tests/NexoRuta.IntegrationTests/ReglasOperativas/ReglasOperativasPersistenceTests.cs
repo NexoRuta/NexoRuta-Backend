@@ -246,6 +246,16 @@ public sealed class ReglasOperativasPersistenceTests(PostgresFixture postgres) :
         await using (var transaction = await db.Database.BeginTransactionAsync())
         {
             await db.ApplyAsync(Actor(seed.OperatorA, seed.UserA));
+            var nullIdentity = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlRawAsync("""
+                UPDATE public."MotivosNoEntregaVersion" SET "Codigo" = NULL
+                 WHERE "OperadorId" = {0} AND "VersionId" = {1} AND "Codigo" = 'DOMICILIO_CERRADO'
+                """, seed.OperatorA, versionId));
+            Assert.Equal(PostgresErrorCodes.ObjectNotInPrerequisiteState, nullIdentity.SqlState);
+        }
+        await using (var db = new NexoRutaDbContext(options))
+        await using (var transaction = await db.Database.BeginTransactionAsync())
+        {
+            await db.ApplyAsync(Actor(seed.OperatorA, seed.UserA));
             var delete = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlRawAsync("""
                 DELETE FROM public."MotivosNoEntregaVersion"
                  WHERE "OperadorId" = {0} AND "VersionId" = {1} AND "Codigo" = 'DOMICILIO_CERRADO'

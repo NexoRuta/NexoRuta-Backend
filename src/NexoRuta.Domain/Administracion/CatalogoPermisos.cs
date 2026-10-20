@@ -19,7 +19,8 @@ public static class CatalogoPermisos
         new(ConfiguracionGestionar, ConfiguracionGestionar, [TipoAccesoUsuario.Operador, TipoAccesoUsuario.Comercio]),
         new("envios.crear", "envios.crear", [TipoAccesoUsuario.Comercio]),
         new("envios.consultar", "envios.consultar", [TipoAccesoUsuario.Operador, TipoAccesoUsuario.Comercio]),
-        new("envios.gestionar", "envios.gestionar", [TipoAccesoUsuario.Operador])
+        new("envios.gestionar", "envios.gestionar", [TipoAccesoUsuario.Operador]),
+        new("reparto.ejecutar", "Ejecutar la hoja de ruta propia", [TipoAccesoUsuario.Operador])
     ]);
 
     public static IReadOnlyList<DefinicionPermiso> Todos => Definiciones;

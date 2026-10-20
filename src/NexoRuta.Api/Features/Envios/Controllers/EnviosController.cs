@@ -36,6 +36,7 @@ public sealed class EnviosController(
                 new CrearEnvioCommand(
                     OperadorId: request.OperadorId!.Value,
                     DestinatarioNombre: request.DestinatarioNombre,
+                    DestinatarioEmail: request.DestinatarioEmail,
                     Direccion: request.Direccion,
                     CodigoBulto: request.CodigoBulto,
                     PesoGramos: request.PesoGramos,

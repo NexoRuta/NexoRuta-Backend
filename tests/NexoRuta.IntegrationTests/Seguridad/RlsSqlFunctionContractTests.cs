@@ -11,7 +11,7 @@ public sealed class RlsSqlFunctionContractTests(PostgresFixture postgres) : ICla
     public async Task ConsumedFunctionsMatchExactPostgresSignaturesForRestrictedRuntimeRoles()
     {
         var contracts = RlsSqlFunctionContract.Functions;
-        Assert.Equal(13, contracts.Count);
+        Assert.Equal(24, contracts.Count);
         Assert.Equal(contracts.Count, contracts.Select(contract => contract.Identifier).Distinct().Count());
         Assert.All(contracts, contract => Assert.Contains(contract.RuntimeRole, new[] { "nexoruta_api", "nexoruta_worker" }));
 

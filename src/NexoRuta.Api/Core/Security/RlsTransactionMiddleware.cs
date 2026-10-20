@@ -2,6 +2,7 @@ using NexoRuta.Application.Administracion.Context;
 using NexoRuta.Application.Administracion.Repositories;
 using NexoRuta.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authorization;
 
 namespace NexoRuta.Api.Core.Security;
 
@@ -14,7 +15,9 @@ public sealed class RlsTransactionMiddleware(RequestDelegate next)
         IPlataformaRepository platform,
         IRegistroRepository identities)
     {
-        if (httpContext.User.Identity?.IsAuthenticated != true)
+        // Login/refresh y los accesos públicos delimitan su propia transacción y contexto.
+        if (httpContext.User.Identity?.IsAuthenticated != true
+            || httpContext.GetEndpoint()?.Metadata.GetMetadata<IAllowAnonymous>() is not null)
         {
             await next(httpContext);
             return;

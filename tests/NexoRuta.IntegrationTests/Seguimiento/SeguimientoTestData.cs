@@ -19,7 +19,7 @@ internal static class SeguimientoTestData
         var comercio = new Comercio("Integration commerce");
         var email = $"user-{Guid.NewGuid():N}@example.test";
         var usuario = new Usuario(email, AuthenticationTestData.Hash(email));
-        var destinatario = new Destinatario(operador.Id, "Integration recipient");
+        var destinatario = new Destinatario(operador.Id, "Integration recipient", "destinatario@example.test");
         var direccion = new Direccion(operador.Id, "Integration address");
         var envio = new Envio(operador.Id, comercio.Id, usuario.Id, destinatario.Id, direccion.Id);
         db.AddRange(operador, comercio, usuario, destinatario, direccion, envio);

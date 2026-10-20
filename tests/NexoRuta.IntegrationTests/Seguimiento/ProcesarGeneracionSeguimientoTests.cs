@@ -50,7 +50,7 @@ public sealed class ProcesarGeneracionSeguimientoTests(
             Content = JsonContent.Create(new
             {
                 operadorId,
-                destinatarioNombre = "Destinatario M05",
+                destinatarioNombre = "Destinatario M05", destinatarioEmail = "destinatario@example.test",
                 direccion = "Dirección prueba transaccional",
                 codigoBulto = "M05-TRANSACCION-001",
                 pesoGramos = 1500m,
@@ -277,7 +277,7 @@ public sealed class ProcesarGeneracionSeguimientoTests(
             Content = JsonContent.Create(new
             {
                 operadorId,
-                destinatarioNombre = "Destinatario rollback M05",
+                destinatarioNombre = "Destinatario rollback M05", destinatarioEmail = "destinatario@example.test",
                 direccion = "Dirección prueba rollback",
                 codigoBulto = "M05-ROLLBACK-001",
                 pesoGramos = 1200m,
@@ -422,7 +422,7 @@ public sealed class ProcesarGeneracionSeguimientoTests(
             Content = JsonContent.Create(new
             {
                 operadorId,
-                destinatarioNombre = "Prueba concurrencia M05",
+                destinatarioNombre = "Prueba concurrencia M05", destinatarioEmail = "destinatario@example.test",
                 direccion = "San José, Uruguay",
                 codigoBulto = "M05-CONCURRENCIA-001",
                 pesoGramos = 1500m,
@@ -554,7 +554,7 @@ public sealed class ProcesarGeneracionSeguimientoTests(
             Content = JsonContent.Create(new
             {
                 operadorId,
-                destinatarioNombre = "Prueba bloqueo M05",
+                destinatarioNombre = "Prueba bloqueo M05", destinatarioEmail = "destinatario@example.test",
                 direccion = "San José, Uruguay",
                 codigoBulto = "M05-LOCK-001",
                 pesoGramos = 1000m,

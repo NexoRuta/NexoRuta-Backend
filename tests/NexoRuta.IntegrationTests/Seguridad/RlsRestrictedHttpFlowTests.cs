@@ -36,7 +36,7 @@ public sealed class RlsRestrictedHttpFlowTests(PostgresFixture postgres) : IClas
         using var created = await client.PostAsJsonAsync("/api/envios", new
         {
             OperadorId = operatorId,
-            DestinatarioNombre = "Ada Lovelace",
+            DestinatarioNombre = "Ada Lovelace", DestinatarioEmail = "destinatario@example.test",
             Direccion = "18 de Julio 123",
             CodigoBulto = "RLS-1",
             PesoGramos = 500m,
@@ -120,7 +120,7 @@ public sealed class RlsRestrictedHttpFlowTests(PostgresFixture postgres) : IClas
         Assert.True(await verify.Roles.AsNoTracking().AnyAsync(x => x.Id == ownerRoleId));
     }
 
-    private static Dictionary<string, string?> ApiSettings()
+    internal static Dictionary<string, string?> ApiSettings()
     {
         var settings = AuthenticationTestData.Settings();
         settings["DatabaseInitialization:SeedData"] = "false";
@@ -138,7 +138,7 @@ public sealed class RlsRestrictedHttpFlowTests(PostgresFixture postgres) : IClas
         return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("accessToken").GetString()!;
     }
 
-    private static async Task<IntegrationDatabase> RestrictApiAsync(IntegrationDatabase database)
+    internal static async Task<IntegrationDatabase> RestrictApiAsync(IntegrationDatabase database)
     {
         var role = $"rls_http_{Guid.NewGuid():N}";
         var password = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));

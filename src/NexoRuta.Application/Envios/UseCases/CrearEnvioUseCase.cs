@@ -22,7 +22,7 @@ public sealed class CrearEnvioUseCase(IEnviosRepository repository, IUsuarioActu
         var operador = await operadores.ObtenerAsync(command.OperadorId, cancellationToken)
             ?? throw new OperadorNoEncontradoException();
 
-        var destinatario = new Destinatario(operador.OperadorId, command.DestinatarioNombre);
+        var destinatario = new Destinatario(operador.OperadorId, command.DestinatarioNombre, command.DestinatarioEmail);
         var direccion = new Direccion(operador.OperadorId, command.Direccion);
         var envio = new Envio(
             operadorId: operador.OperadorId,

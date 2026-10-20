@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using NexoRuta.Application.Administracion.Repositories;
 using NexoRuta.Application.Envios.Repositories;
 using NexoRuta.Application.Envios.UseCases;
@@ -90,6 +91,9 @@ public static class DependencyInjection
         services.AddScoped<IOperadoresRepository, EfOperadoresRepository>();
         services.AddScoped<IComerciosRepository, EfComerciosRepository>();
         services.AddScoped<IEnviosRepository, EfEnviosRepository>();
+        services.AddScoped<NexoRuta.Application.Seguimiento.Interfaces.ICancelacionPublica, NexoRuta.Infrastructure.Seguimiento.Processing.CancelacionPublica>();
+        services.AddScoped<NexoRuta.Application.Envios.Repositories.ICancelacionesEnvioRepository, NexoRuta.Infrastructure.Envios.Repositories.EfCancelacionesEnvioRepository>();
+        services.AddScoped<NexoRuta.Application.Envios.UseCases.CancelarEnvioUseCase>();
         services.AddScoped<IZonasCoberturaRepository, EfZonasCoberturaRepository>();
         services.AddScoped<ITarifariosRepository, EfTarifariosRepository>();
         services.AddScoped<IReglasOperativasRepository, EfReglasOperativasRepository>();
@@ -114,6 +118,23 @@ public static class DependencyInjection
         services.AddScoped<IPermisosUsuarioRepository, EfPermisosUsuarioRepository>();
         services.AddScoped<IUsuariosLoginRepository, EfUsuariosLoginRepository>();
         services.AddScoped<IVerificadorPassword, VerificadorPassword>();
+        services.TryAddSingleton<TimeProvider>(TimeProvider.System);
+        services.AddSingleton<ITokensRenovacion, TokensRenovacion>();
+        services.AddScoped<ISesionesMovilesRepository, EfSesionesMovilesRepository>();
+        services.AddScoped<SesionesMovilesUseCase>();
+        services.AddScoped<NexoRuta.Application.Reparto.Repositories.IRepartidoresRepository,
+            NexoRuta.Infrastructure.Reparto.EfRepartidoresRepository>();
+        services.AddScoped<NexoRuta.Application.Reparto.UseCases.GestionarRepartidoresUseCase>();
+        services.AddScoped<NexoRuta.Application.Reparto.Repositories.IConfiguracionRepartoRepository,
+            NexoRuta.Infrastructure.Reparto.EfConfiguracionRepartoRepository>();
+        services.AddScoped<NexoRuta.Application.Reparto.UseCases.ConfigurarRepartoUseCase>();
+        services.AddScoped<NexoRuta.Application.Reparto.Repositories.IRutasRepository, NexoRuta.Infrastructure.Reparto.EfRutasRepository>();
+        services.AddScoped<NexoRuta.Application.Reparto.UseCases.GestionarRutasUseCase>();
+        services.AddScoped<NexoRuta.Application.Reparto.Repositories.IOperacionesRepartoRepository, NexoRuta.Infrastructure.Reparto.EfOperacionesRepartoRepository>();
+        services.AddScoped<NexoRuta.Application.Reparto.UseCases.EjecutarRepartoUseCase>();
+        services.AddScoped<NexoRuta.Application.Notificaciones.Repositories.INotificacionesRepartoRepository, NexoRuta.Infrastructure.Notificaciones.EfNotificacionesRepartoRepository>();
+        services.AddScoped<NexoRuta.Infrastructure.Notificaciones.CifradorRegistroPush>();
+        services.AddScoped<NexoRuta.Application.Notificaciones.UseCases.NotificacionesRepartoUseCase>();
 
 
         services.AddScoped<GestionarRolesUseCase>();
