@@ -16,7 +16,7 @@ internal static class RepartoHttpData
         var comercio = await db.AccesosUsuario.SingleAsync(x => x.ComercioId != null);
         var destinatario = new Destinatario(operador.OperadorId!.Value, "Destinatario de prueba", "destinatario@example.test");
         var direccion = new Direccion(operador.OperadorId.Value, "Av. de prueba 123");
-        var envio = new Envio(operador.OperadorId.Value, comercio.ComercioId!.Value, comercio.UsuarioId, destinatario.Id, direccion.Id);
+        var envio = new Envio(operador.OperadorId.Value, comercio.ComercioId!.Value, comercio.UsuarioId, destinatario.Id, direccion.Id, (await db.ReglasOperativasOperadores.SingleAsync(r => r.OperadorId == operador.OperadorId)).VersionVigenteId!.Value);
         db.Destinatarios.Add(destinatario); db.Direcciones.Add(direccion); db.Envios.Add(envio);
         db.Bultos.Add(new Bulto(operador.OperadorId.Value, envio.Id, "RUTA-TEST", 1000, 10, 10, 10));
         await db.SaveChangesAsync();
@@ -37,8 +37,8 @@ internal static class RepartoHttpData
         Assert.Equal(HttpStatusCode.NoContent, recepcion.StatusCode);
         return new(operador.Id, idVehiculo, envio.Id);
     }
-    internal static object Politica() => new { Version = 0, ZonaHoraria = "America/Montevideo", MaximoParadas = 30, MaximoIntentos = 3,
-        RequiereFoto = true, RequiereNombre = true, BloquearDiscrepanciasCarga = true, Motivos = new[] { "Ausente" } };
+    internal static object Politica() => new { Version = 0, ZonaHoraria = "America/Montevideo", MaximoParadas = 30,
+        BloquearDiscrepanciasCarga = true };
     internal static object Solicitud(Preparado p) => new { RepartidorAccesoId = p.AccesoId, p.VehiculoId, Fecha = FechaOperacion,
         Paradas = new[] { new { p.EnvioId, LlegadaEstimadaUtc = LlegadaEstimada } } };
     internal sealed record Preparado(Guid AccesoId, Guid VehiculoId, Guid EnvioId);

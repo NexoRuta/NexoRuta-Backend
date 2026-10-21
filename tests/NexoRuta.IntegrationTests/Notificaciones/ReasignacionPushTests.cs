@@ -166,7 +166,7 @@ public sealed partial class PushOutboxTests
         var destinatario = new Destinatario(p.Aviso.OperadorId, "Otro destino", "destinatario@example.test");
         var direccion = new Direccion(p.Aviso.OperadorId, "Otra dirección de prueba");
         direccion.ConfirmarUbicacion(-34.9, -56.2, comercio.UsuarioId, DateTimeOffset.UtcNow, 0);
-        var envio = new Envio(p.Aviso.OperadorId, comercio.ComercioId!.Value, comercio.UsuarioId, destinatario.Id, direccion.Id);
+        var envio = new Envio(p.Aviso.OperadorId, comercio.ComercioId!.Value, comercio.UsuarioId, destinatario.Id, direccion.Id, p.Aviso.OperadorId);
         envio.CambiarEstado(EstadoEnvio.EnDeposito, 0);
         var bulto = new Bulto(p.Aviso.OperadorId, envio.Id, Guid.NewGuid().ToString("N"), 100, 1, 1, 1);
         bulto.RecibirEnDeposito();

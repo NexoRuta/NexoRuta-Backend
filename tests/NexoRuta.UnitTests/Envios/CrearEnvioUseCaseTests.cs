@@ -27,11 +27,22 @@ public sealed class CrearEnvioUseCaseTests
         Assert.Equal(cuenta.ComercioId, result.Origen.ComercioId);
         Assert.Equal(cuenta.ComercioId, repository.Guardado!.Value.Envio.ComercioId);
         Assert.Equal(cuenta.UsuarioId, result.Origen.CreadoPorUsuarioId);
+        Assert.Equal(repository.VersionReglas, repository.Guardado.Value.Envio.VersionReglasId);
         Assert.Equal(operador.Nombre, result.Origen.OperadorNombre);
         Assert.Equal(cuenta.ComercioNombre, result.Origen.ComercioNombre);
         Assert.Equal(result.Id, repository.Guardado!.Value.Envio.Id);
         Assert.Equal(1250m, repository.Guardado.Value.Bulto.PesoGramos);
         Assert.Null(cuenta.OperadorId);
+    }
+
+    [Fact]
+    public async Task Crear_SinPublicacionVigenteNoAdmiteNiPersisteElEnvio()
+    {
+        var operador = new OperadorDisponible(Guid.NewGuid(), "Operador sin reglas");
+        var repo = new FakeEnviosRepository { VersionReglas = null };
+        await Assert.ThrowsAsync<NexoRuta.Application.Envios.Exceptions.ReglasEnvioNoDisponiblesException>(() =>
+            new CrearEnvioUseCase(repo, new UsuarioActual(CuentaComercio()), new Operadores(operador)).EjecutarAsync(Comando(operador.OperadorId)));
+        Assert.Null(repo.Guardado);
     }
 
     [Fact]
@@ -171,6 +182,10 @@ public sealed class CrearEnvioUseCaseTests
 
     private sealed class FakeEnviosRepository : IEnviosRepository
     {
+        public Guid? VersionReglas { get; init; } = Guid.CreateVersion7();
+        public Task<Guid?> ObtenerVersionReglasParaAdmisionAsync(Guid operadorId, CancellationToken cancellationToken = default)
+            => Task.FromResult(VersionReglas);
+
         public (Envio Envio, Destinatario Destinatario, Direccion Direccion, Bulto Bulto)? Guardado { get; private set; }
         public (Guid? OperadorId, Guid? ComercioId)? Filtro { get; private set; }
 

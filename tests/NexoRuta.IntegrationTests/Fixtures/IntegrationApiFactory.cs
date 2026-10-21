@@ -14,7 +14,8 @@ namespace NexoRuta.IntegrationTests.Fixtures;
 
 public sealed class IntegrationApiFactory(IntegrationDatabase database, string environment = "Testing",
     IDictionary<string, string?>? settings = null, IInterceptor[]? interceptors = null,
-    bool replaceDbContext = true, ICorreoSender? correoSender = null) : WebApplicationFactory<NexoRuta.Api.Controllers.AuthController>
+    bool replaceDbContext = true, ICorreoSender? correoSender = null,
+    bool seedOperationalRules = true) : WebApplicationFactory<NexoRuta.Api.Controllers.AuthController>
 {
     protected override IHost CreateHost(IHostBuilder builder)
     {
@@ -54,7 +55,14 @@ public sealed class IntegrationApiFactory(IntegrationDatabase database, string e
             configuration.AddInMemoryCollection(bootstrapSettings);
             if (settings is not null) configuration.AddInMemoryCollection(settings);
         });
-        return base.CreateHost(builder);
+        var host = base.CreateHost(builder);
+        if (seedOperationalRules && host.Services.GetRequiredService<IConfiguration>().GetValue<bool>("DatabaseInitialization:SeedData"))
+            Task.Run(async () =>
+            {
+                await using var db = database.CreateDbContext();
+                await ReglasEnvioTestData.SembrarInicialesAsync(db);
+            }).GetAwaiter().GetResult();
+        return host;
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)

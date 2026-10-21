@@ -25,6 +25,7 @@ public sealed class RlsRestrictedHttpFlowTests(PostgresFixture postgres) : IClas
             await AuthenticationTestData.Seeder(owner,
                 new AccesoInicial(commerceEmail, "Chosen operator", "Test commerce", "rls-http-operator@example.test"))
                 .SeedAsync();
+            await ReglasEnvioTestData.SembrarInicialesAsync(owner);
             operatorId = await owner.Operadores.Select(x => x.Id).SingleAsync();
         }
 

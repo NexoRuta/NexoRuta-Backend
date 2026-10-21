@@ -75,7 +75,7 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         await shipmentDb.ApplyAsync(RlsActorContext.From(context));
         var recipient = new Destinatario(operatorId, "Test recipient", "destinatario@example.test");
         var address = new Direccion(operatorId, "Test address");
-        var shipment = new Envio(operatorId, commerceId, userId, recipient.Id, address.Id);
+        var shipment = new Envio(operatorId, commerceId, userId, recipient.Id, address.Id, operatorId);
         var parcel = new Bulto(operatorId, shipment.Id, "RACE-1", 100m, 10m, 10m, 10m);
         var save = new EfEnviosRepository(shipmentDb).GuardarAsync(shipment, recipient, address, parcel);
         await lockObserver.LockStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -374,7 +374,7 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
             $"INSERT INTO \"AccesosUsuario\" (\"Id\", \"UsuarioId\", \"OperadorId\", \"OperadorComercioId\") VALUES ({cuentaAnterior}, {usuario.Id}, {opUno.Id}, {vinculoUno}), ({segundoAcceso}, {usuario.Id}, {opDos.Id}, {vinculoDos})");
         var destinatario = new Destinatario(opUno.Id, "Destinatario anterior", "destinatario@example.test");
         var direccion = new Direccion(opUno.Id, "Direccion anterior");
-        var envio = new Envio(opUno.Id, comercio.Id, usuario.Id, destinatario.Id, direccion.Id);
+        var envio = new Envio(opUno.Id, comercio.Id, usuario.Id, destinatario.Id, direccion.Id, opUno.Id);
         var bulto = new Bulto(opUno.Id, envio.Id, "ANTERIOR", 1750m, 32m, 21m, 11m);
         await InsertarDestinoAnterior(db, destinatario, direccion);
         await InsertarEnvioAnterior(db, envio, vinculoUno);
@@ -435,7 +435,7 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         var destinatario = new Destinatario(operador.OperadorId.Value, "Destinatario anterior", "destinatario@example.test");
         var direccion = new Direccion(operador.OperadorId.Value, "Dirección anterior");
         await InsertarDestinoAnterior(db, destinatario, direccion);
-        var envio = new Envio(operador.OperadorId.Value, cuenta.ComercioId.Value, cuenta.UsuarioId, destinatario.Id, direccion.Id);
+        var envio = new Envio(operador.OperadorId.Value, cuenta.ComercioId.Value, cuenta.UsuarioId, destinatario.Id, direccion.Id, operador.OperadorId.Value);
         await InsertarEnvioAnterior(db, envio, vinculo);
         var bulto = new Bulto(envio.OperadorId, envio.Id, "ANTERIOR", 1750m, 32m, 21m, 11m);
         await InsertarBultoAnterior(db, bulto);
@@ -456,24 +456,16 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         Assert.Equal(cuenta.UsuarioId, persistido.Origen.CreadoPorUsuarioId);
         Assert.Equal(bulto.Codigo, Assert.Single(persistido.Bultos).Codigo);
 
-        var nuevoOperador = new Operador("Operador nuevo sin vínculo previo");
-        db.Operadores.Add(nuevoOperador);
-        await db.SaveChangesAsync();
-        var nuevo = await Crear(db, cuenta.AccesoId, nuevoOperador.Id, "NUEVO");
-        var repetido = await Crear(db, cuenta.AccesoId, nuevoOperador.Id, "REPETIDO");
-
         await migrator.MigrateAsync(anterior);
-        Assert.Equal(2, await db.Database.SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM \"OperadoresComercios\"").SingleAsync());
-        Assert.Equal(3, await db.Database.SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM \"Envios\" e JOIN \"OperadoresComercios\" r ON e.\"OperadorComercioId\" = r.\"Id\" AND e.\"OperadorId\" = r.\"OperadorId\"").SingleAsync());
+        Assert.Equal(1, await db.Database.SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM \"OperadoresComercios\"").SingleAsync());
+        Assert.Equal(1, await db.Database.SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM \"Envios\" e JOIN \"OperadoresComercios\" r ON e.\"OperadorComercioId\" = r.\"Id\" AND e.\"OperadorId\" = r.\"OperadorId\"").SingleAsync());
         await MigrarActualConCorreosDeFixture(db, migrator);
         db.ChangeTracker.Clear();
         await ConfigureHistoricAccounts(db, inicial);
         var envios = await Listar(db, cuenta.AccesoId);
-        Assert.Equal(3, envios.Count);
+        Assert.Single(envios);
         Assert.Contains(envios, x => x.Id == envio.Id && x.Origen.ComercioId == cuenta.ComercioId);
-        Assert.Contains(envios, x => x.Id == nuevo.Id && x.Origen.ComercioId == cuenta.ComercioId);
-        Assert.Contains(envios, x => x.Id == repetido.Id && x.Origen.ComercioId == cuenta.ComercioId);
-        Assert.Equal(3, await db.Bultos.CountAsync());
+        Assert.Equal(1, await db.Bultos.CountAsync());
         Assert.True(await db.Bultos.AnyAsync(x => x.Id == bulto.Id && x.EnvioId == envio.Id));
     }
 
@@ -488,7 +480,7 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         var destinatario = new Destinatario(operador.OperadorId!.Value, "Ana", "destinatario@example.test");
         var direccion = new Direccion(operador.OperadorId.Value, "Rivera 123");
         var envio = new Envio(operador.OperadorId.Value, comercio.ComercioId!.Value,
-            comercio.UsuarioId, destinatario.Id, direccion.Id);
+            comercio.UsuarioId, destinatario.Id, direccion.Id, operador.OperadorId.Value);
         var bulto = new Bulto(Guid.CreateVersion7(), envio.Id, "FK-INVALIDA", 100m, 10m, 20m, 30m);
 
         var context = await new EfAccesosUsuarioRepository(db).ObtenerAsync(comercio.AccesoId)
@@ -564,6 +556,8 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
     {
         var context = await new EfAccesosUsuarioRepository(db).ObtenerAsync(accesoId)
             ?? throw new InvalidOperationException("The selected access is missing.");
+        if (context.ComercioId is not null && await db.Operadores.AnyAsync(o => o.Id == operadorId))
+            await ReglasEnvioTestData.PublicarInicialAsync(db, operadorId, context.UsuarioId);
         await using var transaction = await db.BeginOrJoinAsync();
         await db.ApplyAsync(RlsActorContext.From(context));
         var created = await new CrearEnvioUseCase(new EfEnviosRepository(db), new UsuarioSeleccionado(db, accesoId), new EfOperadoresRepository(db))

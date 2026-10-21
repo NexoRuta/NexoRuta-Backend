@@ -199,7 +199,7 @@ public sealed partial class PushOutboxTests
             var envio = await db.Envios.SingleAsync(e => e.Id == preparado.EnvioId);
             if (admitido)
             {
-                envio = new Envio(envio.OperadorId, envio.ComercioId, envio.CreadoPorUsuarioId, envio.DestinatarioId, envio.DireccionId);
+                envio = new Envio(envio.OperadorId, envio.ComercioId, envio.CreadoPorUsuarioId, envio.DestinatarioId, envio.DireccionId, envio.VersionReglasId);
                 db.Envios.Add(envio); db.Bultos.Add(new Bulto(envio.OperadorId, envio.Id, "NUEVO-" + Guid.NewGuid().ToString("N"), 100, 1, 1, 1));
                 await db.SaveChangesAsync();
             }

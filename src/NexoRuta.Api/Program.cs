@@ -191,7 +191,8 @@ if (builder.Configuration.GetValue<bool>("OpenTelemetry:Enabled"))
         .ConfigureResource(resource => resource.AddService("NexoRuta.Api"))
         .WithTracing(tracing => tracing
             .AddAspNetCoreInstrumentation()
-            .AddHttpClientInstrumentation()
+            .AddHttpClientInstrumentation(options => options.FilterHttpRequestMessage = request =>
+                request.RequestUri?.Host != "api.geoapify.com")
             .AddOtlpExporter())
         .WithMetrics(metrics => metrics
             .AddAspNetCoreInstrumentation()
@@ -205,6 +206,10 @@ builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode =
         StatusCodes.Status429TooManyRequests;
+
+    options.AddPolicy("geocodificacion", context => RateLimitPartition.GetFixedWindowLimiter(
+        partitionKey: context.User.FindFirst("sub")?.Value ?? context.Connection.RemoteIpAddress?.ToString() ?? "sin-ip",
+        factory: _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));
 
     options.AddPolicy("seguimiento-publico", context =>
         RateLimitPartition.GetFixedWindowLimiter(
@@ -265,8 +270,8 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 
 app.UseRouting();
-app.UseRateLimiter();
 app.UseAuthentication();
+app.UseRateLimiter();
 app.UseMiddleware<RlsTransactionMiddleware>();
 app.UseAuthorization();
 app.MapControllers();

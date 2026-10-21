@@ -235,6 +235,7 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
         var op2 = await Create("operadores", "operator2@example.test");
         var commerce1 = await Create("comercios", "commerce1@example.test");
         var commerce2 = await Create("comercios", "commerce2@example.test");
+        await using (var reglas = database.CreateDbContext()) await ReglasEnvioTestData.SembrarInicialesAsync(reglas);
         // Only four explicit logins after the platform login, within the existing five/minute limiter.
         await Login(client, "commerce1@example.test");
         var available = await client.GetFromJsonAsync<JsonElement[]>("/api/operadores");
@@ -397,7 +398,7 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
         await db.Database.MigrateAsync("20261016021011_ProtectSystemAdministratorRoles");
         await HistoricRecipientEmail.MigrateAsync(db);
         db.ChangeTracker.Clear();
-        Assert.Equal(shipment.Id, (await db.Envios.SingleAsync()).Id);
+        Assert.Equal(shipment.Id, await db.Envios.Select(e => e.Id).SingleAsync());
         Assert.Equal(access.Id, (await db.AccesosUsuario.SingleAsync()).Id);
         Assert.Equal(shipment.CreadoPorUsuarioId, (await db.Usuarios.SingleAsync()).Id);
         Assert.Equal(hash, (await db.Usuarios.SingleAsync()).PasswordHash);

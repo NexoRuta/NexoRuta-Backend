@@ -529,7 +529,7 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
         await using (var create = new NpgsqlCommand("""
             SELECT nexoruta_app.create_shipment(
                 @shipment, @recipient, @address_id, @parcel, @recipient_name, @recipient_email, @address, @code,
-                @weight, @length, @width, @height)
+                @weight, @length, @width, @height, @rules_version)
             """, connection, transaction))
         {
             create.Parameters.AddWithValue("shipment", shipmentId);
@@ -544,6 +544,7 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
             create.Parameters.AddWithValue("length", 10m);
             create.Parameters.AddWithValue("width", 10m);
             create.Parameters.AddWithValue("height", 10m);
+            create.Parameters.AddWithValue("rules_version", rows.OperatorB);
             Assert.Equal(shipmentId, (Guid)(await create.ExecuteScalarAsync())!);
         }
         await using (var outbox = new NpgsqlCommand("""
@@ -889,6 +890,9 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
         db.AddRange(new Comercio("Commerce A", ids.CommerceA), new Comercio("Commerce B", ids.CommerceB),
             new Operador("Operator A", ids.OperatorA), new Operador("Operator B", ids.OperatorB), userA, userB,
             commerceRole, otherRole, commerceAccess, otherAccess);
+        await db.SaveChangesAsync();
+        await ReglasEnvioTestData.PublicarInicialAsync(db, ids.OperatorA, userA.Id);
+        await ReglasEnvioTestData.PublicarInicialAsync(db, ids.OperatorB, userB.Id);
         var a1 = Shipment(ids.OperatorA, ids.CommerceA, userA.Id);
         var a2 = Shipment(ids.OperatorB, ids.CommerceA, userA.Id);
         var b1 = Shipment(ids.OperatorB, ids.CommerceB, userB.Id);
@@ -926,7 +930,7 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
     {
         var recipient = new Destinatario(operatorId, "Recipient", "destinatario@example.test");
         var address = new Direccion(operatorId, "Address");
-        var shipment = new Envio(operatorId, commerceId, userId, recipient.Id, address.Id);
+        var shipment = new Envio(operatorId, commerceId, userId, recipient.Id, address.Id, operatorId);
         var parcel = new Bulto(operatorId, shipment.Id, "PKG", 1, 1, 1, 1);
         return (recipient, address, shipment, parcel);
     }

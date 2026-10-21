@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
+using NexoRuta.Domain.ReglasOperativas;
 using NexoRuta.Application.Reparto.Dtos;
 using NexoRuta.Domain.Envios;
 using NexoRuta.Domain.Reparto;
@@ -65,21 +67,26 @@ public sealed partial class EfOperacionesRepartoRepository
         }
         if (op.Tipo == "FinJornada")
         {
-            Exigir(!bultos.Any(x => x.RutaCustodiaId == hoja.Id && x.Custodia == EstadoCustodiaBulto.Repartidor), "Declará primero los bultos que devolvés al depósito.");
             foreach (var envio in envios.Where(x => x.Estado == EstadoEnvio.EntregaPendienteValidacion
                 && bultos.Any(b => b.EnvioId == x.Id && b.RutaCustodiaId == hoja.Id && b.Custodia == EstadoCustodiaBulto.Destinatario)))
                 envio.CambiarEstado(EstadoEnvio.EntregaSinValidacion, envio.Version);
             foreach (var parada in hoja.Paradas.Where(x => x.Activa))
             {
                 var envio = envios.Single(e => e.Id == parada.EnvioId);
-                if (envio.Estado == EstadoEnvio.AsignadoRuta) envio.CambiarEstado(EstadoEnvio.EnDeposito, envio.Version);
+                if (envio.Estado == EstadoEnvio.AsignadoRuta && bultos.Where(b => b.EnvioId == envio.Id)
+                    .All(b => b.Custodia == EstadoCustodiaBulto.Deposito)) envio.CambiarEstado(EstadoEnvio.EnDeposito, envio.Version);
                 parada.Completar();
             }
-            hoja.RegistrarFin(op.OcurridaEn); return null;
+            hoja.RegistrarFin(op.OcurridaEn);
+            var faltantes = bultos.Count(b => b.RutaCustodiaId == hoja.Id && b.Custodia == EstadoCustodiaBulto.Repartidor);
+            return faltantes == 0 ? null : $"Jornada cerrada con incidencia: {faltantes} bulto(s) sin entrega ni rendición. Se conserva su custodia; no se confirmó recepción en depósito.";
         }
         var actual = envios.SingleOrDefault(x => x.Id == op.EnvioId);
         var paradaActual = hoja.Paradas.SingleOrDefault(x => x.EnvioId == op.EnvioId);
         Exigir(actual is not null && paradaActual is not null, "El envío no pertenece a esta hoja.");
+        var reglas = await db.VersionesReglasOperativas.Include(v => v.RequisitosPrueba).Include(v => v.Motivos)
+            .SingleAsync(v => v.OperadorId == hoja.OperadorId && v.Id == actual!.VersionReglasId
+                && v.Estado == EstadoVersionReglasOperativas.Publicada, ct);
         var propios = bultos.Where(x => x.EnvioId == actual!.Id).ToArray();
         if (op.Tipo == "EntregaFisica" && op.VersionEnvio is >= 0 && op.VersionEnvio < actual!.Version
             && actual.Estado is (EstadoEnvio.Cancelado or EstadoEnvio.Reprogramado or EstadoEnvio.AsignadoRuta))
@@ -91,11 +98,11 @@ public sealed partial class EfOperacionesRepartoRepository
                 && h.Paradas.Any(p => p.EnvioId == actual.Id && p.Activa)).ToArrayAsync(ct);
             Exigir(otras.All(h => h.Estado == EstadoHojaRuta.Planificada), "La asignación posterior ya fue despachada; se conserva el hecho como conflicto.");
             var prueba = await AplicarPrueba(hoja, actual.Id, datos, ct);
-            actual.ConciliarEntregaFisica(op.OcurridaEn, Completa(prueba, politica), actual.Version);
+            actual.ConciliarEntregaFisica(op.OcurridaEn, Completa(prueba, reglas), actual.Version);
             foreach (var bulto in propios) bulto.Entregar(hoja.RepartidorAccesoId, hoja.Id);
             foreach (var otra in otras) otra.SuspenderParada(actual.Id, "Entrega física registrada en la ruta original; no corresponde otra entrega.");
             paradaActual!.Completar();
-            return "Entrega física conciliada automáticamente; una cancelación posterior requiere devolución. La prueba conserva los requisitos de esta jornada.";
+            return "Entrega física conciliada automáticamente; una cancelación posterior requiere devolución. La prueba conserva los requisitos fijados al crear el envío.";
         }
         Exigir(op.VersionEnvio == actual!.Version, "El envío cambió en el servidor; se conservan el hecho y su evidencia como conflicto de sincronización.");
         if (op.Tipo == "CargarBulto")
@@ -111,7 +118,7 @@ public sealed partial class EfOperacionesRepartoRepository
             Exigir(actual.Estado == EstadoEnvio.EntregaPendienteValidacion && actual.EntregaFisicaEnUtc is not null,
                 "La entrega no está pendiente de prueba dentro de esta jornada.");
             var prueba = await AplicarPrueba(hoja, actual.Id, datos, ct);
-            if (Completa(prueba, politica)) actual.CambiarEstado(EstadoEnvio.Entregado, actual.Version);
+            if (Completa(prueba, reglas)) actual.CambiarEstado(EstadoEnvio.Entregado, actual.Version);
             else actual.RegistrarProgresoPrueba(actual.Version);
             return actual.Estado == EstadoEnvio.Entregado ? "Prueba completa; entrega validada automáticamente." : "La entrega conserva prueba pendiente.";
         }
@@ -119,18 +126,31 @@ public sealed partial class EfOperacionesRepartoRepository
             && x.AccesoCustodioId == hoja.RepartidorAccesoId && x.RutaCustodiaId == hoja.Id), "La entrega fue suspendida, cambió de estado o tiene otra custodia.");
         if (op.Tipo == "IntentoFallido")
         {
-            Exigir(datos.Motivo is not null && politica.Motivos.Contains(datos.Motivo, StringComparer.Ordinal), "El motivo no pertenece a la política de esta hoja.");
+            Exigir(datos.Motivo is not null && reglas.Motivos.Any(m => m.Codigo == datos.Motivo && m.Disponible), "El motivo no pertenece a las reglas de este envío.");
             Exigir(!politica.RequiereFotoIntento || await Archivo(hoja, actual.Id, datos.FotoId, "Foto", ct), "El intento requiere una foto subida y verificada.");
-            var anteriores = await db.OperacionesJornada.CountAsync(x => x.OperadorId == hoja.OperadorId && x.EnvioId == actual.Id && x.Tipo == "IntentoFallido" && x.Resultado == "Aplicada", ct);
-            Exigir(anteriores < politica.MaximoIntentos, "Se alcanzó el máximo de intentos configurado.");
+            var anteriores = await db.OperacionesJornada.AsNoTracking().Where(x => x.OperadorId == hoja.OperadorId
+                && x.EnvioId == actual.Id && x.Tipo == "IntentoFallido" && x.Resultado == "Aplicada").Select(x => x.Payload).ToArrayAsync(ct);
+            Exigir(anteriores.Length < reglas.MaxIntentosEntrega!.Value, "Se alcanzó el máximo de intentos configurado.");
+            var ultima = anteriores.Select(p => JsonSerializer.Deserialize<OperacionRepartoDatos>(p, Json)!.OcurridaEn)
+                .DefaultIfEmpty(DateTimeOffset.MinValue).Max();
+            Exigir(anteriores.Length == 0 || op.OcurridaEn - ultima >= TimeSpan.FromMinutes(reglas.IntervaloEntreIntentosMinutos!.Value),
+                "No se cumplió el intervalo entre intentos de este envío; se conserva el registro como conflicto.");
             if (actual.Estado == EstadoEnvio.NoEntregado) actual.CambiarEstado(EstadoEnvio.EnTransito, actual.Version);
-            actual.CambiarEstado(EstadoEnvio.NoEntregado, actual.Version); return null;
+            actual.CambiarEstado(EstadoEnvio.NoEntregado, actual.Version);
+            if (anteriores.Length + 1 == reglas.MaxIntentosEntrega!.Value
+                && reglas.PoliticaDevolucionAlAgotarIntentos == PoliticaDevolucionAlAgotarIntentos.IniciarAutomaticamente)
+            {
+                actual.CambiarEstado(EstadoEnvio.EnDevolucion, actual.Version);
+                hoja.SuspenderParada(actual.Id, "Intentos agotados: devolución iniciada; requiere rendición y recepción en depósito.");
+                return "Intentos agotados; devolución iniciada sin modificar la custodia física.";
+            }
+            return null;
         }
         if (op.Tipo == "EntregaFisica")
         {
             var prueba = await AplicarPrueba(hoja, actual.Id, datos, ct);
             if (actual.Estado == EstadoEnvio.NoEntregado) actual.CambiarEstado(EstadoEnvio.EnTransito, actual.Version);
-            actual.DeclararEntregaFisica(op.OcurridaEn, Completa(prueba, politica), actual.Version);
+            actual.DeclararEntregaFisica(op.OcurridaEn, Completa(prueba, reglas), actual.Version);
             foreach (var bulto in propios) bulto.Entregar(hoja.RepartidorAccesoId, hoja.Id);
             paradaActual.Completar();
             return actual.Estado == EstadoEnvio.Entregado ? "Entrega validada." : "Entrega física declarada; prueba pendiente hasta cerrar la jornada.";
@@ -156,7 +176,13 @@ public sealed partial class EfOperacionesRepartoRepository
     private Task<bool> Archivo(HojaRuta hoja, Guid envio, Guid? id, string tipo, CancellationToken ct) =>
         db.EvidenciasReparto.AnyAsync(x => x.OperadorId == hoja.OperadorId && x.RutaId == hoja.Id && x.AccesoId == hoja.RepartidorAccesoId
             && x.EnvioId == envio && x.Id == id && x.Tipo == tipo, ct);
-    private static bool Completa(PruebaEntrega p, ConfiguracionReparto c) => p.Latitud is not null && p.Longitud is not null
-        && p.PrecisionMetros is not null && p.PosicionEnUtc is not null && (!c.RequiereNombre || !string.IsNullOrWhiteSpace(p.Nombre))
-        && (!c.RequiereDocumento || !string.IsNullOrWhiteSpace(p.Documento)) && (!c.RequiereFoto || p.FotoId is not null) && (!c.RequiereFirma || p.FirmaId is not null);
+    private static bool Completa(PruebaEntrega p, VersionReglasOperativas reglas) => p.Latitud is not null && p.Longitud is not null
+        && p.PrecisionMetros is not null && p.PosicionEnUtc is not null && reglas.RequisitosPrueba.All(r => r.Tipo switch
+        {
+            TipoPruebaEntrega.NombreReceptor => !string.IsNullOrWhiteSpace(p.Nombre),
+            TipoPruebaEntrega.DocumentoReceptor => !string.IsNullOrWhiteSpace(p.Documento),
+            TipoPruebaEntrega.Fotografia => p.FotoId is not null,
+            TipoPruebaEntrega.FirmaEnPantalla => p.FirmaId is not null,
+            _ => false
+        });
 }

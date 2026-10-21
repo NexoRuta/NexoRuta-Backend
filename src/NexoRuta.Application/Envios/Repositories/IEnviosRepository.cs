@@ -5,6 +5,7 @@ namespace NexoRuta.Application.Envios.Repositories;
 
 public interface IEnviosRepository
 {
+    Task<Guid?> ObtenerVersionReglasParaAdmisionAsync(Guid operadorId, CancellationToken cancellationToken = default);
     Task GuardarAsync(
         Envio envio,
         Destinatario destinatario,

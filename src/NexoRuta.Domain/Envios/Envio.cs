@@ -8,6 +8,7 @@ public sealed class Envio
     public Guid CreadoPorUsuarioId { get; private set; }
     public Guid DestinatarioId { get; private set; }
     public Guid DireccionId { get; private set; }
+    public Guid VersionReglasId { get; private set; }
     public EstadoEnvio Estado { get; private set; }
     public long Version { get; private set; }
     public DateTimeOffset? EntregaFisicaEnUtc { get; private set; }
@@ -17,7 +18,8 @@ public sealed class Envio
         Guid comercioId,
         Guid creadoPorUsuarioId,
         Guid destinatarioId,
-        Guid direccionId)
+        Guid direccionId,
+        Guid versionReglasId)
     {
         if (operadorId == Guid.Empty)
             throw new ArgumentException("El operador es obligatorio.", nameof(operadorId));
@@ -29,6 +31,8 @@ public sealed class Envio
             throw new ArgumentException("El destinatario es obligatorio.", nameof(destinatarioId));
         if (direccionId == Guid.Empty)
             throw new ArgumentException("La dirección es obligatoria.", nameof(direccionId));
+        if (versionReglasId == Guid.Empty)
+            throw new ArgumentException("El envío requiere una publicación de reglas operativas.", nameof(versionReglasId));
 
         Id = Guid.CreateVersion7();
         OperadorId = operadorId;
@@ -36,6 +40,7 @@ public sealed class Envio
         CreadoPorUsuarioId = creadoPorUsuarioId;
         DestinatarioId = destinatarioId;
         DireccionId = direccionId;
+        VersionReglasId = versionReglasId;
         Estado = EstadoEnvio.Admitido;
     }
 

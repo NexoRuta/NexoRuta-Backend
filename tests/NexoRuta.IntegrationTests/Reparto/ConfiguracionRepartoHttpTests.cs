@@ -30,8 +30,8 @@ public sealed class ConfiguracionRepartoHttpTests(PostgresFixture postgres) : IC
         Assert.Equal(2, (await segunda.Content.ReadFromJsonAsync<ConfiguracionRepartoContract>())!.Version);
         var historico = await db.ConfiguracionesReparto.AsNoTracking().Where(x => x.OperadorId == acceso.OperadorId).OrderBy(x => x.Version).ToArrayAsync();
         Assert.Equal(2, historico.Length);
-        Assert.True(historico[0].RequiereFoto);
-        Assert.False(historico[1].RequiereFoto);
+        Assert.True(historico[0].RequiereFotoIntento);
+        Assert.False(historico[1].RequiereFotoIntento);
         using var viejo = await client.PutAsJsonAsync("/api/reparto/configuracion", Politica());
         Assert.Equal(HttpStatusCode.Conflict, viejo.StatusCode);
         using var leida = await client.GetAsync("/api/reparto/configuracion");
@@ -39,9 +39,9 @@ public sealed class ConfiguracionRepartoHttpTests(PostgresFixture postgres) : IC
     }
 
     [Theory]
-    [InlineData("zona inexistente", "No hay nadie")]
-    [InlineData("UTC", "")]
-    public async Task ConfiguracionInvalidaNoCreaVersion(string zona, string motivo)
+    [InlineData("zona inexistente", 20)]
+    [InlineData("UTC", 0)]
+    public async Task ConfiguracionInvalidaNoCreaVersion(string zona, int maximoParadas)
     {
         var data = await postgres.CreateDatabaseAsync();
         using var factory = data.CreateApiFactory();
@@ -49,7 +49,7 @@ public sealed class ConfiguracionRepartoHttpTests(PostgresFixture postgres) : IC
         await using var db = data.CreateDbContext();
         await client.SetBearerForAccessAsync(data, (await db.AccesosUsuario.SingleAsync(x => x.OperadorId != null)).Id);
         using var response = await client.PutAsJsonAsync("/api/reparto/configuracion", new
-        { Version = 0, ZonaHoraria = zona, MaximoParadas = 20, MaximoIntentos = 3, Motivos = new[] { motivo } });
+        { Version = 0, ZonaHoraria = zona, MaximoParadas = maximoParadas });
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal(0, await db.ConfiguracionesReparto.CountAsync());
     }
@@ -86,9 +86,9 @@ public sealed class ConfiguracionRepartoHttpTests(PostgresFixture postgres) : IC
         await client.SetBearerForAccessAsync(data, (await db.AccesosUsuario.SingleAsync(x => x.OperadorId != null)).Id);
         using var crear = await client.PutAsJsonAsync("/api/reparto/configuracion", Politica());
         Assert.Equal(HttpStatusCode.OK, crear.StatusCode);
-        var ex = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlRawAsync("UPDATE \"ConfiguracionesReparto\" SET \"MaximoIntentos\"=99"));
+        var ex = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlRawAsync("UPDATE \"ConfiguracionesReparto\" SET \"MaximoParadas\"=99"));
         Assert.Equal("55000", ex.SqlState);
-        Assert.Equal(3, (await db.ConfiguracionesReparto.SingleAsync()).MaximoIntentos);
+        Assert.Equal(30, (await db.ConfiguracionesReparto.SingleAsync()).MaximoParadas);
     }
 
     [Fact]
@@ -106,9 +106,8 @@ public sealed class ConfiguracionRepartoHttpTests(PostgresFixture postgres) : IC
     }
 
     private static object Politica(long version = 0, string zona = "America/Montevideo", bool foto = true) => new
-    { Version = version, ZonaHoraria = zona, MaximoParadas = 30, MaximoIntentos = 3, RequiereFoto = foto,
-        RequiereNombre = true, RequiereFirma = false, RequiereDocumento = false, RequiereFotoIntento = true,
-        BloquearDiscrepanciasCarga = true, Motivos = new[] { "No hay nadie", "Dirección incorrecta" } };
+    { Version = version, ZonaHoraria = zona, MaximoParadas = 30,
+        RequiereFotoIntento = foto, BloquearDiscrepanciasCarga = true };
     private static object Vehiculo(Guid id = default, long version = 0, decimal peso = 500000) => new
     { Id = id, Version = version, Matricula = " sab1234 ", PesoMaximoGramos = peso, VolumenMaximoCm3 = 4000000m, Activo = true };
 }

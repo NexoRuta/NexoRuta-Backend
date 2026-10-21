@@ -5,6 +5,8 @@ using NexoRuta.Api.Features.Envios.Contracts.Requests;
 using NexoRuta.Application.Administracion.Exceptions;
 using NexoRuta.Application.Envios.Commands;
 using NexoRuta.Application.Envios.UseCases;
+using NexoRuta.Application.Envios.Exceptions;
+using NexoRuta.Application.Reparto.Exceptions;
 using NexoRuta.Domain.Administracion;
 using EnvioCreado = NexoRuta.Api.Features.Envios.Contracts.Responses.EnvioCreado;
 using EnvioDetalle = NexoRuta.Api.Features.Envios.Contracts.Responses.EnvioDetalle;
@@ -25,6 +27,7 @@ public sealed class EnviosController(
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> CreateShipment(
         [FromBody] CrearEnvioRequest request,
@@ -47,6 +50,8 @@ public sealed class EnviosController(
 
             return Created("/api/envios", EnvioCreado.Desde(created));
         }
+        catch (Exception exception) when (exception is ReglasEnvioNoDisponiblesException or ConflictoRepartoException)
+        { return Conflict(new { message = exception.Message }); }
         catch (OperadorNoEncontradoException exception)
         {
             return BadRequest(new { message = exception.Message });

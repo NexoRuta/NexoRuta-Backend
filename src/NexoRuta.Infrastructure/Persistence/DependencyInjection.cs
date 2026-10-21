@@ -43,6 +43,11 @@ public static class DependencyInjection
 
         services.AddDbContext<NexoRutaDbContext>(options => options.UseNexoRutaPostgres(connectionString));
         services.AddMemoryCache();
+        services.AddHttpClient(NexoRuta.Infrastructure.Envios.Geocodificacion.GeocodificadorGeoapify.ClienteHttp,
+            http => http.Timeout = TimeSpan.FromSeconds(8)).RemoveAllLoggers();
+        services.AddScoped<NexoRuta.Application.Envios.Interfaces.IGeocodificador, NexoRuta.Infrastructure.Envios.Geocodificacion.GeocodificadorGeoapify>();
+        services.AddScoped<NexoRuta.Application.Envios.Repositories.IDestinosEnvioRepository, NexoRuta.Infrastructure.Envios.Repositories.EfDestinosEnvioRepository>();
+        services.AddScoped<NexoRuta.Application.Envios.UseCases.GestionarDestinoEnvioUseCase>();
         services.AddDataProtection();
         services.AddIdentityCore<Usuario>(options =>
             {

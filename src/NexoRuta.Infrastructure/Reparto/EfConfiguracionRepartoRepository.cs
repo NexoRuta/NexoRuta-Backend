@@ -27,9 +27,7 @@ public sealed class EfConfiguracionRepartoRepository(NexoRutaDbContext db) : ICo
         var actual = await db.ConfiguracionesReparto.Where(x => x.OperadorId == operadorId).MaxAsync(x => (long?)x.Version, ct) ?? 0;
         if (datos.Version != actual) throw new ConflictoRepartoException("La configuración cambió. Recargala antes de guardar.");
         var nueva = new ConfiguracionReparto(operadorId, checked(actual + 1), datos.ZonaHoraria, datos.MaximoParadas,
-            datos.MaximoIntentos, datos.RequiereFirma, datos.RequiereFoto, datos.RequiereNombre,
-            datos.RequiereDocumento, datos.RequiereFotoIntento, datos.BloquearDiscrepanciasCarga,
-            datos.Motivos ?? throw new ArgumentException("Configurá los motivos de intento fallido."));
+            datos.RequiereFotoIntento, datos.BloquearDiscrepanciasCarga);
         db.ConfiguracionesReparto.Add(nueva);
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
@@ -74,8 +72,7 @@ public sealed class EfConfiguracionRepartoRepository(NexoRutaDbContext db) : ICo
     }
 
     private static ConfiguracionRepartoDatos Datos(ConfiguracionReparto x) => new(x.Version, x.ZonaHoraria, x.MaximoParadas,
-        x.MaximoIntentos, x.RequiereFirma, x.RequiereFoto, x.RequiereNombre, x.RequiereDocumento,
-        x.RequiereFotoIntento, x.BloquearDiscrepanciasCarga, x.Motivos.ToArray());
+        x.RequiereFotoIntento, x.BloquearDiscrepanciasCarga);
     private Task Contexto(Guid operadorId, CancellationToken ct) => db.Database.ExecuteSqlInterpolatedAsync(
         $"SELECT set_config('nexoruta.operador_id', {operadorId.ToString()}, true)", ct);
     private Task BloquearOperador(Guid operadorId, CancellationToken ct) => db.Operadores.FromSqlInterpolated(

@@ -90,13 +90,4 @@ public sealed class RutasController(GestionarRutasUseCase casos, ConfigurarRepar
         catch (RepartoNoPermitidoException) { return Forbid(); }
         catch (ConflictoRepartoException ex) { return Problem(ex.Message, statusCode: 409); }
     }
-    [HttpPut("/api/envios/{id:guid}/destino"), Authorize(Policy = "envios.crear")]
-    [ProducesResponseType(204), ProducesResponseType(400), ProducesResponseType(404), ProducesResponseType(403), ProducesResponseType(409)]
-    public async Task<IActionResult> Destino(Guid id, ConfirmarDestinoRequest request, CancellationToken ct)
-    {
-        try { return await casos.ConfirmarDestinoAsync(id, request.Version, request.Latitud, request.Longitud, ct) ? NoContent() : NotFound(); }
-        catch (RepartoNoPermitidoException) { return Forbid(); }
-        catch (ConflictoRepartoException ex) { return Problem(ex.Message, statusCode: 409); }
-        catch (ArgumentException ex) { return Problem(ex.Message, statusCode: 400); }
-    }
 }

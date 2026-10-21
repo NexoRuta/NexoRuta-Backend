@@ -28,3 +28,5 @@ CrearEnvioUseCase valida actor, destinatario, dirección y bulto. La escritura p
 - backend/tests/NexoRuta.IntegrationTests/Seguridad/RlsPolicyTests.cs y RlsRestrictedHttpFlowTests.cs: roles restringidos, visibilidad de ambas partes, filas hijas y operaciones directas limitadas por privilegios/RLS.
 
 Importación masiva, tarifas y máquina de estados completa pertenecen a otros casos/hitos.
+
+El comercio revisa y confirma las coordenadas antes de planificar el envío. [Contrato de destinos y geocodificación](destinos-envios.md).

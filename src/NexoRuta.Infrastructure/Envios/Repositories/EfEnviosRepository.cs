@@ -15,6 +15,12 @@ namespace NexoRuta.Infrastructure.Envios.Repositories;
 
 public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
 {
+    public async Task<Guid?> ObtenerVersionReglasParaAdmisionAsync(Guid operadorId, CancellationToken cancellationToken = default)
+    {
+        try { return await db.Database.SqlQuery<Guid?>($"SELECT nexoruta_app.shipment_rules_for_admission({operadorId}) AS \"Value\"").SingleAsync(cancellationToken); }
+        catch (PostgresException error) when (error.SqlState == "NXR01")
+        { throw new OrganizacionSuspendidaException("No se puede admitir el envío mientras el operador seleccionado no esté disponible."); }
+    }
     public async Task GuardarAsync(
         Envio envio,
         Destinatario destinatario,
@@ -71,16 +77,18 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
         {
             createdId = await db.Database.SqlQueryRaw<Guid>(
                 "SELECT " + RlsSqlFunctionContract.CreateShipment +
-                "({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11}) AS \"Value\"",
+                "({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11}, {12}) AS \"Value\"",
                 envio.Id, destinatario.Id, direccion.Id, bulto.Id,
                 destinatario.Nombre, destinatario.Email, direccion.Descripcion, bulto.Codigo,
-                bulto.PesoGramos, bulto.LargoCentimetros, bulto.AnchoCentimetros, bulto.AltoCentimetros)
+                bulto.PesoGramos, bulto.LargoCentimetros, bulto.AnchoCentimetros, bulto.AltoCentimetros, envio.VersionReglasId)
                 .SingleAsync(cancellationToken);
         }
         catch (PostgresException error) when (error.SqlState == "NXR01")
         {
             throw new OrganizacionSuspendidaException("No se puede crear el envío mientras el operador seleccionado está suspendido.");
         }
+        catch (PostgresException error) when (error.SqlState == "NXR03")
+        { throw new NexoRuta.Application.Reparto.Exceptions.ConflictoRepartoException("Las reglas del operador cambiaron. Volvé a crear el envío para fijar la publicación vigente."); }
         if (createdId != envio.Id)
             throw new InvalidOperationException("The database did not create the requested shipment.");
 

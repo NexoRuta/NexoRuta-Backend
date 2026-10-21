@@ -309,6 +309,9 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
             entity.HasAlternateKey(x => new { x.OperadorId, x.Id });
             entity.Property(x => x.Estado).HasConversion<string>().HasMaxLength(32).IsRequired();
             entity.Property(x => x.Version).IsConcurrencyToken();
+            entity.HasOne<VersionReglasOperativas>().WithMany()
+                .HasForeignKey(x => new { x.OperadorId, x.VersionReglasId })
+                .HasPrincipalKey(x => new { x.OperadorId, x.Id }).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<Operador>().WithMany().HasForeignKey(x => x.OperadorId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<Comercio>().WithMany().HasForeignKey(x => x.ComercioId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<Usuario>().WithMany().HasForeignKey(x => x.CreadoPorUsuarioId).OnDelete(DeleteBehavior.Restrict);

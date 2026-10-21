@@ -41,10 +41,4 @@ public sealed class GestionarRutasUseCase(IUsuarioActual usuario, IRutasReposito
         var actor = await usuario.ObtenerAsync(ct);
         return await rutas.RecibirAsync(actor.OperadorId ?? throw new RepartoNoPermitidoException(), envioId, version, ct);
     }
-    public async Task<bool> ConfirmarDestinoAsync(Guid envioId, long version, double latitud, double longitud, CancellationToken ct)
-    {
-        var actor = await usuario.ObtenerAsync(ct);
-        return await rutas.ConfirmarDestinoAsync(actor.ComercioId ?? throw new RepartoNoPermitidoException(),
-            actor.UsuarioId, envioId, version, latitud, longitud, ct);
-    }
 }

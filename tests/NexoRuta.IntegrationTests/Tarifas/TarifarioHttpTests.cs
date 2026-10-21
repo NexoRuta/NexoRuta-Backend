@@ -150,7 +150,8 @@ public sealed class TarifarioHttpTests(PostgresFixture postgres) : IClassFixture
         var configured = await saved.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(1, configured.GetProperty("versionConcurrencia").GetInt64());
         Assert.Equal(2, configured.GetProperty("tarifas").GetArrayLength());
-        Assert.Equal(4, configured.GetProperty("tarifas")[0].GetProperty("ajustes").GetArrayLength());
+        Assert.Equal(4, configured.GetProperty("tarifas").EnumerateArray()
+            .Single(t => t.GetProperty("zonaId").GetGuid() == zoneId).GetProperty("ajustes").GetArrayLength());
 
         using var tampered = await client.PutAsJsonAsync("/api/configuracion/tarifas/borrador/tarifas", new
         {
@@ -264,7 +265,8 @@ public sealed class TarifarioHttpTests(PostgresFixture postgres) : IClassFixture
         Assert.Equal(HttpStatusCode.OK, updatedToZero.StatusCode);
         using var oldPublicationAfterDraftEdit = await client.GetAsync($"/api/configuracion/tarifas/publicaciones/{draftId}");
         var unchangedPublication = await oldPublicationAfterDraftEdit.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal(120m, unchangedPublication.GetProperty("tarifas")[0].GetProperty("importeBaseUyu").GetDecimal());
+        Assert.Equal(120m, unchangedPublication.GetProperty("tarifas").EnumerateArray()
+            .Single(t => t.GetProperty("zonaId").GetGuid() == zoneId).GetProperty("importeBaseUyu").GetDecimal());
         simulation = new
         {
             versionTarifarioId = nextDraft.GetProperty("versionTarifarioId").GetGuid(),

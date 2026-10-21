@@ -19,10 +19,12 @@ internal static class SeguimientoTestData
         var comercio = new Comercio("Integration commerce");
         var email = $"user-{Guid.NewGuid():N}@example.test";
         var usuario = new Usuario(email, AuthenticationTestData.Hash(email));
+        db.AddRange(operador, comercio, usuario); await db.SaveChangesAsync();
+        await ReglasEnvioTestData.PublicarInicialAsync(db, operador.Id, usuario.Id);
         var destinatario = new Destinatario(operador.Id, "Integration recipient", "destinatario@example.test");
         var direccion = new Direccion(operador.Id, "Integration address");
-        var envio = new Envio(operador.Id, comercio.Id, usuario.Id, destinatario.Id, direccion.Id);
-        db.AddRange(operador, comercio, usuario, destinatario, direccion, envio);
+        var envio = new Envio(operador.Id, comercio.Id, usuario.Id, destinatario.Id, direccion.Id, operador.Id);
+        db.AddRange(destinatario, direccion, envio);
         await db.SaveChangesAsync();
         return envio;
     }

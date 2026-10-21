@@ -15,6 +15,7 @@ internal static class HistoricRecipientEmail
             // These fixture recipients explicitly use this address; production migrations never invent contact data.
             await db.Database.ExecuteSqlRawAsync("UPDATE \"Destinatarios\" SET \"Email\"='destinatario@example.test' WHERE \"Email\" IS NULL");
         }
-        await migrator.MigrateAsync();
+        // Historical account/RLS tests stop before the intentionally breaking shipment-rules contract.
+        await migrator.MigrateAsync("20261020224947_RecordClosingIncidents");
     }
 }

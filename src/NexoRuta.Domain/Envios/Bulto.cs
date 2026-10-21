@@ -67,6 +67,15 @@ public sealed class Bulto
         Custodia = EstadoCustodiaBulto.Repartidor; AccesoCustodioId = accesoId; RutaCustodiaId = rutaId; Version++;
     }
 
+    public void RecibirTrasIncidenciaDeCierre(Guid accesoId, Guid rutaId)
+    {
+        ExigirCustodia(accesoId, rutaId);
+        if (Custodia != EstadoCustodiaBulto.Repartidor)
+            throw new InvalidOperationException("La recepción requiere la custodia registrada en la incidencia de cierre.");
+        Custodia = EstadoCustodiaBulto.Deposito;
+        AccesoCustodioId = null; RutaCustodiaId = null; Version++;
+    }
+
     public void Entregar(Guid accesoId, Guid rutaId)
     {
         ExigirCustodia(accesoId, rutaId);

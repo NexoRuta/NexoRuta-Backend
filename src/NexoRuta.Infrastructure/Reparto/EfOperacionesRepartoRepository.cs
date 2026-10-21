@@ -66,12 +66,20 @@ public sealed partial class EfOperacionesRepartoRepository(NexoRutaDbContext db,
         var estados = resultado == "Aplicada" ? db.ChangeTracker.Entries<Envio>().Where(x => x.State == EntityState.Modified)
             .ToDictionary(x => x.Entity.Id, x => x.Entity.Estado.ToString()) : new Dictionary<Guid, string>();
         var respuesta = new ResultadoOperacionReparto(operacion.Id, operacion.Secuencia, resultado, detalle, versionEnvio, hoja.Version, cambios, estados);
+        var recibidaEn = reloj.GetUtcNow();
+        var incidencias = resultado == "Aplicada" && operacion.Tipo == "FinJornada"
+            ? (await db.Bultos.AsNoTracking().Where(b => b.OperadorId == operadorId && b.RutaCustodiaId == hoja.Id
+                && b.AccesoCustodioId == accesoId && b.Custodia == EstadoCustodiaBulto.Repartidor).OrderBy(b => b.Id).ToArrayAsync(ct))
+                .Select(b => new IncidenciaCierreDatos(operacion.Id, b.EnvioId, b.Id, b.Codigo, b.Version,
+                    operacion.OcurridaEn.ToUniversalTime(), recibidaEn)).ToArray()
+            : [];
         db.OperacionesJornada.Add(new()
         {
             Id = operacion.Id, OperadorId = operadorId, AccesoId = accesoId, RutaId = hoja.Id,
             EnvioId = hoja.Paradas.Any(x => x.EnvioId == operacion.EnvioId) ? operacion.EnvioId : null,
             Secuencia = operacion.Secuencia, Tipo = operacion.Tipo, Hash = hash, Payload = payload,
-            Respuesta = JsonSerializer.Serialize(respuesta, Json), Resultado = resultado, RecibidaEnUtc = reloj.GetUtcNow()
+            Respuesta = JsonSerializer.Serialize(respuesta, Json), Resultado = resultado, RecibidaEnUtc = recibidaEn,
+            IncidenciasCierre = JsonSerializer.Serialize(incidencias, Json)
         });
         await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return respuesta;
     }

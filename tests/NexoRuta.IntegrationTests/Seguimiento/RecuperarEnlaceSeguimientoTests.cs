@@ -218,7 +218,7 @@ public sealed class RecuperarEnlaceSeguimientoTests(PostgresFixture postgres) : 
         var recipient = new Destinatario(operatorAccess.OperadorId!.Value, "Recipient", "destinatario@example.test");
         var address = new Direccion(operatorAccess.OperadorId.Value, "Address");
         var shipment = new Envio(operatorAccess.OperadorId.Value, owner.ComercioId!.Value,
-            owner.UsuarioId, recipient.Id, address.Id);
+            owner.UsuarioId, recipient.Id, address.Id, operatorAccess.OperadorId.Value);
         db.AddRange(recipient, address, shipment);
         await db.SaveChangesAsync();
         return (shipment, owner.Id, operatorAccess.Id);

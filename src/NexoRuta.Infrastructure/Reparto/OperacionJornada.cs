@@ -12,5 +12,6 @@ public sealed class OperacionJornada
     public string Payload { get; init; } = "";
     public string Respuesta { get; init; } = "";
     public string Resultado { get; init; } = "";
+    public string IncidenciasCierre { get; init; } = "[]";
     public DateTimeOffset RecibidaEnUtc { get; init; }
 }

@@ -21,7 +21,7 @@ public sealed class ReglasOperativasHttpTests(PostgresFixture postgres) : IClass
     {
         var database = await postgres.CreateDatabaseAsync();
         string operatorEmail;
-        using (var bootstrap = new IntegrationApiFactory(database))
+        using (var bootstrap = new IntegrationApiFactory(database, seedOperationalRules: false))
         using (bootstrap.CreateHttpClient())
         {
             await using var db = database.CreateDbContext();
@@ -203,7 +203,7 @@ public sealed class ReglasOperativasHttpTests(PostgresFixture postgres) : IClass
         string noPermissionEmail;
         string platformEmail;
         Guid operatorId;
-        using (var bootstrap = new IntegrationApiFactory(database))
+        using (var bootstrap = new IntegrationApiFactory(database, seedOperationalRules: false))
         using (bootstrap.CreateHttpClient())
         {
             await using var db = database.CreateDbContext();

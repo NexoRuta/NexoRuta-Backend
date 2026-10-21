@@ -253,6 +253,7 @@ public sealed class JwtRbacHttpTests(PostgresFixture postgres) : IClassFixture<P
         foreach (var permission in await db.Permisos.Where(x => x.Codigo == "envios.crear" || x.Codigo == "envios.consultar").ToListAsync())
             db.Add(new RolPermiso(secondRole.Id, permission.Id));
         await db.SaveChangesAsync();
+        await ReglasEnvioTestData.PublicarInicialAsync(db, secondOperator.Id, operatorAccess.UsuarioId);
         var commerceJwt = await Login(client, (await db.Usuarios.SingleAsync(x => x.Id == commerce.UsuarioId)).Email);
         var operatorJwt = await Login(client, (await db.Usuarios.SingleAsync(x => x.Id == operatorAccess.UsuarioId)).Email);
         var secondJwt = await Login(client, secondUser.Email);

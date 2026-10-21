@@ -6,6 +6,7 @@ using NexoRuta.Application.Envios.Dtos;
 using NexoRuta.Application.Envios.Repositories;
 using NexoRuta.Application.Envios.Results;
 using NexoRuta.Domain.Envios;
+using NexoRuta.Application.Envios.Exceptions;
 
 namespace NexoRuta.Application.Envios.UseCases;
 
@@ -21,6 +22,8 @@ public sealed class CrearEnvioUseCase(IEnviosRepository repository, IUsuarioActu
             throw new ArgumentException("Seleccioná un operador para el envío.", nameof(command.OperadorId));
         var operador = await operadores.ObtenerAsync(command.OperadorId, cancellationToken)
             ?? throw new OperadorNoEncontradoException();
+        var versionReglas = await repository.ObtenerVersionReglasParaAdmisionAsync(operador.OperadorId, cancellationToken)
+            ?? throw new ReglasEnvioNoDisponiblesException();
 
         var destinatario = new Destinatario(operador.OperadorId, command.DestinatarioNombre, command.DestinatarioEmail);
         var direccion = new Direccion(operador.OperadorId, command.Direccion);
@@ -29,7 +32,8 @@ public sealed class CrearEnvioUseCase(IEnviosRepository repository, IUsuarioActu
             comercioId: comercio.Id,
             creadoPorUsuarioId: contexto.UsuarioId,
             destinatarioId: destinatario.Id,
-            direccionId: direccion.Id);
+            direccionId: direccion.Id,
+            versionReglasId: versionReglas);
         var bulto = new Bulto(
             operadorId: operador.OperadorId,
             envioId: envio.Id,

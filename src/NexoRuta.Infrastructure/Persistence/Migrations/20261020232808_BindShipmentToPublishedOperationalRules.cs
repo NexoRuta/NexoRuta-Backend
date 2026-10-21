@@ -1,0 +1,57 @@
+using System;
+using Microsoft.EntityFrameworkCore.Migrations;
+
+#nullable disable
+
+namespace NexoRuta.Infrastructure.Persistence.Migrations
+{
+    /// <inheritdoc />
+    public partial class BindShipmentToPublishedOperationalRules : Migration
+    {
+        /// <inheritdoc />
+        protected override void Up(MigrationBuilder migrationBuilder)
+        {
+            migrationBuilder.Sql("""
+                DO $$ BEGIN IF EXISTS(SELECT 1 FROM public."Envios") THEN
+                    RAISE EXCEPTION 'Development shipments have no historical operational rules. Preserve this database and initialize an empty development database before applying this contract.' USING ERRCODE='55000';
+                END IF; END $$;
+                """);
+            migrationBuilder.AddColumn<Guid>(
+                name: "VersionReglasId",
+                table: "Envios",
+                type: "uuid",
+                nullable: false);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Envios_OperadorId_VersionReglasId",
+                table: "Envios",
+                columns: new[] { "OperadorId", "VersionReglasId" });
+
+            migrationBuilder.AddForeignKey(
+                name: "FK_Envios_VersionesReglasOperativas_OperadorId_VersionReglasId",
+                table: "Envios",
+                columns: new[] { "OperadorId", "VersionReglasId" },
+                principalTable: "VersionesReglasOperativas",
+                principalColumns: new[] { "OperadorId", "Id" },
+                onDelete: ReferentialAction.Restrict);
+            ConfigurarAdmision(migrationBuilder);
+        }
+
+        /// <inheritdoc />
+        protected override void Down(MigrationBuilder migrationBuilder)
+        {
+            RetirarAdmision(migrationBuilder);
+            migrationBuilder.DropForeignKey(
+                name: "FK_Envios_VersionesReglasOperativas_OperadorId_VersionReglasId",
+                table: "Envios");
+
+            migrationBuilder.DropIndex(
+                name: "IX_Envios_OperadorId_VersionReglasId",
+                table: "Envios");
+
+            migrationBuilder.DropColumn(
+                name: "VersionReglasId",
+                table: "Envios");
+        }
+    }
+}
