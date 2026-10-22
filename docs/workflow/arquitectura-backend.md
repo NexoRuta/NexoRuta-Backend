@@ -6,7 +6,7 @@ Fuentes de referencia: `Laboratorio__NET_2026.pdf` (§§ 3–6 y 8), `Entrega_An
 
 ## Estado del repositorio y dirección de dependencias
 
-La solución apunta a **.NET 10** y contiene `NexoRuta.Domain`, `NexoRuta.Application`, `NexoRuta.Infrastructure`, `NexoRuta.Api`, `NexoRuta.Worker` y proyectos de pruebas unitarias, de integración y de arquitectura. La API implementa los recortes CU-01, CU-07 y CU-08 con persistencia y acceso por organización; el Worker sigue siendo una plantilla de actividad periódica. La existencia de un proyecto o paquete no implica que las capacidades posteriores estén terminadas.
+La solución apunta a **.NET 10** y contiene `NexoRuta.Domain`, `NexoRuta.Application`, `NexoRuta.Infrastructure`, `NexoRuta.Api`, `NexoRuta.Worker` y proyectos de pruebas unitarias, de integración y de arquitectura. La API implementa CU-01, CU-07 y CU-08 con persistencia y acceso por organización, además de M05 Seguimiento. El Worker ejecuta Outbox y generación de seguimiento por RabbitMQ, o publicación de eventos por Kafka, en procesos independientes. La existencia de un proyecto o paquete no implica que todas las capacidades posteriores estén terminadas.
 
 | Proyecto | Responsabilidad y dependencias permitidas |
 | --- | --- |
@@ -35,12 +35,31 @@ Cada CU tiene **un módulo principal**, aunque pueda consumir contratos de otro.
 
 - Organizar el código por módulo dentro de los proyectos existentes. Agregar un proyecto nuevo solo si existe una necesidad técnica o de aislamiento concreta.
 - Mantener controladores y adaptadores HTTP limitados a entrada, autorización, invocación del CU y respuesta. Las reglas de negocio viven en dominio o aplicación, según su alcance.
-- Agrupar las excepciones de aplicación de Administración en `Administracion/Excepciones`, con un archivo por tipo y el namespace correspondiente. La API conserva la traducción a estados HTTP.
+- Agrupar las excepciones de aplicación de Administración en `Administracion/Exceptions`, con un archivo por tipo y el namespace correspondiente. La API conserva la traducción a estados HTTP.
 - Definir entradas y salidas explícitas de cada CU. Los contratos HTTP no son entidades de dominio. No se ha decidido usar MediatR ni otro framework de mediación.
 - Separar las consultas de pertenencia de usuarios (`IAccesosUsuarioRepository`) de las consultas de empresas (`IOperadoresRepository` e `IComerciosRepository`). Las proyecciones de contexto o detalle pueden incluir nombres de entidades relacionadas en una única consulta.
 - Mantener la configuración de EF Core, migraciones, RLS y clientes externos en infraestructura. El dominio no lleva anotaciones de persistencia.
 - Evitar clases vacías para todo el DBML: es un modelo conceptual preliminar. Implementar entidades y relaciones cuando un CU las necesite, conservando los invariantes ya conocidos.
 - En el primer corte se acordó `Guid`/UUIDv7 generado al construir las entidades; `Destinatario` y `Direccion` son entidades separadas; `Bulto` expresa peso en gramos y dimensiones en centímetros. La conversión visual de unidades pertenece a la presentación. Registrar cualquier cambio transversal antes de alterar estos contratos.
+
+### Organización de Application
+
+Mantener la organización por módulo (`Administracion`, `Envios`, `Seguimiento`) y usar solo las carpetas que tengan contenido:
+
+| Carpeta | Responsabilidad |
+| --- | --- |
+| `Commands` | Entradas de casos de uso. |
+| `Dtos` | Objetos de transferencia internos de Application. |
+| `Repositories` | Contratos de acceso a persistencia. |
+| `Interfaces` | Abstracciones de servicios que no sean repositorios. |
+| `Results` | Resultados de ejecución de casos de uso. |
+| `UseCases` | Implementación de casos de uso. |
+| `Context` | Información contextual utilizada por Application. |
+| `Exceptions` | Excepciones específicas; no usar también `Excepciones`. |
+
+Cada archivo `.cs` contiene un tipo público principal y lleva su nombre. El namespace refleja módulo y carpeta, por ejemplo `NexoRuta.Application.Administracion.Dtos`. Separar DTOs y resultados de las interfaces o casos de uso que los consumen; no crear archivos vacíos como anticipo de funcionalidades.
+
+En CU-01, `UsuarioLogin` pertenece a `Dtos`, `IUsuariosLoginRepository` a `Repositories` e `IVerificadorPassword` a `Interfaces`. `IniciarSesionUseCase` está implementado en `UseCases`, `SesionIniciada` en `Results`, junto con `AuthController` y JWT; la organización estructural permanece vigente.
 
 ## Multitenancy y seguridad de datos
 
@@ -67,12 +86,18 @@ El mecanismo concreto de contexto RLS, sus migraciones y las pruebas todavía de
 
 | Tema | Estado de la decisión |
 | --- | --- |
-| PostgreSQL + EF Core/migraciones + RLS | PostgreSQL, EF Core y migraciones implementados para el primer monitoreo; RLS y su verificación con rol restringido siguen pendientes. |
-| Cola de trabajo y Worker independiente | RabbitMQ y Worker están desplegados localmente; publicación, consumo y reintentos de mensajes siguen pendientes. |
+| PostgreSQL + EF Core/migraciones + RLS | PostgreSQL RLS está implementado para las tablas de negocio, con contexto transaccional validado y pruebas con los roles restringidos de runtime; el límite de los GUC mutables se documenta en docs/rls/AUDITORIA.md. |
+| Cola de trabajo y Worker independiente | RabbitMQ publica y consume mensajes de seguimiento, con reintentos y Outbox; Kafka usa un proceso Worker independiente para `EnvioCreado.v1`. |
 | Caché distribuida | Obligatoria en dos perfiles de acceso, con invalidación y métricas; Redis está propuesto. |
 | SignalR, Serilog y OpenTelemetry | La API exporta OpenTelemetry al Dashboard local; tiempo real, Serilog y correlación con mensajes siguen pendientes. |
 | Kafka y NoSQL | Opcionales seleccionados en la entrega; no sustituyen la cola ni la base transaccional obligatorias. |
 | Dos instancias API, Docker Compose, CI/CD, nube e IaC | Compose y workflows de CI/CD presentes; compilación y servicios locales verificados. Dos instancias, CI remota, despliegue e IaC no se verificaron en esta revisión. |
-| Proveedor de identidad, modo de Blazor, conflicto offline, invalidación de caché, estrategia concreta de outbox, herramienta IaC y tablero técnico | Pendientes de decisión documentada antes de su implementación. |
+| Identidad, modo de Blazor, conflicto offline, invalidación de caché, estrategia concreta de outbox, herramienta IaC y tablero técnico | Identity con almacén EF Core y JWT actual fue elegido para las cuentas; OIDC no se afirma como implementado. Las demás decisiones de arquitectura conservan su estado específico. |
 
 Las pruebas unitarias de dominio, de integración de un flujo crítico, de arquitectura y de aislamiento deben ejecutarse en CI. El alcance y criterio verificable de cada CU se documentan siguiendo [Implementar un CU](implementar-cu.md) y su [plantilla](../cu/_plantilla.md).
+
+## CU-01: roles e inicialización vigentes
+
+Los roles pertenecen a un UUID concreto de operador o comercio; el catálogo global contiene permisos, no cuatro roles obligatorios. Application delimita administración por la organización autenticada y PostgreSQL impide asignaciones cruzadas mediante CHECK/FK compuesta. Los roles del comercio son independientes del operador de cada envío. JWT y compatibilidad Development consultan la identidad vigente; los permisos efectivos se leen de PostgreSQL en cada autorización.
+
+Esquema, bootstrap y administración posterior son responsabilidades separadas. Las dos banderas de inicialización están desactivadas por defecto. El bootstrap usa IDs persistidos y una lista configurable de roles/grants de creación única, con marcador por organización; no restaura decisiones administrativas ni eleva usuarios existentes. Datos históricos incompletos quedan bloqueados sin credenciales/privilegios artificiales. Se corrigen las migraciones recientes y se agrega una normalización compatible, sin reinicializar bases. Véase [CU-01](../cu/CU-01-comercios-usuarios.md) para contratos, conversión y límites de rollback.

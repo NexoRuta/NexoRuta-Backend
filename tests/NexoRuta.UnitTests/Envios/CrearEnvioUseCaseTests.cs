@@ -1,6 +1,12 @@
-using NexoRuta.Application.Administracion;
-using NexoRuta.Application.Administracion.Excepciones;
-using NexoRuta.Application.Envios;
+using NexoRuta.Application.Administracion.Context;
+using NexoRuta.Application.Administracion.Dtos;
+using NexoRuta.Application.Administracion.Exceptions;
+using NexoRuta.Application.Administracion.Interfaces;
+using NexoRuta.Application.Administracion.Repositories;
+using NexoRuta.Application.Envios.Commands;
+using NexoRuta.Application.Envios.Repositories;
+using NexoRuta.Application.Envios.Results;
+using NexoRuta.Application.Envios.UseCases;
 using NexoRuta.Domain.Envios;
 
 namespace NexoRuta.UnitTests.Envios;
@@ -17,15 +23,26 @@ public sealed class CrearEnvioUseCaseTests
 
         var result = await useCase.EjecutarAsync(Comando(operador.OperadorId));
 
-        Assert.Equal(operador.OperadorId, result.OperadorId);
-        Assert.Equal(cuenta.ComercioId, result.ComercioId);
+        Assert.Equal(operador.OperadorId, result.Origen.OperadorId);
+        Assert.Equal(cuenta.ComercioId, result.Origen.ComercioId);
         Assert.Equal(cuenta.ComercioId, repository.Guardado!.Value.Envio.ComercioId);
-        Assert.Equal(cuenta.UsuarioId, result.CreadoPorUsuarioId);
-        Assert.Equal(operador.Nombre, result.OperadorNombre);
-        Assert.Equal(cuenta.ComercioNombre, result.ComercioNombre);
+        Assert.Equal(cuenta.UsuarioId, result.Origen.CreadoPorUsuarioId);
+        Assert.Equal(repository.VersionReglas, repository.Guardado.Value.Envio.VersionReglasId);
+        Assert.Equal(operador.Nombre, result.Origen.OperadorNombre);
+        Assert.Equal(cuenta.ComercioNombre, result.Origen.ComercioNombre);
         Assert.Equal(result.Id, repository.Guardado!.Value.Envio.Id);
         Assert.Equal(1250m, repository.Guardado.Value.Bulto.PesoGramos);
         Assert.Null(cuenta.OperadorId);
+    }
+
+    [Fact]
+    public async Task Crear_SinPublicacionVigenteNoAdmiteNiPersisteElEnvio()
+    {
+        var operador = new OperadorDisponible(Guid.NewGuid(), "Operador sin reglas");
+        var repo = new FakeEnviosRepository { VersionReglas = null };
+        await Assert.ThrowsAsync<NexoRuta.Application.Envios.Exceptions.ReglasEnvioNoDisponiblesException>(() =>
+            new CrearEnvioUseCase(repo, new UsuarioActual(CuentaComercio()), new Operadores(operador)).EjecutarAsync(Comando(operador.OperadorId)));
+        Assert.Null(repo.Guardado);
     }
 
     [Fact]
@@ -102,16 +119,46 @@ public sealed class CrearEnvioUseCaseTests
         Assert.Equal((cuenta.OperadorId, cuenta.ComercioId), repository.Filtro);
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    public async Task Crear_ContextoDeComercioIncompletoNoPersiste(string? nombre)
+    {
+        var cuenta = CuentaComercio() with { ComercioNombre = nombre };
+        var operador = new OperadorDisponible(Guid.CreateVersion7(), "Operador");
+        var repository = new FakeEnviosRepository();
+
+        await Assert.ThrowsAsync<AccesoActualNoDisponibleException>(() =>
+            new CrearEnvioUseCase(repository, new UsuarioActual(cuenta), new Operadores(operador))
+                .EjecutarAsync(Comando(operador.OperadorId)));
+
+        Assert.Null(repository.Guardado);
+    }
+
+    [Fact]
+    public async Task Crear_ComercioVacioNoPersiste()
+    {
+        var cuenta = CuentaComercio() with { ComercioId = Guid.Empty };
+        var repository = new FakeEnviosRepository();
+        await Assert.ThrowsAsync<AccesoActualNoDisponibleException>(() =>
+            new CrearEnvioUseCase(repository, new UsuarioActual(cuenta), new Operadores(null))
+                .EjecutarAsync(Comando(Guid.CreateVersion7())));
+        Assert.Null(repository.Guardado);
+    }
+
     private static ContextoUsuario CuentaComercio()
         => new(Guid.CreateVersion7(), Guid.CreateVersion7(), null, Guid.CreateVersion7(),
-            "dueno@comercio.local", null, "Comercio Centro", true);
+            "dueno@comercio.local", null, "Comercio Centro", Guid.CreateVersion7(), "propietario_comercio");
 
     private static ContextoUsuario CuentaOperador()
         => new(Guid.CreateVersion7(), Guid.CreateVersion7(), Guid.CreateVersion7(), null,
-            "operador@empresa.local", "Distribución Sur", null, false);
+            "operador@empresa.local", "Distribución Sur", null, Guid.CreateVersion7(), "administrador_operador");
 
     private static CrearEnvioCommand Comando(Guid operadorId)
-        => new(operadorId, "Ana", "18 de Julio 123", "B-001", 1250m, 30m, 20m, 10m);
+        => new(OperadorId: operadorId, DestinatarioNombre: "Ana",
+                DestinatarioEmail: "destinatario@example.test", Direccion: "18 de Julio 123",
+            CodigoBulto: "B-001", PesoGramos: 1250m, LargoCentimetros: 30m, AnchoCentimetros: 20m, AltoCentimetros: 10m);
 
     private sealed class UsuarioActual(ContextoUsuario cuenta) : IUsuarioActual
     {
@@ -135,6 +182,10 @@ public sealed class CrearEnvioUseCaseTests
 
     private sealed class FakeEnviosRepository : IEnviosRepository
     {
+        public Guid? VersionReglas { get; init; } = Guid.CreateVersion7();
+        public Task<Guid?> ObtenerVersionReglasParaAdmisionAsync(Guid operadorId, CancellationToken cancellationToken = default)
+            => Task.FromResult(VersionReglas);
+
         public (Envio Envio, Destinatario Destinatario, Direccion Direccion, Bulto Bulto)? Guardado { get; private set; }
         public (Guid? OperadorId, Guid? ComercioId)? Filtro { get; private set; }
 

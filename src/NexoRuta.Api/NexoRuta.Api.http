@@ -1,32 +1,45 @@
 @NexoRuta.Api_HostAddress = http://localhost:5041
-# Para Compose, usar http://localhost:5000 como HostAddress.
-# Reemplazar por el acceso de una cuenta de comercio obtenido en GET /api/accesos.
-@NexoRuta.AccesoId = 00000000-0000-0000-0000-000000000000
+# For Compose, use http://localhost:5000 as HostAddress.
+@NexoRuta.Email = operator@example.test
+@NexoRuta.Password = replace-with-a-local-test-password
 
 GET {{NexoRuta.Api_HostAddress}}/health/ready
 Accept: application/json
 
 ###
 
-GET {{NexoRuta.Api_HostAddress}}/api/accesos?tipo=Comercio
-Accept: application/json
+POST {{NexoRuta.Api_HostAddress}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{NexoRuta.Email}}",
+  "password": "{{NexoRuta.Password}}"
+}
+
+> {%
+client.global.set("NexoRuta.Token", response.body.accessToken);
+%}
 
 ###
 
 GET {{NexoRuta.Api_HostAddress}}/api/usuarios/actual
-X-NexoRuta-Acceso: {{NexoRuta.AccesoId}}
+Authorization: Bearer {{NexoRuta.Token}}
+Accept: application/json
+
+###
+
+GET {{NexoRuta.Api_HostAddress}}/api/usuarios/actual/permisos
+Authorization: Bearer {{NexoRuta.Token}}
 Accept: application/json
 
 ###
 
 GET {{NexoRuta.Api_HostAddress}}/api/operadores
-X-NexoRuta-Acceso: {{NexoRuta.AccesoId}}
+Authorization: Bearer {{NexoRuta.Token}}
 Accept: application/json
 
 ###
 
 GET {{NexoRuta.Api_HostAddress}}/api/envios
-X-NexoRuta-Acceso: {{NexoRuta.AccesoId}}
+Authorization: Bearer {{NexoRuta.Token}}
 Accept: application/json
-
-###

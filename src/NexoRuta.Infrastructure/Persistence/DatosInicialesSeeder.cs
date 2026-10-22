@@ -1,75 +1,166 @@
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using NexoRuta.Domain.Administracion;
 using NexoRuta.Infrastructure.Administracion;
+using NexoRuta.Application.Administracion.Repositories;
+using NexoRuta.Application.Administracion.Exceptions;
 
 namespace NexoRuta.Infrastructure.Persistence;
 
-public sealed class DatosInicialesSeeder(NexoRutaDbContext db, AccesoInicial accesoInicial)
+public sealed class DatosInicialesSeeder(NexoRutaDbContext db, AccesoInicial initial,
+    IConfiguration configuration, UserManager<Usuario> identityUsers, IPlataformaRepository plataforma)
 {
+    public async Task SeedPlataformaAsync(CancellationToken ct = default)
+    {
+        if (!configuration.GetValue<bool>("PlatformInitialization:Enabled")) return;
+        var email = configuration["PlatformInitialization:Email"];
+        var password = configuration["PlatformInitialization:Password"];
+        if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
+            throw new InvalidOperationException("Platform initialization requires PlatformInitialization:Email and PlatformInitialization:Password; no account was changed.");
+        try
+        {
+            await plataforma.InicializarAsync(email, password, ct, permitirExistente: true);
+        }
+        catch (ArgumentException)
+        {
+            throw new InvalidOperationException("Platform initialization requires a valid email and a password of at least 12 characters; no account was changed.");
+        }
+        catch (CorreoYaRegistradoException)
+        {
+            throw new InvalidOperationException("Platform initialization email belongs to an existing identity; it will not be elevated or modified.");
+        }
+    }
+
     public async Task SeedAsync(CancellationToken cancellationToken = default)
     {
-        if (string.Equals(accesoInicial.UsuarioEmail, accesoInicial.OperadorUsuarioEmail, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("El dueño del comercio y el usuario del operador deben ser cuentas distintas.");
+        if (initial.OperadorId is null || initial.ComercioId is null || initial.OperadorId == Guid.Empty || initial.ComercioId == Guid.Empty)
+            throw new InvalidOperationException("Bootstrap requires persistent organization IDs.");
+        if (string.Equals(initial.UsuarioEmail, initial.OperadorUsuarioEmail, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Bootstrap accounts must be distinct.");
+        await using var transaction = await db.BeginOrJoinAsync(cancellationToken);
+        await db.ApplyAsync(RlsActorContext.Bootstrap(initial.OperadorId, initial.ComercioId), cancellationToken);
+        if (!await db.Operadores.AnyAsync(x => x.Id == initial.OperadorId, cancellationToken))
+            db.Add(new Operador(initial.OperadorNombre, initial.OperadorId));
+        if (!await db.Comercios.AnyAsync(x => x.Id == initial.ComercioId, cancellationToken))
+            db.Add(new Comercio(initial.ComercioNombre, initial.ComercioId));
+        await db.SaveChangesAsync(cancellationToken);
 
-        var usuarioComercio = await db.Usuarios.SingleOrDefaultAsync(
-            x => x.Email == accesoInicial.UsuarioEmail, cancellationToken);
-        var usuarioOperador = await db.Usuarios.SingleOrDefaultAsync(
-            x => x.Email == accesoInicial.OperadorUsuarioEmail, cancellationToken);
-        var cuentaComercio = usuarioComercio is null ? null :
-            await db.AccesosUsuario.SingleOrDefaultAsync(x => x.UsuarioId == usuarioComercio.Id, cancellationToken);
-        var cuentaOperador = usuarioOperador is null ? null :
-            await db.AccesosUsuario.SingleOrDefaultAsync(x => x.UsuarioId == usuarioOperador.Id, cancellationToken);
-        if (cuentaComercio?.OperadorId is not null || cuentaOperador?.ComercioId is not null)
-            throw new InvalidOperationException("Las cuentas iniciales no pertenecen al tipo de organización previsto.");
-
-        var comercio = cuentaComercio?.ComercioId is { } comercioId
-            ? await db.Comercios.SingleAsync(x => x.Id == comercioId, cancellationToken)
-            : await db.Comercios.SingleOrDefaultAsync(x => x.Nombre == accesoInicial.ComercioNombre, cancellationToken);
-        var operador = cuentaOperador?.OperadorId is { } operadorId
-            ? await db.Operadores.SingleAsync(x => x.Id == operadorId, cancellationToken)
-            : await db.Operadores.SingleOrDefaultAsync(x => x.Nombre == accesoInicial.OperadorNombre, cancellationToken);
-
-        // Reutilizar el alta inicial anterior conserva los IDs y los envíos ya registrados.
-        if (usuarioComercio is null && comercio is null)
+        var operatorEntity = await db.Operadores.SingleAsync(x => x.Id == initial.OperadorId, cancellationToken);
+        var commerceEntity = await db.Comercios.SingleAsync(x => x.Id == initial.ComercioId, cancellationToken);
+        var operatorCompleted = db.Entry(operatorEntity).Property<bool>("BootstrapCompletado").CurrentValue;
+        var commerceCompleted = db.Entry(commerceEntity).Property<bool>("BootstrapCompletado").CurrentValue;
+        foreach (var permiso in CatalogoPermisos.Todos)
+            if (!await db.Permisos.AnyAsync(x => x.Codigo == permiso.Codigo, cancellationToken))
+                db.Add(new Permiso(permiso.Codigo, permiso.Nombre));
+        var definitions = configuration.GetSection("Bootstrap:Roles").Get<RolInicial[]>() ?? [];
+        foreach (var definition in definitions)
         {
-            var anterior = await (
-                from cuenta in db.AccesosUsuario
-                join usuario in db.Usuarios on cuenta.UsuarioId equals usuario.Id
-                join cliente in db.Comercios on cuenta.ComercioId equals (Guid?)cliente.Id
-                where usuario.Email == "demo@nexoruta.local" && cliente.Nombre == "Comercio Demo"
-                select new { Usuario = usuario, Comercio = cliente, Cuenta = cuenta })
-                .SingleOrDefaultAsync(cancellationToken);
-            if (anterior is not null)
+            var role = new Rol(definition.Codigo, definition.Nombre, definition.OperadorId, definition.ComercioId);
+            if (role.OperadorId != initial.OperadorId && role.ComercioId != initial.ComercioId)
+                throw new InvalidOperationException("Bootstrap roles must belong to the configured organizations.");
+            if (definition.Permisos.Any(code => !CatalogoPermisos.EsAplicable(code, role.TipoOrganizacion)))
+                throw new InvalidOperationException("Bootstrap roles can only receive registered permissions applicable to their organization.");
+            var isConfiguredOwnerRole =
+                (role.OperadorId == initial.OperadorId && role.Codigo == initial.OperadorRolCodigo)
+                || (role.ComercioId == initial.ComercioId && role.Codigo == initial.ComercioRolCodigo);
+            var existing = await db.Roles.SingleOrDefaultAsync(x => x.Codigo == role.Codigo
+                && x.OrganizacionId == role.OrganizacionId && x.TipoOrganizacion == role.TipoOrganizacion, cancellationToken);
+            if (existing is not null)
             {
-                usuarioComercio = anterior.Usuario;
-                comercio = anterior.Comercio;
-                cuentaComercio = anterior.Cuenta;
-                db.Entry(usuarioComercio).Property(x => x.Email).CurrentValue = accesoInicial.UsuarioEmail;
-                db.Entry(comercio).Property(x => x.Nombre).CurrentValue = accesoInicial.ComercioNombre;
-                if (operador is null)
+                if (isConfiguredOwnerRole) existing.ProtegerComoRolSistema();
+                continue;
+            }
+            if (role.OperadorId.HasValue ? operatorCompleted : commerceCompleted) continue;
+            if (isConfiguredOwnerRole) role.ProtegerComoRolSistema();
+            db.Add(role);
+            foreach (var code in definition.Permisos.Distinct(StringComparer.Ordinal))
+            {
+                var permission = db.Permisos.Local.SingleOrDefault(x => x.Codigo == code)
+                    ?? await db.Permisos.SingleOrDefaultAsync(x => x.Codigo == code, cancellationToken);
+                if (permission is null)
                 {
-                    operador = await db.Operadores.SingleOrDefaultAsync(x => x.Nombre == "Operador Demo", cancellationToken);
-                    if (operador is not null)
-                        db.Entry(operador).Property(x => x.Nombre).CurrentValue = accesoInicial.OperadorNombre;
+                    permission = new Permiso(code, code);
+                    db.Add(permission);
                 }
+                db.Add(new RolPermiso(role.Id, permission.Id));
             }
         }
-
-        if (operador is null)
-            db.Operadores.Add(operador = new Operador(accesoInicial.OperadorNombre));
-        if (comercio is null)
-            db.Comercios.Add(comercio = new Comercio(accesoInicial.ComercioNombre));
-        if (usuarioComercio is null)
-            db.Usuarios.Add(usuarioComercio = new Usuario(accesoInicial.UsuarioEmail));
-        if (usuarioOperador is null)
-            db.Usuarios.Add(usuarioOperador = new Usuario(accesoInicial.OperadorUsuarioEmail));
-
-        if (cuentaComercio is null)
-            db.AccesosUsuario.Add(new AccesoUsuario(usuarioComercio.Id, null, comercio.Id, esPropietario: true));
-        else
-            db.Entry(cuentaComercio).Property(x => x.EsPropietario).CurrentValue = true;
-        if (cuentaOperador is null)
-            db.AccesosUsuario.Add(new AccesoUsuario(usuarioOperador.Id, operador.Id, null));
         await db.SaveChangesAsync(cancellationToken);
+        await EnsureOwnerRolePermissionsAsync(TipoAccesoUsuario.Operador, initial.OperadorId.Value,
+            initial.OperadorRolCodigo, definitions, cancellationToken);
+        await EnsureOwnerRolePermissionsAsync(TipoAccesoUsuario.Comercio, initial.ComercioId.Value,
+            initial.ComercioRolCodigo, definitions, cancellationToken);
+        await EnsureAccount(initial.OperadorUsuarioEmail, initial.OperadorId, null, initial.OperadorRolCodigo,
+            "AccesoInicial:OperadorUsuarioPassword", cancellationToken);
+        await EnsureAccount(initial.UsuarioEmail, null, initial.ComercioId, initial.ComercioRolCodigo,
+            "AccesoInicial:UsuarioPassword", cancellationToken);
+        db.Entry(operatorEntity).Property<bool>("BootstrapCompletado").CurrentValue = true;
+        db.Entry(commerceEntity).Property<bool>("BootstrapCompletado").CurrentValue = true;
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    private async Task EnsureOwnerRolePermissionsAsync(
+        TipoAccesoUsuario scope, Guid organizationId, string? roleCode,
+        IReadOnlyList<RolInicial> definitions, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(roleCode)) return;
+        var operatorId = scope == TipoAccesoUsuario.Operador ? organizationId : (Guid?)null;
+        var commerceId = scope == TipoAccesoUsuario.Comercio ? organizationId : (Guid?)null;
+        var definition = definitions.SingleOrDefault(x => x.Codigo == roleCode
+            && x.OperadorId == operatorId && x.ComercioId == commerceId)
+            ?? throw new InvalidOperationException("The configured organization owner must have a scoped bootstrap role definition.");
+
+        var role = await db.Roles.SingleOrDefaultAsync(x => x.Codigo == roleCode
+            && x.OrganizacionId == organizationId && x.TipoOrganizacion == scope, ct);
+        if (role is null)
+            throw new InvalidOperationException("The configured organization owner role is missing after bootstrap.");
+        role.ProtegerComoRolSistema();
+
+        // The centralized permission catalog is the source of truth for protected organization-owner grants.
+        var codes = CatalogoPermisos.Para(scope).Select(x => x.Codigo).ToArray();
+        var permissions = new List<Permiso>(codes.Length);
+        foreach (var code in codes)
+        {
+            var permission = db.Permisos.Local.SingleOrDefault(x => x.Codigo == code)
+                ?? await db.Permisos.SingleOrDefaultAsync(x => x.Codigo == code, ct);
+            if (permission is null)
+                throw new InvalidOperationException($"Registered permission {code} is missing after bootstrap.");
+            permissions.Add(permission);
+        }
+
+        var grants = await db.RolesPermisos.Where(x => x.RolId == role.Id).ToListAsync(ct);
+        db.RemoveRange(grants.Where(x => !permissions.Any(p => p.Id == x.PermisoId)));
+        foreach (var permission in permissions.Where(p => !grants.Any(x => x.PermisoId == p.Id)))
+            db.Add(new RolPermiso(role.Id, permission.Id));
+        await db.SaveChangesAsync(ct);
+    }
+
+    private async Task EnsureAccount(string email, Guid? operatorId, Guid? commerceId, string? code,
+        string passwordSetting, CancellationToken ct)
+    {
+        var normalized = email.Trim().ToLowerInvariant();
+        var user = await db.Usuarios.SingleOrDefaultAsync(x => x.Email!.ToLower() == normalized, ct);
+        var isNew = user is null;
+        if (isNew)
+        {
+            var password = configuration[passwordSetting];
+            if (string.IsNullOrWhiteSpace(password) || password.Length < 12)
+                throw new InvalidOperationException($"A bootstrap password of at least 12 characters is required: {passwordSetting}.");
+            user = new Usuario(normalized);
+            var result = await identityUsers.CreateAsync(user, password);
+            if (!result.Succeeded)
+                throw new InvalidOperationException("The configured bootstrap identity was rejected by Identity.");
+        }
+        await db.SetBootstrapUserAsync(user!.Id, ct);
+        if (await db.AccesosUsuario.AnyAsync(x => x.UsuarioId == user!.Id, ct)) return;
+        // ponytail: bootstrap grants are create-only; repair of an existing user requires explicit administrative assignment.
+        var role = isNew && !string.IsNullOrWhiteSpace(code)
+            ? await db.Roles.SingleOrDefaultAsync(x => x.Codigo == code && x.OperadorId == operatorId && x.ComercioId == commerceId, ct)
+            : null;
+        if (isNew && !string.IsNullOrWhiteSpace(code) && role is null)
+            throw new InvalidOperationException("The configured initial role does not belong to this organization.");
+        db.Add(new AccesoUsuario(user!.Id, operatorId, commerceId, role, esPropietario: role is not null));
     }
 }

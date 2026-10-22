@@ -10,6 +10,10 @@ public sealed class Bulto
     public decimal LargoCentimetros { get; private set; }
     public decimal AnchoCentimetros { get; private set; }
     public decimal AltoCentimetros { get; private set; }
+    public EstadoCustodiaBulto Custodia { get; private set; }
+    public Guid? AccesoCustodioId { get; private set; }
+    public Guid? RutaCustodiaId { get; private set; }
+    public long Version { get; private set; }
 
     public Bulto(
         Guid operadorId,
@@ -43,5 +47,53 @@ public sealed class Bulto
         LargoCentimetros = largoCentimetros;
         AnchoCentimetros = anchoCentimetros;
         AltoCentimetros = altoCentimetros;
+    }
+
+    public void RecibirEnDeposito(bool devolucionPosterior = false)
+    {
+        if (Custodia == EstadoCustodiaBulto.Deposito) return;
+        if (Custodia is not (EstadoCustodiaBulto.SinRecepcion or EstadoCustodiaBulto.PendienteDeposito)
+            && !(devolucionPosterior && Custodia == EstadoCustodiaBulto.Destinatario))
+            throw new InvalidOperationException("El bulto no está declarado para recepción en depósito.");
+        Custodia = EstadoCustodiaBulto.Deposito;
+        AccesoCustodioId = null; RutaCustodiaId = null; Version++;
+    }
+
+    public void Cargar(Guid accesoId, Guid rutaId)
+    {
+        if (accesoId == Guid.Empty || rutaId == Guid.Empty) throw new ArgumentException("La carga requiere repartidor y ruta.");
+        if (Custodia == EstadoCustodiaBulto.Repartidor && AccesoCustodioId == accesoId && RutaCustodiaId == rutaId) return;
+        if (Custodia != EstadoCustodiaBulto.Deposito) throw new InvalidOperationException("El bulto todavía no está disponible en depósito.");
+        Custodia = EstadoCustodiaBulto.Repartidor; AccesoCustodioId = accesoId; RutaCustodiaId = rutaId; Version++;
+    }
+
+    public void RecibirTrasIncidenciaDeCierre(Guid accesoId, Guid rutaId)
+    {
+        ExigirCustodia(accesoId, rutaId);
+        if (Custodia != EstadoCustodiaBulto.Repartidor)
+            throw new InvalidOperationException("La recepción requiere la custodia registrada en la incidencia de cierre.");
+        Custodia = EstadoCustodiaBulto.Deposito;
+        AccesoCustodioId = null; RutaCustodiaId = null; Version++;
+    }
+
+    public void Entregar(Guid accesoId, Guid rutaId)
+    {
+        ExigirCustodia(accesoId, rutaId);
+        if (Custodia != EstadoCustodiaBulto.Repartidor) throw new InvalidOperationException("El bulto no está cargado para entrega.");
+        Custodia = EstadoCustodiaBulto.Destinatario; Version++;
+    }
+
+    public void DeclararRendicion(Guid accesoId, Guid rutaId)
+    {
+        ExigirCustodia(accesoId, rutaId);
+        if (Custodia == EstadoCustodiaBulto.PendienteDeposito) return;
+        if (Custodia != EstadoCustodiaBulto.Repartidor) throw new InvalidOperationException("No se puede rendir un bulto ya entregado.");
+        Custodia = EstadoCustodiaBulto.PendienteDeposito; Version++;
+    }
+
+    private void ExigirCustodia(Guid accesoId, Guid rutaId)
+    {
+        if (AccesoCustodioId != accesoId || RutaCustodiaId != rutaId)
+            throw new InvalidOperationException("El bulto está bajo otra custodia.");
     }
 }
