@@ -1,3 +1,13 @@
+-- Cloud SQL administrators can manage these roles but cannot change the
+-- superuser-only attributes, even when setting them to false. Fail closed.
+DO $safe_runtime_roles$ BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles
+        WHERE rolname IN ('nexoruta_api_runtime', 'nexoruta_worker_runtime', 'nexoruta_bootstrap_runtime')
+          AND (rolsuper OR rolbypassrls OR rolreplication)) THEN
+        RAISE EXCEPTION 'Unsafe runtime role attributes require repair by an authorized administrator.';
+    END IF;
+END $safe_runtime_roles$;
+
 \getenv api_password NEXORUTA_API_DB_PASSWORD
 \getenv worker_password NEXORUTA_WORKER_DB_PASSWORD
 \getenv bootstrap_password NEXORUTA_BOOTSTRAP_DB_PASSWORD
@@ -8,7 +18,7 @@ SELECT format(
 WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'nexoruta_api_runtime')
 \gexec
 SELECT format(
-    'ALTER ROLE nexoruta_api_runtime LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS PASSWORD %L',
+    'ALTER ROLE nexoruta_api_runtime LOGIN INHERIT NOCREATEDB NOCREATEROLE PASSWORD %L',
     :'api_password')
 \gexec
 GRANT nexoruta_api TO nexoruta_api_runtime;
@@ -19,7 +29,7 @@ SELECT format(
 WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'nexoruta_worker_runtime')
 \gexec
 SELECT format(
-    'ALTER ROLE nexoruta_worker_runtime LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS PASSWORD %L',
+    'ALTER ROLE nexoruta_worker_runtime LOGIN INHERIT NOCREATEDB NOCREATEROLE PASSWORD %L',
     :'worker_password')
 \gexec
 GRANT nexoruta_worker TO nexoruta_worker_runtime;
@@ -30,7 +40,7 @@ SELECT format(
 WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'nexoruta_bootstrap_runtime')
 \gexec
 SELECT format(
-    'ALTER ROLE nexoruta_bootstrap_runtime LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS PASSWORD %L',
+    'ALTER ROLE nexoruta_bootstrap_runtime LOGIN INHERIT NOCREATEDB NOCREATEROLE PASSWORD %L',
     :'bootstrap_password')
 \gexec
 

@@ -28,17 +28,23 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                 END
                 $roles$;
 
-                ALTER ROLE nexoruta_schema_owner NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
-                ALTER ROLE nexoruta_api NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
-                ALTER ROLE nexoruta_worker NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
-                ALTER ROLE nexoruta_bootstrap NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
-                ALTER ROLE nexoruta_auth_fn NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
-                ALTER ROLE nexoruta_public_fn NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
-                ALTER ROLE nexoruta_queue_fn NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
-                ALTER ROLE nexoruta_role_fn NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
-                ALTER ROLE nexoruta_org_fn NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
-                ALTER ROLE nexoruta_shipment_fn NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
-                ALTER ROLE nexoruta_job_fn NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+                DO $safe_roles$ BEGIN
+                    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname IN ('nexoruta_schema_owner', 'nexoruta_api', 'nexoruta_worker', 'nexoruta_bootstrap', 'nexoruta_auth_fn', 'nexoruta_public_fn', 'nexoruta_queue_fn', 'nexoruta_role_fn', 'nexoruta_org_fn', 'nexoruta_shipment_fn', 'nexoruta_job_fn')
+                        AND (rolsuper OR rolbypassrls OR rolreplication)) THEN
+                        RAISE EXCEPTION 'Application roles must not have SUPERUSER, BYPASSRLS or REPLICATION; repair them with an authorized administrator.';
+                    END IF;
+                END $safe_roles$;
+                ALTER ROLE nexoruta_schema_owner NOLOGIN NOINHERIT NOCREATEDB NOCREATEROLE;
+                ALTER ROLE nexoruta_api NOLOGIN NOINHERIT NOCREATEDB NOCREATEROLE;
+                ALTER ROLE nexoruta_worker NOLOGIN NOINHERIT NOCREATEDB NOCREATEROLE;
+                ALTER ROLE nexoruta_bootstrap NOLOGIN NOINHERIT NOCREATEDB NOCREATEROLE;
+                ALTER ROLE nexoruta_auth_fn NOLOGIN NOINHERIT NOCREATEDB NOCREATEROLE;
+                ALTER ROLE nexoruta_public_fn NOLOGIN NOINHERIT NOCREATEDB NOCREATEROLE;
+                ALTER ROLE nexoruta_queue_fn NOLOGIN NOINHERIT NOCREATEDB NOCREATEROLE;
+                ALTER ROLE nexoruta_role_fn NOLOGIN NOINHERIT NOCREATEDB NOCREATEROLE;
+                ALTER ROLE nexoruta_org_fn NOLOGIN NOINHERIT NOCREATEDB NOCREATEROLE;
+                ALTER ROLE nexoruta_shipment_fn NOLOGIN NOINHERIT NOCREATEDB NOCREATEROLE;
+                ALTER ROLE nexoruta_job_fn NOLOGIN NOINHERIT NOCREATEDB NOCREATEROLE;
                 DO $memberships$
                 DECLARE membership record;
                 BEGIN

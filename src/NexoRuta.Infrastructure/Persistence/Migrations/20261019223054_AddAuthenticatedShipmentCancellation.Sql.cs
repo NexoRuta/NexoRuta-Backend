@@ -12,7 +12,13 @@ public partial class AddAuthenticatedShipmentCancellation
                     CREATE ROLE nexoruta_cancel_fn NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
                 END IF;
             END $role$;
-            ALTER ROLE nexoruta_cancel_fn NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+            DO $safe_roles$ BEGIN
+                IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname IN ('nexoruta_cancel_fn')
+                    AND (rolsuper OR rolbypassrls OR rolreplication)) THEN
+                    RAISE EXCEPTION 'Application roles must not have SUPERUSER, BYPASSRLS or REPLICATION; repair them with an authorized administrator.';
+                END IF;
+            END $safe_roles$;
+            ALTER ROLE nexoruta_cancel_fn NOLOGIN NOINHERIT NOCREATEDB NOCREATEROLE;
             GRANT USAGE ON SCHEMA public, nexoruta_app TO nexoruta_cancel_fn;
             GRANT EXECUTE ON FUNCTION nexoruta_app.setting(text), nexoruta_app.ctx_uuid(text) TO nexoruta_cancel_fn;
             ALTER TABLE public."CancelacionesEnvio" OWNER TO nexoruta_schema_owner;

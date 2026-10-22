@@ -8,7 +8,13 @@ public partial class AuthorizeShipmentDestinationConfirmation
         DO $$ BEGIN IF NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='nexoruta_destino_fn') THEN
             CREATE ROLE nexoruta_destino_fn NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
         END IF; END $$;
-        ALTER ROLE nexoruta_destino_fn NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+        DO $safe_roles$ BEGIN
+            IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname IN ('nexoruta_destino_fn')
+                AND (rolsuper OR rolbypassrls OR rolreplication)) THEN
+                RAISE EXCEPTION 'Application roles must not have SUPERUSER, BYPASSRLS or REPLICATION; repair them with an authorized administrator.';
+            END IF;
+        END $safe_roles$;
+        ALTER ROLE nexoruta_destino_fn NOLOGIN NOINHERIT NOCREATEDB NOCREATEROLE;
         GRANT USAGE ON SCHEMA public,nexoruta_app TO nexoruta_destino_fn;
         GRANT EXECUTE ON FUNCTION nexoruta_app.setting(text),nexoruta_app.ctx_uuid(text) TO nexoruta_destino_fn;
         GRANT SELECT ON public."Envios",public."Direcciones",public."Operadores",public."AccesosUsuario",public."Roles",public."RolesPermisos",public."Permisos" TO nexoruta_destino_fn;
