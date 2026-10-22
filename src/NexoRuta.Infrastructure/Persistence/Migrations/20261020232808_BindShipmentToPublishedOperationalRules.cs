@@ -12,6 +12,11 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.Sql("""
+                -- EF runs this migration in one transaction. The owner must see
+                -- all rows for both the data guard and foreign-key validation;
+                -- FORCE is restored before commit, including on failure rollback.
+                ALTER TABLE public."Envios" NO FORCE ROW LEVEL SECURITY;
+                ALTER TABLE public."VersionesReglasOperativas" NO FORCE ROW LEVEL SECURITY;
                 DO $guard$
                 DECLARE was_forced boolean;
                 BEGIN
@@ -47,6 +52,10 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                 principalColumns: new[] { "OperadorId", "Id" },
                 onDelete: ReferentialAction.Restrict);
             ConfigurarAdmision(migrationBuilder);
+            migrationBuilder.Sql("""
+                ALTER TABLE public."Envios" FORCE ROW LEVEL SECURITY;
+                ALTER TABLE public."VersionesReglasOperativas" FORCE ROW LEVEL SECURITY;
+                """);
         }
 
         /// <inheritdoc />
