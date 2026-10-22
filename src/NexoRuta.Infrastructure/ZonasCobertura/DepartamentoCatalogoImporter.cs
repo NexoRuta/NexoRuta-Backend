@@ -39,6 +39,16 @@ public sealed class DepartamentoCatalogImporter(NexoRutaDbContext db)
         var departments = ParseAndValidate(bytes);
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        // This administrative command must validate/import the entire catalog.
+        // Keep the owner-only RLS change in this transaction: other sessions
+        // never observe it, and failures/early returns restore it by rollback.
+        var wasForced = await db.Database.SqlQueryRaw<bool>("""
+            SELECT relforcerowsecurity AS "Value" FROM pg_class
+            WHERE oid = 'public."DepartamentosReferencia"'::regclass
+            """).SingleAsync(cancellationToken);
+        if (wasForced)
+            await db.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE public.\"DepartamentosReferencia\" NO FORCE ROW LEVEL SECURITY", cancellationToken);
         var sameVersion = await db.DepartamentosReferencia.AsNoTracking()
             .Where(x => x.VersionFuente == version)
             .Select(x => x.Codigo)
@@ -74,6 +84,9 @@ public sealed class DepartamentoCatalogImporter(NexoRutaDbContext db)
             CatalogoDepartamentosUruguay.UndeclaredLicense,
             importedAt)));
         await db.SaveChangesAsync(cancellationToken);
+        if (wasForced)
+            await db.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE public.\"DepartamentosReferencia\" FORCE ROW LEVEL SECURITY", cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return new(departments.Count, version, AlreadyImported: false);
     }
