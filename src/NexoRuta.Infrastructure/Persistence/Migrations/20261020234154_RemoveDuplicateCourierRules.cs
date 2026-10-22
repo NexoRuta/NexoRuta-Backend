@@ -52,9 +52,21 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.Sql("""
-                DO $$ BEGIN IF EXISTS(SELECT 1 FROM public."ConfiguracionesReparto") THEN
+                DO $guard$
+                DECLARE was_forced boolean;
+                BEGIN
+                    SELECT relforcerowsecurity INTO was_forced FROM pg_class
+                    WHERE oid = 'public."ConfiguracionesReparto"'::regclass;
+                    IF was_forced THEN
+                        ALTER TABLE public."ConfiguracionesReparto" NO FORCE ROW LEVEL SECURITY;
+                    END IF;
+                    IF EXISTS(SELECT 1 FROM public."ConfiguracionesReparto") THEN
                     RAISE EXCEPTION 'Cannot reconstruct deleted duplicate courier policies. Roll back only an empty development database.' USING ERRCODE='55000';
-                END IF; END $$;
+                    END IF;
+                    IF was_forced THEN
+                        ALTER TABLE public."ConfiguracionesReparto" FORCE ROW LEVEL SECURITY;
+                    END IF;
+                END $guard$;
                 """);
             migrationBuilder.DropCheckConstraint(
                 name: "CK_ConfiguracionesReparto_Limites",

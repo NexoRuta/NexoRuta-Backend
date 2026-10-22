@@ -12,9 +12,21 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.Sql("""
-                DO $$ BEGIN IF EXISTS(SELECT 1 FROM public."Envios") THEN
+                DO $guard$
+                DECLARE was_forced boolean;
+                BEGIN
+                    SELECT relforcerowsecurity INTO was_forced FROM pg_class
+                    WHERE oid = 'public."Envios"'::regclass;
+                    IF was_forced THEN
+                        ALTER TABLE public."Envios" NO FORCE ROW LEVEL SECURITY;
+                    END IF;
+                    IF EXISTS(SELECT 1 FROM public."Envios") THEN
                     RAISE EXCEPTION 'Development shipments have no historical operational rules. Preserve this database and initialize an empty development database before applying this contract.' USING ERRCODE='55000';
-                END IF; END $$;
+                    END IF;
+                    IF was_forced THEN
+                        ALTER TABLE public."Envios" FORCE ROW LEVEL SECURITY;
+                    END IF;
+                END $guard$;
                 """);
             migrationBuilder.AddColumn<Guid>(
                 name: "VersionReglasId",
