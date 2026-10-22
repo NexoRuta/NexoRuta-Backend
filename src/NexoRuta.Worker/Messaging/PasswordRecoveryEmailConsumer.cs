@@ -80,10 +80,16 @@ public sealed class PasswordRecoveryEmailConsumer(
                 return;
             }
 
-            var minutes = Math.Max(1, (int)Math.Ceiling((command.ExpiresAtUtc - DateTimeOffset.UtcNow).TotalMinutes));
-            var body = $"Para establecer una contraseña nueva, abrí este enlace dentro de {minutes} minutos:\n\n{command.Link}\n\nSi no solicitaste este cambio, ignorá este mensaje.";
+            var email = PasswordRecoveryEmailTemplate.Create(command.Link, command.ExpiresAtUtc);
             stage = PasswordRecoveryEmailStage.SmtpDelivery;
-            await correo.EnviarAsync(command.Recipient, "Restablecer contraseña de NexoRuta", body, ct);
+            await correo.EnviarHtmlAsync(
+                command.Recipient,
+                "Restablecer contraseña de NexoRuta",
+                email.Text,
+                email.Html,
+                null,
+                null,
+                ct);
             stage = PasswordRecoveryEmailStage.DeliveryStatePersistence;
             var markedDelivered = await outbox.MarkEmailDeliveryAsync(messageId, OutboxEmailDeliveryState.Delivered, ct);
             if (!markedDelivered && await outbox.GetEmailDeliveryStateAsync(messageId, ct) != nameof(OutboxEmailDeliveryState.Delivered))

@@ -8,6 +8,7 @@ using NexoRuta.Domain.Envios;
 using NexoRuta.Domain.Seguimiento;
 using NexoRuta.Infrastructure.Seguimiento.Consultas;
 using NexoRuta.IntegrationTests.Fixtures;
+using NexoRuta.IntegrationTests.Seguridad;
 using Npgsql;
 
 namespace NexoRuta.IntegrationTests.Seguimiento;
@@ -38,15 +39,46 @@ public sealed class EnlaceSeguimientoPostgresTests(PostgresFixture postgres)
             token = await SeguimientoTestData.CreateActiveLinkAsync(db, envio);
         }
 
-        using var api = database.CreateApiFactory();
+        var runtime = await RlsRestrictedHttpFlowTests.RestrictApiAsync(database);
+        using var api = new IntegrationApiFactory(runtime, settings: RlsRestrictedHttpFlowTests.ApiSettings());
         using var client = api.CreateHttpClient();
         using var response = await client.GetAsync($"/api/public/seguimiento/{token}");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        var property = Assert.Single(json.RootElement.EnumerateObject());
-        Assert.Equal("estado", property.Name);
-        Assert.Equal("Admitido", property.Value.GetString());
+        Assert.Equal(new[] { "estado", "identidad" }, json.RootElement.EnumerateObject().Select(property => property.Name));
+        Assert.Equal("Admitido", json.RootElement.GetProperty("estado").GetString());
+        Assert.Equal("Integration operator", json.RootElement.GetProperty("identidad").GetProperty("nombre").GetString());
+        Assert.False(json.RootElement.GetProperty("identidad").TryGetProperty("nombreAdministrativo", out _));
+    }
+
+    [Fact]
+    public async Task TokenValido_ProyectaSoloLaMarcaPublicaDelOperadorDelEnvio()
+    {
+        string token;
+        await using (var db = database.CreateDbContext())
+        {
+            var envio = await SeguimientoTestData.CreateEnvioAsync(db);
+            db.VersionesIdentidadVisualOperador.Add(new NexoRuta.Domain.Administracion.VersionIdentidadVisualOperador(
+                envio.OperadorId, 1, "Marca Sur", "hola@sur.test", "+598 99 123 456", "#AABBCC", null,
+                null, null, envio.CreadoPorUsuarioId, DateTimeOffset.UtcNow));
+            await db.SaveChangesAsync();
+            token = await SeguimientoTestData.CreateActiveLinkAsync(db, envio);
+        }
+
+        var runtime = await RlsRestrictedHttpFlowTests.RestrictApiAsync(database);
+        using var api = new IntegrationApiFactory(runtime, settings: RlsRestrictedHttpFlowTests.ApiSettings());
+        using var client = api.CreateHttpClient();
+        using var response = await client.GetAsync($"/api/public/seguimiento/{token}");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var identity = json.RootElement.GetProperty("identidad");
+        Assert.Equal("Marca Sur", identity.GetProperty("nombre").GetString());
+        Assert.Equal("hola@sur.test", identity.GetProperty("correoPublico").GetString());
+        Assert.Equal("+598 99 123 456", identity.GetProperty("telefonoPublico").GetString());
+        Assert.Equal("#AABBCC", identity.GetProperty("colorPrimario").GetString());
+        Assert.Equal(new[] { "nombre", "correoPublico", "telefonoPublico", "colorPrimario", "colorSecundario", "logoContenido", "logoTipoContenido" },
+            identity.EnumerateObject().Select(property => property.Name));
     }
 
     [Fact]
@@ -160,7 +192,8 @@ public sealed class EnlaceSeguimientoPostgresTests(PostgresFixture postgres)
 
     private async Task AssertNotFoundAsync(string token)
     {
-        using var api = database.CreateApiFactory();
+        var runtime = await RlsRestrictedHttpFlowTests.RestrictApiAsync(database);
+        using var api = new IntegrationApiFactory(runtime, settings: RlsRestrictedHttpFlowTests.ApiSettings());
         using var client = api.CreateHttpClient();
         using var response = await client.GetAsync($"/api/public/seguimiento/{token}");
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);

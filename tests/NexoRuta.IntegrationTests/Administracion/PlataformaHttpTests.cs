@@ -13,6 +13,7 @@ using NexoRuta.Application.Administracion.Exceptions;
 using NexoRuta.Application.Administracion.Repositories;
 using NexoRuta.Domain.Administracion;
 using NexoRuta.Infrastructure.Administracion.Autenticacion;
+using NexoRuta.Infrastructure.Administracion;
 using NexoRuta.Infrastructure.Administracion.Repositories;
 using NexoRuta.Infrastructure.Persistence;
 using NexoRuta.IntegrationTests.Fixtures;
@@ -62,6 +63,89 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
             Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync($"/api/admin/{kind}/{Guid.NewGuid()}")).StatusCode);
             Assert.Equal(HttpStatusCode.Unauthorized, (await client.PostAsync($"/api/admin/{kind}", null)).StatusCode);
         }
+    }
+
+    [Fact]
+    public async Task RestrictedApiCreatesOperatorOnlyForAuthorizedPlatformAndRejectsUnauthorizedUsersAtomically()
+    {
+        var database = await postgres.CreateDatabaseAsync();
+        await Initialize(database);
+        var initial = new AccesoInicial(PlatformEmail, "RLS operator", "RLS commerce", "operator-owner@example.test");
+        await using (var seed = database.CreateDbContext())
+            await AuthenticationTestData.Seeder(seed, initial).SeedAsync();
+
+        var runtime = await NexoRuta.IntegrationTests.Seguridad.RlsRestrictedHttpFlowTests.RestrictApiAsync(database);
+        using var factory = new IntegrationApiFactory(runtime,
+            settings: NexoRuta.IntegrationTests.Seguridad.RlsRestrictedHttpFlowTests.ApiSettings());
+        using var platformClient = factory.CreateHttpClient();
+        await Login(platformClient, PlatformEmail);
+
+        using var created = await platformClient.PostAsJsonAsync("/api/admin/operadores",
+            Request("Authorized operator", "authorized-operator@example.test"));
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var result = (await created.Content.ReadFromJsonAsync<AltaOrganizacion>())!;
+        Assert.Equal("Authorized operator", result.Organizacion.Nombre);
+
+        await using (var verifyRls = database.CreateDbContext())
+        {
+            var createdAccess = await verifyRls.AccesosUsuario.SingleAsync(x => x.UsuarioId == result.UsuarioId);
+            var otherOperator = await verifyRls.Operadores.SingleAsync(x => x.Nombre == "RLS operator");
+            var otherOwnerAccess = await verifyRls.AccesosUsuario.SingleAsync(x => x.OperadorId == otherOperator.Id && x.EsPropietario);
+            var manager = new RlsActorContext(RlsActorKind.Plataforma, CanManageOrganizations: true);
+
+            Assert.NotNull(createdAccess.RolId);
+            Assert.True(await CanReadAccessAsAsync(runtime, createdAccess.Id, manager,
+                createdAccess.OrganizacionId, createdAccess.UsuarioId, createdAccess.RolId.Value));
+            Assert.False(await CanReadAccessAsAsync(runtime, createdAccess.Id, manager,
+                otherOperator.Id, createdAccess.UsuarioId, createdAccess.RolId.Value));
+            Assert.False(await CanReadAccessAsAsync(runtime, createdAccess.Id, manager,
+                createdAccess.OrganizacionId, otherOwnerAccess.UsuarioId, createdAccess.RolId.Value));
+            Assert.False(await CanReadAccessAsAsync(runtime, createdAccess.Id, manager,
+                createdAccess.OrganizacionId, createdAccess.UsuarioId, otherOwnerAccess.RolId!.Value));
+            Assert.False(await CanReadAccessAsAsync(runtime, createdAccess.Id,
+                new RlsActorContext(RlsActorKind.Plataforma),
+                createdAccess.OrganizacionId, createdAccess.UsuarioId, createdAccess.RolId.Value));
+            Assert.False(await CanReadAccessAsAsync(runtime, createdAccess.Id,
+                new RlsActorContext(RlsActorKind.Operador, otherOwnerAccess.UsuarioId, otherOwnerAccess.Id,
+                    otherOperator.Id, OrganizationType: TipoAccesoUsuario.Operador)));
+        }
+
+        using var conflict = await platformClient.PostAsJsonAsync("/api/admin/operadores",
+            Request("Must roll back", "authorized-operator@example.test"));
+        Assert.Equal(HttpStatusCode.Conflict, conflict.StatusCode);
+
+        using var organizationClient = factory.CreateHttpClient();
+        await Login(organizationClient, initial.OperadorUsuarioEmail);
+        using var forbidden = await organizationClient.PostAsJsonAsync("/api/admin/operadores",
+            Request("Unauthorized operator", "unauthorized-operator@example.test"));
+        Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+
+        using var anonymousClient = factory.CreateHttpClient();
+        using var unauthorized = await anonymousClient.PostAsJsonAsync("/api/admin/operadores",
+            Request("Anonymous operator", "anonymous-operator@example.test"));
+        Assert.Equal(HttpStatusCode.Unauthorized, unauthorized.StatusCode);
+
+        using (var failingFactory = new IntegrationApiFactory(runtime,
+            settings: NexoRuta.IntegrationTests.Seguridad.RlsRestrictedHttpFlowTests.ApiSettings(),
+            interceptors: [new FailAfterSave()]))
+        using (var failingClient = failingFactory.CreateHttpClient())
+        {
+            await Login(failingClient, PlatformEmail);
+            var failure = await Record.ExceptionAsync(() => failingClient.PostAsJsonAsync("/api/admin/operadores",
+                Request("Rolled-back operator", "rolled-back-operator@example.test")));
+            Assert.NotNull(failure);
+            Assert.Contains("Injected failure before transaction commit", failure.ToString());
+        }
+
+        await using var verify = database.CreateDbContext();
+        Assert.Equal(2, await verify.Operadores.CountAsync());
+        Assert.Equal(2, await verify.AccesosUsuario.CountAsync(x => x.EsPropietario));
+        Assert.False(await verify.Usuarios.AnyAsync(x => x.Email == "unauthorized-operator@example.test"));
+        Assert.False(await verify.Usuarios.AnyAsync(x => x.Email == "anonymous-operator@example.test"));
+        Assert.False(await verify.Usuarios.AnyAsync(x => x.Email == "rolled-back-operator@example.test"));
+        Assert.False(await verify.Operadores.AnyAsync(x =>
+            x.Nombre == "Must roll back" || x.Nombre == "Unauthorized operator" ||
+            x.Nombre == "Anonymous operator" || x.Nombre == "Rolled-back operator"));
     }
 
     [Theory]
@@ -429,6 +513,23 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
     private static IntegrationApiFactory EmptyFactory(IntegrationDatabase database)
         => new(database, settings: new Dictionary<string, string?> { ["DatabaseInitialization:SeedData"] = "false" });
     private static object Request(string name, string email) => new { Nombre = name, Administrador = new { Email = email, Password } };
+
+    private static async Task<bool> CanReadAccessAsAsync(
+        NexoRuta.IntegrationTests.Fixtures.IntegrationDatabase database,
+        Guid accessId,
+        RlsActorContext actor,
+        Guid? selectedOrganizationId = null,
+        Guid? targetUserId = null,
+        Guid? targetRoleId = null)
+    {
+        await using var db = database.CreateDbContext();
+        await using var transaction = await db.Database.BeginTransactionAsync();
+        await db.ApplyAsync(actor);
+        if (selectedOrganizationId is { } organizationId && targetUserId is { } userId && targetRoleId is { } roleId)
+            await db.SetOrganizationCreationAsync(organizationId, userId, roleId);
+        return await db.AccesosUsuario.AsNoTracking().AnyAsync(x => x.Id == accessId);
+    }
+
     private static async Task Login(HttpClient client, string email)
     {
         using var response = await client.PostAsJsonAsync("/api/auth/login", new { Email = email, Password });

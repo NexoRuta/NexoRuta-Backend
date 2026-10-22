@@ -1,4 +1,5 @@
 using NexoRuta.Application.Seguimiento.Interfaces;
+using NexoRuta.Application.Seguimiento.Dtos;
 using NexoRuta.Application.Seguimiento.Services;
 using NexoRuta.Application.Seguimiento.UseCases;
 using NexoRuta.Domain.Envios;
@@ -102,5 +103,7 @@ public sealed class CrearEnlaceSeguimientoUseCaseTests
     }
     public Task<EstadoEnvio?> ObtenerEstadoPublicoAsync(string token, CancellationToken cancellationToken = default)
         => Task.FromResult<EstadoEnvio?>(null);
+    public Task<SeguimientoPublico?> ObtenerSeguimientoPublicoAsync(string token, CancellationToken cancellationToken = default)
+        => Task.FromResult<SeguimientoPublico?>(null);
     }
 }
