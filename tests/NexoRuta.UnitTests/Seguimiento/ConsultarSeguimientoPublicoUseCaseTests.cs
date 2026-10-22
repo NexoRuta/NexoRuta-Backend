@@ -1,4 +1,5 @@
 using NexoRuta.Application.Seguimiento.Interfaces;
+using NexoRuta.Application.Seguimiento.Dtos;
 using NexoRuta.Application.Seguimiento.Services;
 using NexoRuta.Application.Seguimiento.UseCases;
 using NexoRuta.Domain.Envios;
@@ -103,6 +104,9 @@ public sealed class ConsultarSeguimientoPublicoUseCaseTests
                 enlace.EstaVigente(DateTimeOffset.UtcNow);
             return Task.FromResult<EstadoEnvio?>(valid ? EstadoEnvio.Admitido : null);
         }
+
+        public Task<SeguimientoPublico?> ObtenerSeguimientoPublicoAsync(string token, CancellationToken cancellationToken = default)
+            => Task.FromResult<SeguimientoPublico?>(null);
     }
     [Fact]
     public async Task EjecutarAsync_TokenRevocado_NoConsultaEnvio()

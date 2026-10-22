@@ -98,6 +98,17 @@ public static class RlsTransaction
             (RlsContextContract.ParcelId, parcelId.ToString("D")));
     }
 
+    public static Task SelectOperatorAsync(
+        this NexoRutaDbContext db,
+        Guid operatorId,
+        CancellationToken cancellationToken = default)
+    {
+        if (operatorId == Guid.Empty || db.Database.CurrentTransaction is null)
+            throw new InvalidOperationException("Operator selection requires a valid id and an active transaction.");
+        return ExecuteSettingsAsync(db, null, cancellationToken,
+            (RlsContextContract.SelectedOperatorId, operatorId.ToString("D")));
+    }
+
     public static Task SetOrganizationCreationAsync(
         this NexoRutaDbContext db,
         Guid organizationId,
