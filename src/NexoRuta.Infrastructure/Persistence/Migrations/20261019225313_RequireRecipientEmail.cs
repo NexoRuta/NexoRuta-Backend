@@ -11,10 +11,22 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.Sql("""
-                DO $email$ BEGIN
+                -- Validate every row as the table owner. The FORCE setting is
+                -- restored in this statement; an error rolls back the change.
+                DO $email$
+                DECLARE was_forced boolean;
+                BEGIN
+                    SELECT relforcerowsecurity INTO was_forced FROM pg_class
+                    WHERE oid = 'public."Destinatarios"'::regclass;
+                    IF was_forced THEN
+                        ALTER TABLE public."Destinatarios" NO FORCE ROW LEVEL SECURITY;
+                    END IF;
                     IF EXISTS (SELECT 1 FROM public."Destinatarios" WHERE "Email" IS NULL OR "Email" <> btrim("Email")
                         OR "Email" !~ '^[^[:space:]@]+@[^[:space:]@]+$') THEN
                         RAISE EXCEPTION 'Complete recipient emails before making them mandatory.' USING ERRCODE = '23514';
+                    END IF;
+                    IF was_forced THEN
+                        ALTER TABLE public."Destinatarios" FORCE ROW LEVEL SECURITY;
                     END IF;
                 END $email$;
                 """);
