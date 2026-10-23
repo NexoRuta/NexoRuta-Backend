@@ -734,6 +734,61 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                     b.ToTable("Usuarios", (string)null);
                 });
 
+            modelBuilder.Entity("NexoRuta.Domain.Administracion.VersionIdentidadVisualOperador", b =>
+                {
+                    b.Property<Guid>("OperadorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("AutorUsuarioId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ColorPrimario")
+                        .HasMaxLength(7)
+                        .HasColumnType("character varying(7)");
+
+                    b.Property<string>("ColorSecundario")
+                        .HasMaxLength(7)
+                        .HasColumnType("character varying(7)");
+
+                    b.Property<string>("CorreoPublico")
+                        .HasMaxLength(254)
+                        .HasColumnType("character varying(254)");
+
+                    b.Property<DateTimeOffset>("CreadoEnUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<byte[]>("LogoContenido")
+                        .HasColumnType("bytea");
+
+                    b.Property<string>("LogoTipoContenido")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("NombreComercial")
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<string>("TelefonoPublico")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.HasKey("OperadorId", "Version");
+
+                    b.HasIndex("AutorUsuarioId");
+
+                    b.ToTable("VersionesIdentidadVisualOperador", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_VersionesIdentidadVisualOperador_Colores", "(\"ColorPrimario\" IS NULL OR \"ColorPrimario\" ~ '^#[0-9A-F]{6}$') AND (\"ColorSecundario\" IS NULL OR \"ColorSecundario\" ~ '^#[0-9A-F]{6}$')");
+
+                            t.HasCheckConstraint("CK_VersionesIdentidadVisualOperador_Logo", "(\"LogoContenido\" IS NULL AND \"LogoTipoContenido\" IS NULL) OR (\"LogoContenido\" IS NOT NULL AND \"LogoTipoContenido\" IS NOT NULL AND \"LogoTipoContenido\" IN ('image/png', 'image/jpeg') AND octet_length(\"LogoContenido\") BETWEEN 1 AND 1048576)");
+
+                            t.HasCheckConstraint("CK_VersionesIdentidadVisualOperador_Version", "\"Version\" >= 1");
+                        });
+                });
+
             modelBuilder.Entity("NexoRuta.Domain.Envios.Bulto", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1727,8 +1782,6 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
 
                     NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("Geometria"), "gist");
 
-                    b.HasIndex("CodigoDepartamento", "VersionFuente");
-
                     b.HasIndex("OperadorId", "Estado");
 
                     b.ToTable("ZonasCobertura", null, t =>
@@ -2518,6 +2571,21 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("NexoRuta.Domain.Administracion.VersionIdentidadVisualOperador", b =>
+                {
+                    b.HasOne("NexoRuta.Domain.Administracion.Usuario", null)
+                        .WithMany()
+                        .HasForeignKey("AutorUsuarioId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("NexoRuta.Domain.Administracion.Operador", null)
+                        .WithMany()
+                        .HasForeignKey("OperadorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("NexoRuta.Domain.Envios.Bulto", b =>
                 {
                     b.HasOne("NexoRuta.Domain.Reparto.Repartidor", null)
@@ -2835,11 +2903,6 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                         .HasForeignKey("OperadorId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
-
-                    b.HasOne("NexoRuta.Domain.ZonasCobertura.DepartamentoReferencia", null)
-                        .WithMany()
-                        .HasForeignKey("CodigoDepartamento", "VersionFuente")
-                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("NexoRuta.Domain.ZonasCobertura.ZonaCoberturaRevision", b =>

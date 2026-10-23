@@ -139,6 +139,36 @@ public sealed class PublicCancellationTests(PostgresFixture postgres) : IClassFi
         var denied = await Assert.ThrowsAsync<PostgresException>(() => db.CodigosCancelacionPublica.ToArrayAsync()); Assert.Equal("42501", denied.SqlState);
     }
 
+    [Fact]
+    public async Task RecipientCancellationEmailUsesOnlyExplicitPublicBrandAndAccessibleLogo()
+    {
+        using var p = await Preparar();
+        var logo = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/S3sAAAAASUVORK5CYII=");
+        await using (var owner = p.Data.CreateDbContext())
+        {
+            owner.VersionesIdentidadVisualOperador.Add(new NexoRuta.Domain.Administracion.VersionIdentidadVisualOperador(
+                p.Envio.OperadorId, 1, "Marca Destinataria", "contacto@marca.test", "+598 99 123 456",
+                "#FFFF00", null, logo, "image/png", p.Envio.CreadoPorUsuarioId, DateTimeOffset.UtcNow));
+            await owner.SaveChangesAsync();
+        }
+        var command = await Solicitar(p);
+        Assert.Equal("Marca Destinataria", command.Identidad!.Nombre);
+        Assert.Equal("contacto@marca.test", command.Identidad.CorreoPublico);
+
+        await Publicar(p, command.MessageId);
+        await using var db = await WorkerDb(p);
+        var mail = new CorreoPrueba();
+        await new ProcesarCorreoCodigoCancelacion(db, p.Proteccion, mail).EjecutarAsync(command.MessageId, default);
+
+        Assert.Single(mail.Enviados);
+        Assert.Contains("Marca Destinataria", mail.Enviados[0].Cuerpo);
+        Assert.Contains("contacto@marca.test", mail.Enviados[0].Cuerpo);
+        Assert.Contains("Marca Destinataria", mail.HtmlBody);
+        Assert.Contains("mailto:contacto@marca.test", mail.HtmlBody);
+        Assert.Contains("cid:nexoruta-operator-logo", mail.HtmlBody);
+        Assert.Equal(logo, mail.InlineLogo);
+    }
+
     [Theory]
     [InlineData("reemplazado")] [InlineData("consumido")] [InlineData("entregado")]
     public async Task WorkerOmiteCorreoQueYaNoSirve(string causa)
@@ -293,7 +323,18 @@ public sealed class PublicCancellationTests(PostgresFixture postgres) : IClassFi
     {
         public bool Fallar { get; set; }
         public List<(string Destino, string Cuerpo)> Enviados { get; } = [];
+        public string? HtmlBody { get; private set; }
+        public byte[]? InlineLogo { get; private set; }
         public Task EnviarAsync(string destinatario, string asunto, string cuerpo, CancellationToken cancellationToken = default)
         { if (Fallar) throw new IOException("SMTP no disponible"); Enviados.Add((destinatario, cuerpo)); return Task.CompletedTask; }
+        public Task EnviarHtmlAsync(string destinatario, string asunto, string cuerpoTexto, string cuerpoHtml,
+            byte[]? imagenInline, string? tipoImagen, CancellationToken ct)
+        {
+            if (Fallar) throw new IOException("SMTP no disponible");
+            Enviados.Add((destinatario, cuerpoTexto));
+            HtmlBody = cuerpoHtml;
+            InlineLogo = imagenInline;
+            return Task.CompletedTask;
+        }
     }
 }

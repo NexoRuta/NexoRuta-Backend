@@ -64,6 +64,7 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
     public DbSet<VersionReglasOperativas> VersionesReglasOperativas => Set<VersionReglasOperativas>();
     public DbSet<RequisitoPruebaEntrega> RequisitosPruebaEntrega => Set<RequisitoPruebaEntrega>();
     public DbSet<MotivoNoEntregaVersion> MotivosNoEntregaVersion => Set<MotivoNoEntregaVersion>();
+    public DbSet<VersionIdentidadVisualOperador> VersionesIdentidadVisualOperador => Set<VersionIdentidadVisualOperador>();
 
     public DbSet<Rol> Roles => Set<Rol>();
     public DbSet<Permiso> Permisos => Set<Permiso>();
@@ -122,6 +123,27 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
             entity.Property(x => x.Estado).HasConversion<string>().HasMaxLength(20)
                 .HasDefaultValue(EstadoOrganizacion.Activa).IsRequired();
             entity.Property(x => x.Version).HasDefaultValue(0L).IsConcurrencyToken().ValueGeneratedNever();
+        });
+
+        modelBuilder.Entity<VersionIdentidadVisualOperador>(entity =>
+        {
+            entity.ToTable("VersionesIdentidadVisualOperador", table =>
+            {
+                table.HasCheckConstraint("CK_VersionesIdentidadVisualOperador_Version", "\"Version\" >= 1");
+                table.HasCheckConstraint("CK_VersionesIdentidadVisualOperador_Logo", "(\"LogoContenido\" IS NULL AND \"LogoTipoContenido\" IS NULL) OR (\"LogoContenido\" IS NOT NULL AND \"LogoTipoContenido\" IS NOT NULL AND \"LogoTipoContenido\" IN ('image/png', 'image/jpeg') AND octet_length(\"LogoContenido\") BETWEEN 1 AND 1048576)");
+                table.HasCheckConstraint("CK_VersionesIdentidadVisualOperador_Colores", "(\"ColorPrimario\" IS NULL OR \"ColorPrimario\" ~ '^#[0-9A-F]{6}$') AND (\"ColorSecundario\" IS NULL OR \"ColorSecundario\" ~ '^#[0-9A-F]{6}$')");
+            });
+            entity.HasKey(x => new { x.OperadorId, x.Version });
+            entity.Property(x => x.NombreComercial).HasMaxLength(160);
+            entity.Property(x => x.CorreoPublico).HasMaxLength(254);
+            entity.Property(x => x.TelefonoPublico).HasMaxLength(32);
+            entity.Property(x => x.ColorPrimario).HasMaxLength(7);
+            entity.Property(x => x.ColorSecundario).HasMaxLength(7);
+            entity.Property(x => x.LogoContenido).HasColumnType("bytea");
+            entity.Property(x => x.LogoTipoContenido).HasMaxLength(32);
+            entity.Property(x => x.CreadoEnUtc).IsRequired();
+            entity.HasOne<Operador>().WithMany().HasForeignKey(x => x.OperadorId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Usuario>().WithMany().HasForeignKey(x => x.AutorUsuarioId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<Comercio>(entity =>
@@ -548,10 +570,6 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
             entity.HasIndex(x => new { x.OperadorId, x.Estado });
             entity.HasIndex(x => x.Geometria).HasMethod("gist").HasDatabaseName("IX_ZonasCobertura_Geometria_Gist");
             entity.HasOne<Operador>().WithMany().HasForeignKey(x => x.OperadorId).OnDelete(DeleteBehavior.Restrict);
-            entity.HasOne<DepartamentoReferencia>().WithMany()
-                .HasForeignKey(x => new { x.CodigoDepartamento, x.VersionFuente })
-                .HasPrincipalKey(x => new { x.Codigo, x.VersionFuente })
-                .OnDelete(DeleteBehavior.Restrict);
             entity.HasMany(x => x.Franjas).WithOne()
                 .HasForeignKey(x => new { x.OperadorId, x.ZonaId })
                 .HasPrincipalKey(x => new { x.OperadorId, x.Id })

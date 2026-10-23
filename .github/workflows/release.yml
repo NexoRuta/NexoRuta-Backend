@@ -13,6 +13,8 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Test Python release scripts (no external services)
+        run: python3 scripts/release/test-deploy.py
       - name: Trigger the NexoRuta integration pipeline
         env:
           NEXORUTA_INTEGRATION_TOKEN: ${{ secrets.NEXORUTA_INTEGRATION_TOKEN }}

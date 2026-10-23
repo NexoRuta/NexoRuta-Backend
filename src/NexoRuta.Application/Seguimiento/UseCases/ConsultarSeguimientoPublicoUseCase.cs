@@ -1,4 +1,5 @@
 using NexoRuta.Application.Seguimiento.Interfaces;
+using NexoRuta.Application.Seguimiento.Dtos;
 using NexoRuta.Domain.Envios;
 
 namespace NexoRuta.Application.Seguimiento.UseCases;
@@ -16,6 +17,13 @@ public sealed class ConsultarSeguimientoPublicoUseCase(
 
         return await enlaces.ObtenerEstadoPublicoAsync(token!, cancellationToken);
     }
+
+    public Task<SeguimientoPublico?> EjecutarConIdentidadAsync(
+        string? token,
+        CancellationToken cancellationToken = default)
+        => TieneFormatoValido(token)
+            ? enlaces.ObtenerSeguimientoPublicoAsync(token!, cancellationToken)
+            : Task.FromResult<SeguimientoPublico?>(null);
 
     private static bool TieneFormatoValido(string? token)
     {

@@ -39,7 +39,7 @@ public static class RlsSqlFunctionContract
             (LookupPlatformAccess, "uuid",
                 "TABLE(\"UsuarioId\" uuid, \"AccesoId\" uuid, \"VersionSesion\" bigint, \"PuedeGestionarOrganizaciones\" boolean, \"UsuarioEmail\" text)", "nexoruta_api"),
             (LookupUnassignedIdentity, "uuid", "TABLE(\"UsuarioId\" uuid, \"Email\" text)", "nexoruta_api"),
-            (PublicTracking, "text", "TABLE(\"Estado\" text)", "nexoruta_api"),
+            (PublicTracking, "text", "TABLE(\"Estado\" text, \"NombreOperador\" text, \"CorreoPublico\" text, \"TelefonoPublico\" text, \"ColorPrimario\" text, \"ColorSecundario\" text, \"LogoContenido\" bytea, \"LogoTipoContenido\" text)", "nexoruta_api"),
             ("nexoruta_app.shipment_rules_for_admission", "uuid", "uuid", "nexoruta_api"),
             (CreateShipment, "uuid, uuid, uuid, uuid, text, text, text, text, numeric, numeric, numeric, numeric, uuid", "uuid", "nexoruta_api"),
             (ClaimOutbox, "uuid, text",
