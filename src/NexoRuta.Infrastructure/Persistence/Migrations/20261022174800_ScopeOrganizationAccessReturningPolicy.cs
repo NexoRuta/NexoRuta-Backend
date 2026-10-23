@@ -54,7 +54,7 @@ public sealed class ScopeOrganizationAccessReturningPolicy : Migration
                     AND "OrganizacionId" = nexoruta_app.ctx_uuid('org_id'))
                 OR (nexoruta_app.setting('actor_kind') = 'bootstrap' AND "UsuarioId" = nexoruta_app.ctx_uuid('user_id')
                     AND (("OperadorId" IS NOT NULL AND "OperadorId" = nexoruta_app.ctx_uuid('bootstrap_operator_id'))
-                      OR ("ComercioId" IS NOT NULL AND "ComercioId" = nexoruta_app.ctx_uuid('bootstrap_commerce_id'))))));
+                      OR ("ComercioId" IS NOT NULL AND "ComercioId" = nexoruta_app.ctx_uuid('bootstrap_commerce_id')))));
 
         DROP POLICY user_access_api_insert ON public."AccesosUsuario";
         CREATE POLICY user_access_api_insert ON public."AccesosUsuario" FOR INSERT TO nexoruta_api
@@ -66,6 +66,6 @@ public sealed class ScopeOrganizationAccessReturningPolicy : Migration
                     AND "OrganizacionId" = nexoruta_app.ctx_uuid('selected_org_id') AND "EsPropietario")
                 OR (nexoruta_app.setting('actor_kind') = 'bootstrap' AND "UsuarioId" = nexoruta_app.ctx_uuid('user_id')
                     AND "EsPropietario" AND (("OperadorId" IS NOT NULL AND "OperadorId" = nexoruta_app.ctx_uuid('bootstrap_operator_id'))
-                      OR ("ComercioId" IS NOT NULL AND "ComercioId" = nexoruta_app.ctx_uuid('bootstrap_commerce_id')))));
+                      OR ("ComercioId" IS NOT NULL AND "ComercioId" = nexoruta_app.ctx_uuid('bootstrap_commerce_id'))))));
         """);
 }
