@@ -98,6 +98,122 @@ public sealed class UruguayCatalogAndTerritoryTests(PostgresFixture postgres) : 
     }
 
     [Fact]
+    public async Task EmptyReferenceTableStillServesOfficialTerritoryAndCreatesCustomZone()
+    {
+        var database = await postgres.CreateDatabaseAsync();
+        string operatorEmail;
+        using (var bootstrapFactory = new IntegrationApiFactory(database))
+        using (bootstrapFactory.CreateHttpClient())
+        {
+            await using var db = database.CreateDbContext();
+            operatorEmail = await db.AccesosUsuario.Where(x => x.OperadorId != null)
+                .Join(db.Usuarios, x => x.UsuarioId, x => x.Id, (_, user) => user.Email).FirstAsync();
+        }
+
+        var runtimeConnection = await CreateRestrictedApiConnectionAsync(database);
+        var settings = new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:Postgres"] = runtimeConnection,
+            ["DatabaseInitialization:ApplyMigrations"] = "false",
+            ["DatabaseInitialization:SeedData"] = "false"
+        };
+        using var factory = new IntegrationApiFactory(database, settings: settings, replaceDbContext: false);
+        using var client = factory.CreateHttpClient();
+        await LoginAsync(client, operatorEmail);
+
+        using var catalog = await client.GetAsync("/api/configuracion/zonas/departamentos");
+        Assert.Equal(HttpStatusCode.OK, catalog.StatusCode);
+        Assert.Empty(await catalog.Content.ReadFromJsonAsync<JsonElement[]>() ?? []);
+
+        using var territory = await client.GetAsync("/api/configuracion/zonas/departamentos/territorio");
+        Assert.Equal(HttpStatusCode.OK, territory.StatusCode);
+        var territoryData = await territory.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("UY", territoryData.GetProperty("codigoPais").GetString());
+        Assert.StartsWith("sha256:", territoryData.GetProperty("versionFuente").GetString());
+
+        using var department = await client.GetAsync("/api/configuracion/zonas/departamentos/UY-MO");
+        Assert.Equal(HttpStatusCode.OK, department.StatusCode);
+        var departmentData = await department.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("UY-MO", departmentData.GetProperty("codigo").GetString());
+
+        using var create = await client.PostAsJsonAsync("/api/configuracion/zonas", new
+        {
+            nombre = "Geometría propia sin catálogo",
+            geometria = departmentData.GetProperty("geometria"),
+            codigoDepartamento = (string?)null
+        });
+        Assert.True(create.StatusCode == HttpStatusCode.Created,
+            $"Expected custom geometry creation; received {(int)create.StatusCode}: {await create.Content.ReadAsStringAsync()}");
+        var created = await create.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("Dibujada", created.GetProperty("origenGeometria").GetString());
+        var createdId = created.GetProperty("id").GetGuid();
+        var recovered = await client.GetFromJsonAsync<JsonElement>($"/api/configuracion/zonas/{createdId}");
+        Assert.Equal("Geometría propia sin catálogo", recovered.GetProperty("nombre").GetString());
+
+        using var slot = await client.PostAsJsonAsync($"/api/configuracion/zonas/{createdId}/franjas",
+            new { diaSemanaIso = 1, horaInicio = "09:00", horaFin = "17:00", versionZona = 0 });
+        Assert.Equal(HttpStatusCode.Created, slot.StatusCode);
+        using var activation = await client.PutAsJsonAsync($"/api/configuracion/zonas/{createdId}/estado",
+            new { estado = "Activa", version = 1 });
+        Assert.Equal(HttpStatusCode.OK, activation.StatusCode);
+
+        using var draft = await client.PostAsync("/api/configuracion/tarifas/borrador", null);
+        Assert.Equal(HttpStatusCode.Created, draft.StatusCode);
+        using var configuredRate = await client.PutAsJsonAsync("/api/configuracion/tarifas/borrador/tarifas", new
+        {
+            versionConcurrencia = 0,
+            tarifas = new[]
+            {
+                new
+                {
+                    zonaId = createdId,
+                    modalidad = "Estandar",
+                    importeBaseUyu = 150m,
+                    precioPorKilogramoUyu = 12m,
+                    precioPorMetroCubicoUyu = 0m,
+                    ajustes = Array.Empty<object>()
+                }
+            }
+        });
+        Assert.Equal(HttpStatusCode.OK, configuredRate.StatusCode);
+        var rateResult = await configuredRate.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(createdId, rateResult.GetProperty("tarifas").EnumerateArray().Single()
+            .GetProperty("zonaId").GetGuid());
+
+        using var copied = await client.PostAsJsonAsync("/api/configuracion/zonas", new
+        {
+            nombre = "Montevideo copiado sin catálogo",
+            geometria = (object?)null,
+            codigoDepartamento = "UY-MO"
+        });
+        Assert.Equal(HttpStatusCode.Created, copied.StatusCode);
+        var copiedData = await copied.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("Departamento", copiedData.GetProperty("origenGeometria").GetString());
+        Assert.Equal("UY-MO", copiedData.GetProperty("codigoDepartamento").GetString());
+        Assert.Equal(territoryData.GetProperty("versionFuente").GetString(), copiedData.GetProperty("versionFuente").GetString());
+
+        using var outside = await client.PostAsJsonAsync("/api/configuracion/zonas", new
+        {
+            nombre = "Fuera de Uruguay",
+            geometria = new
+            {
+                type = "Polygon",
+                coordinates = new[]
+                {
+                    new[] { new[] { -70d, -34d }, new[] { -69d, -34d },
+                        new[] { -69d, -33d }, new[] { -70d, -34d } }
+                }
+            },
+            codigoDepartamento = (string?)null
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, outside.StatusCode);
+
+        await using var verification = database.CreateDbContext();
+        Assert.Empty(await verification.DepartamentosReferencia.AsNoTracking().ToListAsync());
+        Assert.Equal(2, await verification.ZonasCobertura.CountAsync());
+    }
+
+    [Fact]
     public async Task ReferenceComponentsCoverDepartmentInPostgisAndApplicationValidation()
     {
         var database = await postgres.CreateDatabaseAsync();

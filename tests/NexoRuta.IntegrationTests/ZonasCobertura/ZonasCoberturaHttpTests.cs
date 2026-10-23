@@ -4,6 +4,10 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using NetTopologySuite;
+using NetTopologySuite.Geometries;
+using NetTopologySuite.IO;
+using Newtonsoft.Json;
 using NexoRuta.Domain.Administracion;
 using NexoRuta.Infrastructure.ZonasCobertura;
 using NexoRuta.IntegrationTests.Fixtures;
@@ -54,27 +58,29 @@ public sealed class ZonasCoberturaHttpTests(PostgresFixture postgres) : IClassFi
         using var catalog = await client.GetAsync("/api/configuracion/zonas/departamentos");
         Assert.Equal(HttpStatusCode.OK, catalog.StatusCode);
         Assert.Empty((await catalog.Content.ReadFromJsonAsync<JsonElement[]>()) ?? []);
-        using var missingTerritory = await client.GetAsync("/api/configuracion/zonas/departamentos/territorio");
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, missingTerritory.StatusCode);
+        using var territoryWithoutReference = await client.GetAsync("/api/configuracion/zonas/departamentos/territorio");
+        Assert.Equal(HttpStatusCode.OK, territoryWithoutReference.StatusCode);
+        Assert.Equal("UY", (await territoryWithoutReference.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("codigoPais").GetString());
         using var coverageWithoutReference = await client.PostAsJsonAsync("/api/configuracion/zonas/cobertura",
             new { longitud = -56d, latitud = -34d });
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, coverageWithoutReference.StatusCode);
-
-        // Keep the missing-reference response covered, then prepare the fixture for the rest of this end-to-end flow.
-        await using (var catalogDb = database.CreateDbContext())
-            await new DepartamentoCatalogImporter(catalogDb).ImportarCatalogoIncluidoAsync();
+        Assert.Equal(HttpStatusCode.OK, coverageWithoutReference.StatusCode);
+        Assert.Equal("SinCobertura", (await coverageWithoutReference.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("resultado").GetString());
 
         using var montevideoResponse = await client.GetAsync("/api/configuracion/zonas/departamentos/UY-MO");
         Assert.Equal(HttpStatusCode.OK, montevideoResponse.StatusCode);
         var montevideo = await montevideoResponse.Content.ReadFromJsonAsync<JsonElement>();
         var montevideoGeometry = montevideo.GetProperty("geometria").Clone();
-        await using var referenceDb = database.CreateDbContext();
-        var montevideoReference = await referenceDb.DepartamentosReferencia.AsNoTracking()
-            .SingleAsync(x => x.Codigo == "UY-MO");
-        var artigasReference = await referenceDb.DepartamentosReferencia.AsNoTracking()
-            .SingleAsync(x => x.Codigo == "UY-AR");
-        var boundaryPoint = montevideoReference.Geometria.Boundary.Coordinate;
-        var uncoveredPoint = artigasReference.Geometria.InteriorPoint.Coordinate;
+        using var artigasResponse = await client.GetAsync("/api/configuracion/zonas/departamentos/UY-AR");
+        Assert.Equal(HttpStatusCode.OK, artigasResponse.StatusCode);
+        var artigas = await artigasResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var geometryFactory = NtsGeometryServices.Instance.CreateGeometryFactory(srid: 4326);
+        var geoJsonReader = new GeoJsonReader(geometryFactory, new JsonSerializerSettings());
+        var montevideoShape = geoJsonReader.Read<Geometry>(montevideo.GetProperty("geometria").GetRawText());
+        var artigasShape = geoJsonReader.Read<Geometry>(artigas.GetProperty("geometria").GetRawText());
+        var boundaryPoint = montevideoShape.Boundary.Coordinate!;
+        var uncoveredPoint = artigasShape.InteriorPoint.Coordinate!;
 
         using var missingDepartment = await client.PostAsJsonAsync("/api/configuracion/zonas", new
         { nombre = "Unknown department", codigoDepartamento = "XX" });
@@ -209,6 +215,8 @@ public sealed class ZonasCoberturaHttpTests(PostgresFixture postgres) : IClassFi
         var otherZoneId = await CreateZoneAsync(secondOperatorClient, "Private zone B", montevideoGeometry);
         using var foreign = await client.GetAsync($"/api/configuracion/zonas/{otherZoneId}");
         Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
+        await using var verifyEmptyCatalog = database.CreateDbContext();
+        Assert.Empty(await verifyEmptyCatalog.DepartamentosReferencia.AsNoTracking().ToListAsync());
     }
 
     private static async Task<Guid> CreateZoneAsync(HttpClient client, string name, JsonElement geometry)
