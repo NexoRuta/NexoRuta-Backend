@@ -1782,8 +1782,6 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
 
                     NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("Geometria"), "gist");
 
-                    b.HasIndex("CodigoDepartamento", "VersionFuente");
-
                     b.HasIndex("OperadorId", "Estado");
 
                     b.ToTable("ZonasCobertura", null, t =>
@@ -2905,11 +2903,6 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                         .HasForeignKey("OperadorId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
-
-                    b.HasOne("NexoRuta.Domain.ZonasCobertura.DepartamentoReferencia", null)
-                        .WithMany()
-                        .HasForeignKey("CodigoDepartamento", "VersionFuente")
-                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("NexoRuta.Domain.ZonasCobertura.ZonaCoberturaRevision", b =>
