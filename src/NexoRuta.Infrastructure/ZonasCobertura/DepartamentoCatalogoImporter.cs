@@ -11,19 +11,33 @@ namespace NexoRuta.Infrastructure.ZonasCobertura;
 
 public sealed record DepartamentoCatalogImportResult(int DepartmentCount, string VersionFuente, bool AlreadyImported);
 
+internal sealed record DepartamentoImportado(string Code, string Name, MultiPolygon Geometry);
+internal sealed record DepartamentoCatalogoIncluido(string VersionFuente, IReadOnlyList<DepartamentoImportado> Departamentos);
+
 public sealed class DepartamentoCatalogImporter(NexoRutaDbContext db)
 {
     public const string ImportCommandName = "department-catalog-import";
     public const string AllowUpdateOption = "--allow-source-update";
 
+    internal static DepartamentoCatalogoIncluido LeerFuenteIncluida()
+    {
+        using var stream = typeof(DepartamentoCatalogImporter).Assembly
+            .GetManifestResourceStream(CatalogoDepartamentosUruguay.ResourceName)
+            ?? throw new InvalidOperationException("El GeoJSON departamental no está incluido en el ensamblado publicado.");
+        using var content = new MemoryStream();
+        stream.CopyTo(content);
+        var bytes = content.ToArray();
+        var version = "sha256:" + Convert.ToHexStringLower(SHA256.HashData(bytes));
+        return new(version, ParseAndValidate(bytes));
+    }
+
     public async Task<DepartamentoCatalogImportResult> ImportarCatalogoIncluidoAsync(
         bool permitirActualizacionExplicita = false,
         CancellationToken cancellationToken = default)
     {
-        await using var stream = typeof(DepartamentoCatalogImporter).Assembly
-            .GetManifestResourceStream(CatalogoDepartamentosUruguay.ResourceName)
-            ?? throw new InvalidOperationException("El GeoJSON departamental no está incluido en el ensamblado publicado.");
-        return await ImportarAsync(stream, permitirActualizacionExplicita, cancellationToken);
+        var catalog = LeerFuenteIncluida();
+        return await ImportarAsync(catalog.Departamentos, catalog.VersionFuente,
+            permitirActualizacionExplicita, cancellationToken);
     }
 
     public async Task<DepartamentoCatalogImportResult> ImportarAsync(
@@ -38,6 +52,15 @@ public sealed class DepartamentoCatalogImporter(NexoRutaDbContext db)
         var version = "sha256:" + Convert.ToHexStringLower(SHA256.HashData(bytes));
         var departments = ParseAndValidate(bytes);
 
+        return await ImportarAsync(departments, version, permitirActualizacionExplicita, cancellationToken);
+    }
+
+    private async Task<DepartamentoCatalogImportResult> ImportarAsync(
+        IReadOnlyList<DepartamentoImportado> departments,
+        string version,
+        bool permitirActualizacionExplicita,
+        CancellationToken cancellationToken)
+    {
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         // This administrative command must validate/import the entire catalog.
         // Keep the owner-only RLS change in this transaction: other sessions
@@ -219,5 +242,4 @@ public sealed class DepartamentoCatalogImporter(NexoRutaDbContext db)
         return new Coordinate(longitude, latitude);
     }
 
-    private sealed record DepartamentoImportado(string Code, string Name, MultiPolygon Geometry);
 }

@@ -570,10 +570,6 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
             entity.HasIndex(x => new { x.OperadorId, x.Estado });
             entity.HasIndex(x => x.Geometria).HasMethod("gist").HasDatabaseName("IX_ZonasCobertura_Geometria_Gist");
             entity.HasOne<Operador>().WithMany().HasForeignKey(x => x.OperadorId).OnDelete(DeleteBehavior.Restrict);
-            entity.HasOne<DepartamentoReferencia>().WithMany()
-                .HasForeignKey(x => new { x.CodigoDepartamento, x.VersionFuente })
-                .HasPrincipalKey(x => new { x.Codigo, x.VersionFuente })
-                .OnDelete(DeleteBehavior.Restrict);
             entity.HasMany(x => x.Franjas).WithOne()
                 .HasForeignKey(x => new { x.OperadorId, x.ZonaId })
                 .HasPrincipalKey(x => new { x.OperadorId, x.Id })

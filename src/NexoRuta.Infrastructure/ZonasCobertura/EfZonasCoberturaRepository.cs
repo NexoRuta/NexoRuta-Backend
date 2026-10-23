@@ -1,5 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Caching.Memory;
 using NetTopologySuite.Geometries;
 using Npgsql;
 using NexoRuta.Application.ZonasCobertura.Repositories;
@@ -7,21 +6,19 @@ using NexoRuta.Application.ZonasCobertura;
 using NexoRuta.Domain.ZonasCobertura;
 using NexoRuta.Infrastructure.Persistence;
 using NetTopologySuite;
+using NetTopologySuite.Operation.Union;
 
 namespace NexoRuta.Infrastructure.ZonasCobertura;
 
 public sealed class EfZonasCoberturaRepository : IZonasCoberturaRepository
 {
-    private const string TerritoryCacheKeyPrefix = "NexoRuta.CU02.UruguayTerritory";
-    private static readonly SemaphoreSlim TerritoryCacheGate = new(1, 1);
+    private static readonly Lazy<DepartamentoCatalogoIncluido> IncludedCatalog =
+        new(DepartamentoCatalogImporter.LeerFuenteIncluida, LazyThreadSafetyMode.ExecutionAndPublication);
+    private static readonly Lazy<TerritorioUruguayReferencia> IncludedTerritory =
+        new(CrearTerritorioIncluido, LazyThreadSafetyMode.ExecutionAndPublication);
     private readonly NexoRutaDbContext db;
-    private readonly IMemoryCache cache;
 
-    public EfZonasCoberturaRepository(NexoRutaDbContext db, IMemoryCache? cache = null)
-    {
-        this.db = db;
-        this.cache = cache ?? new MemoryCache(new MemoryCacheOptions());
-    }
+    public EfZonasCoberturaRepository(NexoRutaDbContext db) => this.db = db;
 
     public async Task<(IReadOnlyList<ZonaCoberturaResumen> Items, int Total)> ListarAsync(
         EstadoZonaCobertura? estado, int pagina, int tamanoPagina, CancellationToken cancellationToken = default)
@@ -81,68 +78,22 @@ public sealed class EfZonasCoberturaRepository : IZonasCoberturaRepository
             .FirstOrDefaultAsync(cancellationToken);
     }
 
-    public async Task<DepartamentoReferenciaConGeometria?> ObtenerDepartamentoConGeometriaAsync(
+    public Task<DepartamentoReferenciaConGeometria?> ObtenerDepartamentoConGeometriaAsync(
         string codigo, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(codigo)) throw new ArgumentException("El código de departamento es obligatorio.", nameof(codigo));
-        var department = await ReferenciasActuales().AsNoTracking()
-            .Where(x => x.Codigo == codigo.Trim())
-            .Select(x => new { x.Codigo, x.VersionFuente, x.Nombre, x.Geometria })
-            .SingleOrDefaultAsync(cancellationToken);
-        return department is null ? null : new(department.Codigo, department.VersionFuente, department.Nombre,
-            department.Geometria, department.Geometria.EnvelopeInternal);
+        cancellationToken.ThrowIfCancellationRequested();
+        var department = IncludedCatalog.Value.Departamentos.SingleOrDefault(x =>
+            string.Equals(x.Code, codigo.Trim(), StringComparison.Ordinal));
+        return Task.FromResult(department is null ? null : new DepartamentoReferenciaConGeometria(
+            department.Code, IncludedCatalog.Value.VersionFuente, department.Name,
+            department.Geometry, department.Geometry.EnvelopeInternal));
     }
 
-    public async Task<TerritorioUruguayReferencia?> ObtenerTerritorioUruguayAsync(CancellationToken cancellationToken = default)
+    public Task<TerritorioUruguayReferencia?> ObtenerTerritorioUruguayAsync(CancellationToken cancellationToken = default)
     {
-        var versions = await ReferenciasActuales().AsNoTracking()
-            .OrderBy(x => x.Codigo)
-            .Select(x => new { x.Codigo, x.VersionFuente })
-            .ToListAsync(cancellationToken);
-        if (versions.Count != CatalogoDepartamentosUruguay.DepartmentCodes.Count
-            || versions.Select(x => x.VersionFuente).Distinct(StringComparer.Ordinal).Count() != 1)
-            return null;
-
-        var version = versions[0].VersionFuente;
-        var databaseName = db.Database.GetDbConnection().Database;
-        var key = $"{TerritoryCacheKeyPrefix}:{databaseName}:{version}";
-        if (cache.TryGetValue<TerritorioUruguayReferencia>(key, out var cached)) return cached;
-
-        await TerritoryCacheGate.WaitAsync(cancellationToken);
-        try
-        {
-            if (cache.TryGetValue<TerritorioUruguayReferencia>(key, out cached)) return cached;
-
-            var referenceComponents = await db.Database.SqlQueryRaw<Geometry>(
-                    "SELECT ST_Collect(\"Geometria\") AS \"Value\" FROM \"DepartamentosReferencia\" WHERE \"VersionFuente\" = @version",
-                    new NpgsqlParameter("version", version))
-                .SingleOrDefaultAsync(cancellationToken);
-            if (referenceComponents is null || referenceComponents.IsEmpty || !referenceComponents.IsValid
-                || referenceComponents.SRID != DepartamentoReferencia.GeometriaSrid)
-                return null;
-
-            // Keep the exact component collection for ST_Covers; the dissolved outline can omit
-            // zero-area coincident source edges, although every source department is covered by the collection.
-            var union = await db.Database.SqlQueryRaw<Geometry>(
-                    "SELECT ST_UnaryUnion(ST_Collect(\"Geometria\")) AS \"Value\" FROM \"DepartamentosReferencia\" WHERE \"VersionFuente\" = @version",
-                    new NpgsqlParameter("version", version))
-                .SingleOrDefaultAsync(cancellationToken);
-            if (union is null || union.IsEmpty || !union.IsValid
-                || union.SRID != DepartamentoReferencia.GeometriaSrid)
-                return null;
-            var snapshot = new TerritorioUruguayReferencia(CatalogoDepartamentosUruguay.CountryCode,
-                version, union, referenceComponents, union.EnvelopeInternal);
-            cache.Set(key, snapshot, TimeSpan.FromHours(12));
-            return snapshot;
-        }
-        catch (NetTopologySuite.Geometries.TopologyException)
-        {
-            return null;
-        }
-        finally
-        {
-            TerritoryCacheGate.Release();
-        }
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult<TerritorioUruguayReferencia?>(IncludedTerritory.Value);
     }
 
     public async Task<ResultadoValidacionTerritorial> ValidarTerritorioUruguayAsync(
@@ -152,8 +103,7 @@ public sealed class EfZonasCoberturaRepository : IZonasCoberturaRepository
         if (geometria.IsEmpty || !geometria.IsValid || geometria.SRID != DepartamentoReferencia.GeometriaSrid)
             throw new ArgumentException("La geometría debe ser válida, no vacía y tener SRID 4326.", nameof(geometria));
 
-        var territory = await ObtenerTerritorioUruguayAsync(cancellationToken);
-        if (territory is null) return ResultadoValidacionTerritorial.CatalogoNoDisponible;
+        var territory = IncludedTerritory.Value;
         var parameters = new object[]
         {
             new NpgsqlParameter("territory", territory.GeometriaConDepartamentos),
@@ -163,6 +113,28 @@ public sealed class EfZonasCoberturaRepository : IZonasCoberturaRepository
                 "SELECT ST_Covers(@territory, @candidate) AS \"Value\"", parameters)
             .SingleAsync(cancellationToken);
         return covered ? ResultadoValidacionTerritorial.Cubierta : ResultadoValidacionTerritorial.FueraDelTerritorio;
+    }
+
+    private static TerritorioUruguayReferencia CrearTerritorioIncluido()
+    {
+        var catalog = IncludedCatalog.Value;
+        var factory = NtsGeometryServices.Instance.CreateGeometryFactory(srid: DepartamentoReferencia.GeometriaSrid);
+        var departmentGeometries = catalog.Departamentos.Select(x => (Geometry)x.Geometry).ToArray();
+        var components = factory.CreateGeometryCollection(departmentGeometries);
+        var union = UnaryUnionOp.Union(departmentGeometries);
+        var outline = union switch
+        {
+            Polygon polygon => factory.CreateMultiPolygon([polygon]),
+            MultiPolygon multiPolygon => factory.CreateMultiPolygon(multiPolygon.Geometries.Cast<Polygon>().ToArray()),
+            _ => throw new InvalidDataException("El GeoJSON oficial no produjo un contorno multipoligonal de Uruguay.")
+        };
+        if (components.IsEmpty || outline.IsEmpty || !outline.IsValid
+            || components.SRID != DepartamentoReferencia.GeometriaSrid
+            || outline.SRID != DepartamentoReferencia.GeometriaSrid)
+            throw new InvalidDataException("El GeoJSON oficial no produjo geometrías territoriales válidas.");
+
+        return new TerritorioUruguayReferencia(CatalogoDepartamentosUruguay.CountryCode,
+            catalog.VersionFuente, outline, components, outline.EnvelopeInternal);
     }
 
     private IQueryable<DepartamentoReferencia> ReferenciasActuales()
