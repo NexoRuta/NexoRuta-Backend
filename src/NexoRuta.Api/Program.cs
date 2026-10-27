@@ -57,11 +57,14 @@ var dataProtection = builder.Services.AddDataProtection().SetApplicationName(Pas
 var dataProtectionKeys = builder.Configuration[PasswordRecoveryDataProtection.KeysDirectoryConfigurationKey];
 var sharedDataProtection = builder.Services.AddSharedDataProtection(
     builder.Configuration, PasswordRecoveryDataProtection.ApplicationName, "api");
-if (!sharedDataProtection && builder.Environment.IsProduction()
-    && !platformCommand && !localBootstrapCommand && !migrationCommand && !catalogImportCommand)
-    throw new InvalidOperationException("Production requires shared Data Protection storage.");
-else if (!sharedDataProtection && !string.IsNullOrWhiteSpace(dataProtectionKeys))
-    dataProtection.PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeys));
+if (!sharedDataProtection)
+{
+    if (!string.IsNullOrWhiteSpace(dataProtectionKeys))
+        dataProtection.PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeys));
+    else if (builder.Environment.IsProduction()
+        && !platformCommand && !localBootstrapCommand && !migrationCommand && !catalogImportCommand)
+        throw new InvalidOperationException("Production requires persistent DataProtection:KeysDirectory.");
+}
 builder.Services.AddOptions<PasswordRecoveryOptions>()
     .Bind(builder.Configuration.GetSection("PasswordRecovery"))
     .Validate(options => options.TokenLifespanSeconds is > 0 and <= 3600
