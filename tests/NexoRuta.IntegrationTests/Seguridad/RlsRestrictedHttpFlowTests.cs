@@ -20,6 +20,9 @@ public sealed class RlsRestrictedHttpFlowTests(PostgresFixture postgres) : IClas
         var database = await postgres.CreateDatabaseAsync();
         const string commerceEmail = "rls-http-commerce@example.test";
         Guid operatorId;
+        Guid commerceAccessId;
+        Guid commerceId;
+        Guid commerceUserId;
         await using (var owner = database.CreateDbContext())
         {
             await AuthenticationTestData.Seeder(owner,
@@ -27,13 +30,16 @@ public sealed class RlsRestrictedHttpFlowTests(PostgresFixture postgres) : IClas
                 .SeedAsync();
             await ReglasEnvioTestData.SembrarInicialesAsync(owner);
             operatorId = await owner.Operadores.Select(x => x.Id).SingleAsync();
+            var access = await owner.AccesosUsuario.SingleAsync(x => x.ComercioId != null);
+            commerceAccessId = access.Id;
+            commerceId = access.ComercioId!.Value;
+            commerceUserId = access.UsuarioId;
         }
 
         var runtime = await RestrictApiAsync(database);
         using var api = new IntegrationApiFactory(runtime, settings: ApiSettings());
         using var client = api.CreateHttpClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", await LoginAsync(client, commerceEmail));
-
         using var created = await client.PostAsJsonAsync("/api/envios", new
         {
             OperadorId = operatorId,
@@ -51,6 +57,50 @@ public sealed class RlsRestrictedHttpFlowTests(PostgresFixture postgres) : IClas
 
         await using (var owner = database.CreateDbContext())
         {
+            Assert.Equal(1, await owner.Database.SqlQueryRaw<int>(
+                "SELECT count(*)::int AS \"Value\" FROM public.\"EnvioEventos\" WHERE \"EnvioId\" = {0} AND \"Tipo\" = 'Creacion'",
+                shipmentId).SingleAsync());
+            Assert.False(await owner.Database.SqlQueryRaw<bool>(
+                "SELECT has_table_privilege('nexoruta_api', 'public.\"EnvioEventos\"', 'INSERT') AS \"Value\"").SingleAsync());
+            Assert.False(await owner.Database.SqlQueryRaw<bool>(
+                "SELECT has_table_privilege('nexoruta_api', 'public.\"EnvioEventos\"', 'UPDATE') AS \"Value\"").SingleAsync());
+            Assert.False(await owner.Database.SqlQueryRaw<bool>(
+                "SELECT has_table_privilege('nexoruta_api', 'public.\"EnvioEventos\"', 'DELETE') AS \"Value\"").SingleAsync());
+            Assert.True(await owner.Database.SqlQueryRaw<bool>("""
+                SELECT NOT r.rolcanlogin AND NOT r.rolinherit AND NOT r.rolsuper AND NOT r.rolcreatedb
+                    AND NOT r.rolcreaterole AND NOT r.rolreplication AND NOT r.rolbypassrls
+                    AND NOT EXISTS (SELECT 1 FROM pg_auth_members m WHERE m.roleid = r.oid) AS "Value"
+                FROM pg_roles r WHERE r.rolname = 'nexoruta_history_fn'
+                """).SingleAsync());
+            Assert.True(await owner.Database.SqlQueryRaw<bool>("""
+                SELECT has_table_privilege('nexoruta_history_fn', 'public."EnvioEventos"', 'INSERT')
+                    AND has_table_privilege('nexoruta_history_fn', 'public."EnvioEventos"', 'SELECT')
+                    AND NOT has_table_privilege('nexoruta_history_fn', 'public."EnvioEventos"', 'UPDATE')
+                    AND NOT has_table_privilege('nexoruta_history_fn', 'public."EnvioEventos"', 'DELETE')
+                    AND NOT has_table_privilege('nexoruta_history_fn', 'public."EnvioEventos"', 'TRUNCATE') AS "Value"
+                """).SingleAsync());
+            Assert.False(await owner.Database.SqlQueryRaw<bool>(
+                "SELECT has_function_privilege('nexoruta_api', 'public.capture_shipment_history()', 'EXECUTE') AS \"Value\"").SingleAsync());
+            Assert.False(await owner.Database.SqlQueryRaw<bool>("""
+                SELECT has_table_privilege('nexoruta_worker', 'public."EnvioEventos"', 'INSERT')
+                    OR has_table_privilege('nexoruta_worker', 'public."EnvioEventos"', 'UPDATE')
+                    OR has_table_privilege('nexoruta_worker', 'public."EnvioEventos"', 'DELETE') AS "Value"
+                """).SingleAsync());
+            Assert.True(await owner.Database.SqlQueryRaw<bool>("""
+                SELECT c.relrowsecurity AND c.relforcerowsecurity AS "Value"
+                FROM pg_class c WHERE c.oid = 'public."EnvioEventos"'::regclass
+                """).SingleAsync());
+            Assert.True(await owner.Database.SqlQueryRaw<bool>("""
+                SELECT count(*) = 2 AND bool_and(p.prosecdef AND r.rolname = 'nexoruta_history_fn'
+                    AND p.proconfig @> ARRAY['search_path=pg_catalog, nexoruta_app']) AS "Value"
+                FROM pg_proc p JOIN pg_roles r ON r.oid = p.proowner
+                WHERE p.proname IN ('capture_shipment_history', 'capture_cancellation_history')
+                    AND p.pronamespace = 'public'::regnamespace
+                """).SingleAsync());
+        }
+
+        await using (var owner = database.CreateDbContext())
+        {
             var selectedOperator = await owner.Operadores.SingleAsync(x => x.Id == operatorId);
             selectedOperator.CambiarEstado(EstadoOrganizacion.Suspendida);
             await owner.SaveChangesAsync();
@@ -61,6 +111,163 @@ public sealed class RlsRestrictedHttpFlowTests(PostgresFixture postgres) : IClas
         var shipments = await listed.Content.ReadFromJsonAsync<JsonElement[]>();
         var historical = Assert.Single(shipments!, x => x.GetProperty("id").GetGuid() == shipmentId);
         Assert.Equal("Chosen operator", historical.GetProperty("operadorNombre").GetString());
+
+        await using var restrictedHistory = runtime.CreateDbContext();
+        await using var historyTransaction = await restrictedHistory.BeginOrJoinAsync();
+        await restrictedHistory.ApplyAsync(new RlsActorContext(RlsActorKind.Comercio, commerceUserId,
+            commerceAccessId, commerceId, OrganizationType: TipoAccesoUsuario.Comercio));
+        var visibleHistory = Assert.Single(await restrictedHistory.EnvioEventos
+            .Where(x => x.EnvioId == shipmentId && x.Tipo == "Creacion").ToArrayAsync());
+        await historyTransaction.CommitAsync();
+
+        await using (var immutable = database.CreateDbContext())
+        {
+            var update = await Assert.ThrowsAsync<PostgresException>(() => immutable.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE public.\"EnvioEventos\" SET \"ActorProceso\" = 'tampered' WHERE \"Id\" = {visibleHistory.Id}"));
+            Assert.Equal("55000", update.SqlState);
+        }
+        await using (var immutable = database.CreateDbContext())
+        {
+            var delete = await Assert.ThrowsAsync<PostgresException>(() => immutable.Database.ExecuteSqlInterpolatedAsync(
+                $"DELETE FROM public.\"EnvioEventos\" WHERE \"Id\" = {visibleHistory.Id}"));
+            Assert.Equal("55000", delete.SqlState);
+        }
+        await using (var immutable = database.CreateDbContext())
+        {
+            var truncate = await Assert.ThrowsAsync<PostgresException>(() => immutable.Database.ExecuteSqlRawAsync(
+                "TRUNCATE public.\"EnvioEventos\""));
+            Assert.Equal("55000", truncate.SqlState);
+        }
+    }
+
+    [Fact]
+    public async Task ShipmentHistoryRlsSeparatesCommerceAndOperatorRows()
+    {
+        var database = await postgres.CreateDatabaseAsync();
+        const string commerceAEmail = "history-rls-commerce-a@example.test";
+        const string commerceBEmail = "history-rls-commerce-b@example.test";
+        Guid operatorA;
+        Guid operatorB;
+        Guid commerceA;
+        Guid commerceB;
+        (Guid UserId, Guid AccessId) commerceActorA;
+        (Guid UserId, Guid AccessId) commerceActorB;
+        (Guid UserId, Guid AccessId) operatorActorA;
+        (Guid UserId, Guid AccessId) operatorActorB;
+        await using (var owner = database.CreateDbContext())
+        {
+            await AuthenticationTestData.Seeder(owner,
+                new AccesoInicial(commerceAEmail, "History operator A", "History commerce A", "history-operator-a@example.test"))
+                .SeedAsync();
+            await AuthenticationTestData.Seeder(owner,
+                new AccesoInicial(commerceBEmail, "History operator B", "History commerce B", "history-operator-b@example.test"))
+                .SeedAsync();
+            await ReglasEnvioTestData.SembrarInicialesAsync(owner);
+
+            var commerceUserIdA = await owner.Usuarios.Where(x => x.Email == commerceAEmail).Select(x => x.Id).SingleAsync();
+            var commerceUserIdB = await owner.Usuarios.Where(x => x.Email == commerceBEmail).Select(x => x.Id).SingleAsync();
+            var operatorUserIdA = await owner.Usuarios.Where(x => x.Email == "history-operator-a@example.test").Select(x => x.Id).SingleAsync();
+            var operatorUserIdB = await owner.Usuarios.Where(x => x.Email == "history-operator-b@example.test").Select(x => x.Id).SingleAsync();
+            var accessA = await owner.AccesosUsuario.SingleAsync(x => x.ComercioId != null && x.UsuarioId == commerceUserIdA);
+            var accessB = await owner.AccesosUsuario.SingleAsync(x => x.ComercioId != null && x.UsuarioId == commerceUserIdB);
+            operatorA = (await owner.AccesosUsuario.SingleAsync(x => x.UsuarioId == operatorUserIdA)).OperadorId!.Value;
+            operatorB = (await owner.AccesosUsuario.SingleAsync(x => x.UsuarioId == operatorUserIdB)).OperadorId!.Value;
+            commerceA = accessA.ComercioId!.Value;
+            commerceB = accessB.ComercioId!.Value;
+            commerceActorA = (accessA.UsuarioId, accessA.Id);
+            commerceActorB = (accessB.UsuarioId, accessB.Id);
+            var accessOperatorA = await owner.AccesosUsuario.FirstAsync(x => x.OperadorId == operatorA);
+            var accessOperatorB = await owner.AccesosUsuario.FirstAsync(x => x.OperadorId == operatorB);
+            operatorActorA = (accessOperatorA.UsuarioId, accessOperatorA.Id);
+            operatorActorB = (accessOperatorB.UsuarioId, accessOperatorB.Id);
+        }
+
+        var runtime = await RestrictApiAsync(database);
+        using var api = new IntegrationApiFactory(runtime, settings: ApiSettings());
+        using var commerceClientA = api.CreateHttpClient();
+        using var commerceClientB = api.CreateHttpClient();
+        commerceClientA.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", await LoginAsync(commerceClientA, commerceAEmail));
+        commerceClientB.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", await LoginAsync(commerceClientB, commerceBEmail));
+        var shipmentA = await CreateShipmentAsync(commerceClientA, operatorA, "HISTORY-RLS-A");
+        var shipmentB = await CreateShipmentAsync(commerceClientB, operatorB, "HISTORY-RLS-B");
+
+        await using var restricted = runtime.CreateDbContext();
+        await using var tx = await restricted.BeginOrJoinAsync();
+        await AssertOnlyVisibleAsync(restricted, new RlsActorContext(RlsActorKind.Comercio,
+            commerceActorA.UserId, commerceActorA.AccessId, commerceA, OrganizationType: TipoAccesoUsuario.Comercio), shipmentA);
+        await AssertOnlyVisibleAsync(restricted, new RlsActorContext(RlsActorKind.Comercio,
+            commerceActorB.UserId, commerceActorB.AccessId, commerceB, OrganizationType: TipoAccesoUsuario.Comercio), shipmentB);
+        await AssertOnlyVisibleAsync(restricted, new RlsActorContext(RlsActorKind.Operador,
+            operatorActorA.UserId, operatorActorA.AccessId, operatorA, OrganizationType: TipoAccesoUsuario.Operador), shipmentA);
+        await AssertOnlyVisibleAsync(restricted, new RlsActorContext(RlsActorKind.Operador,
+            operatorActorB.UserId, operatorActorB.AccessId, operatorB, OrganizationType: TipoAccesoUsuario.Operador), shipmentB);
+        await tx.CommitAsync();
+    }
+
+    private static async Task<Guid> CreateShipmentAsync(HttpClient client, Guid operatorId, string code)
+    {
+        using var response = await client.PostAsJsonAsync("/api/envios", new
+        {
+            OperadorId = operatorId,
+            DestinatarioNombre = "History recipient",
+            DestinatarioEmail = "history-recipient@example.test",
+            Direccion = "18 de Julio 123",
+            CodigoBulto = code,
+            PesoGramos = 500m,
+            LargoCentimetros = 20m,
+            AnchoCentimetros = 10m,
+            AltoCentimetros = 5m
+        });
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+    }
+
+    private static async Task AssertOnlyVisibleAsync(NexoRutaDbContext db, RlsActorContext actor, Guid shipmentId)
+    {
+        await db.ApplyAsync(actor);
+        Assert.Equal(new[] { shipmentId }, await db.EnvioEventos.Select(x => x.EnvioId).ToArrayAsync());
+    }
+
+    [Fact]
+    public async Task RestrictedOperatorHttpCannotCreateShipmentOrOutboxRows()
+    {
+        var database = await postgres.CreateDatabaseAsync();
+        const string commerceEmail = "rls-http-deny-commerce@example.test";
+        const string operatorEmail = "rls-http-deny-operator@example.test";
+        Guid operatorId;
+        await using (var owner = database.CreateDbContext())
+        {
+            await AuthenticationTestData.Seeder(owner,
+                new AccesoInicial(commerceEmail, "Chosen operator", "Test commerce", operatorEmail))
+                .SeedAsync();
+            await ReglasEnvioTestData.SembrarInicialesAsync(owner);
+            operatorId = await owner.Operadores.Select(x => x.Id).SingleAsync();
+        }
+
+        var runtime = await RestrictApiAsync(database);
+        using var api = new IntegrationApiFactory(runtime, settings: ApiSettings());
+        using var client = api.CreateHttpClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", await LoginAsync(client, operatorEmail));
+
+        using var response = await client.PostAsJsonAsync("/api/envios", new
+        {
+            OperadorId = operatorId,
+            DestinatarioNombre = "Ada Lovelace", DestinatarioEmail = "destinatario@example.test",
+            Direccion = "18 de Julio 123",
+            CodigoBulto = "RLS-DENY-1",
+            PesoGramos = 500m,
+            LargoCentimetros = 20m,
+            AnchoCentimetros = 10m,
+            AltoCentimetros = 5m
+        });
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        await using var verify = database.CreateDbContext();
+        Assert.Empty(await verify.Envios.ToArrayAsync());
+        Assert.Empty(await verify.Destinatarios.ToArrayAsync());
+        Assert.Empty(await verify.Direcciones.ToArrayAsync());
+        Assert.Empty(await verify.Bultos.ToArrayAsync());
+        Assert.Empty(await verify.OutboxMessages.ToArrayAsync());
     }
 
     [Fact]

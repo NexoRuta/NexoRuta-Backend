@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using NexoRuta.Api.Features.Reparto.Contracts;
 using NexoRuta.Domain.Envios;
 using NexoRuta.IntegrationTests.Fixtures;
+using NexoRuta.IntegrationTests.Seguridad;
 using Npgsql;
 using static NexoRuta.IntegrationTests.Fixtures.RepartoHttpData;
 namespace NexoRuta.IntegrationTests.Reparto;
@@ -34,7 +35,7 @@ public sealed partial class OperacionesRepartoHttpTests(PostgresFixture postgres
     }
 
     [Fact]
-    public async Task EntregaFisicaPendienteSeConservaYAlCerrarPasaASinValidacion()
+    public async Task EntregaFisicaPendienteSeConservaTambienDespuesDeCerrarLaJornada()
     {
         var data = await postgres.CreateDatabaseAsync(); using var factory = data.CreateApiFactory(); using var client = factory.CreateHttpClient();
         var hoja = await Cargada(data, client);
@@ -49,7 +50,7 @@ public sealed partial class OperacionesRepartoHttpTests(PostgresFixture postgres
         }
         Assert.Equal("Aplicada", (await Aplicar(client, hoja, Operacion(Guid.NewGuid(), 5, "FinJornada"))).Resultado);
         await using var final = data.CreateDbContext();
-        Assert.Equal(EstadoEnvio.EntregaSinValidacion, (await final.Envios.SingleAsync(x => x.Id == parada.EnvioId)).Estado);
+        Assert.Equal(EstadoEnvio.EntregaPendienteValidacion, (await final.Envios.SingleAsync(x => x.Id == parada.EnvioId)).Estado);
         Assert.Equal(5, (await final.HojasRuta.SingleAsync()).UltimaSecuencia);
         var cerrada = (await client.GetFromJsonAsync<HojaRutaResponse>($"/api/mobile/rutas/{hoja.Id}"))!;
         Assert.Empty(cerrada.IncidenciasCierre);
@@ -149,12 +150,21 @@ public sealed partial class OperacionesRepartoHttpTests(PostgresFixture postgres
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task EvidenciaCifradaEsInmutableYCompletaLaPruebaAutomaticamente(bool cancelacionConcurrente)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task EvidenciaCifradaEsInmutableYCompletaLaPruebaAutomaticamente(bool cancelacionConcurrente, bool restringida)
     {
         var data = await postgres.CreateDatabaseAsync();
-        using var factory = new IntegrationApiFactory(data, settings: new Dictionary<string, string?> { ["Reparto:EvidenciasEncryptionKey"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)) });
+        var settings = restringida ? RlsRestrictedHttpFlowTests.ApiSettings() : new Dictionary<string, string?>();
+        if (restringida)
+        {
+            using var bootstrap = data.CreateApiFactory();
+            using var bootstrapClient = bootstrap.CreateHttpClient();
+        }
+        var runtime = restringida ? await RlsRestrictedHttpFlowTests.RestrictApiAsync(data) : data;
+        settings["Reparto:EvidenciasEncryptionKey"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+        using var factory = new IntegrationApiFactory(runtime, settings: settings);
         using var client = factory.CreateHttpClient(); var hoja = await Cargada(data, client); var parada = hoja.Paradas[0];
         if (cancelacionConcurrente)
         {
@@ -170,11 +180,23 @@ public sealed partial class OperacionesRepartoHttpTests(PostgresFixture postgres
         using var subir = await client.PutAsJsonAsync(uri, evidencia); Assert.Equal(HttpStatusCode.NoContent, subir.StatusCode);
         using var reintentar = await client.PutAsJsonAsync(uri, evidencia); Assert.Equal(HttpStatusCode.NoContent, reintentar.StatusCode);
         using var reemplazar = await client.PutAsJsonAsync(uri, new { parada.EnvioId, Tipo = "Firma", Contenido = bytes }); Assert.Equal(HttpStatusCode.Conflict, reemplazar.StatusCode);
-        var prueba = await Aplicar(client, hoja, Operacion(Guid.NewGuid(), 5, "EvidenciaEntrega", parada.EnvioId, entrega.VersionEnvio,
-            new { FotoId = fotoId, Nombre = "Receptor", Latitud = -34.9, Longitud = -56.2, PrecisionMetros = 10, PosicionEnUtc = DateTimeOffset.UtcNow }));
+        var comandoPrueba = Operacion(Guid.NewGuid(), 5, "EvidenciaEntrega", parada.EnvioId, entrega.VersionEnvio,
+            new { FotoId = fotoId, Nombre = "Receptor", Latitud = -34.9, Longitud = -56.2, PrecisionMetros = 10, PosicionEnUtc = DateTimeOffset.UtcNow });
+        var prueba = await Aplicar(client, hoja, comandoPrueba);
         Assert.Equal("Aplicada", prueba.Resultado);
+        Assert.Equal(JsonSerializer.Serialize(prueba), JsonSerializer.Serialize(await Aplicar(client, hoja, comandoPrueba)));
         await using var db = data.CreateDbContext();
-        Assert.Equal(EstadoEnvio.Entregado, (await db.Envios.SingleAsync(x => x.Id == parada.EnvioId)).Estado);
+        var envioFinal = await db.Envios.SingleAsync(x => x.Id == parada.EnvioId);
+        Assert.Equal(cancelacionConcurrente ? EstadoEnvio.Cancelado : EstadoEnvio.Entregado, envioFinal.Estado);
+        Assert.Equal(entrega.VersionEnvio + 1, envioFinal.Version);
+        Assert.Equal(LlegadaEstimada, envioFinal.EntregaFisicaEnUtc);
+        Assert.Equal(cancelacionConcurrente ? "Cancelado" : "Entregado", prueba.EstadosEnvio[parada.EnvioId]);
+        Assert.Single(await db.OperacionesJornada.Where(x => x.Id == prueba.Id).ToArrayAsync());
+        var pruebaGuardada = await db.PruebasEntrega.SingleAsync(x => x.EnvioId == parada.EnvioId);
+        Assert.Equal(fotoId, pruebaGuardada.FotoId);
+        Assert.Equal("Receptor", pruebaGuardada.Nombre);
+        Assert.Equal(-34.9, pruebaGuardada.Latitud);
+        Assert.Equal(EstadoCustodiaBulto.Destinatario, (await db.Bultos.SingleAsync(x => x.Id == parada.Bultos[0].Id)).Custodia);
         var archivo = Assert.Single(await db.EvidenciasReparto.ToArrayAsync()); Assert.False(bytes.SequenceEqual(archivo.Cifrado));
         Assert.Equal(64, archivo.Hash.Length); Assert.Equal(12, archivo.Nonce.Length); Assert.Equal(16, archivo.Tag.Length);
     }

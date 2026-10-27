@@ -1,10 +1,10 @@
 # NexoRuta Backend
 
-Platform organization administration: [authority, API and first-account procedure](docs/workflow/platform-administration.md). This is an additional backend slice, not completion of CU-01; Identity/OIDC and RLS remain pending; the separate Admin frontend is available in the frontend repository.
+Platform organization administration: [authority, API and first-account procedure](docs/workflow/platform-administration.md). This is an additional backend slice, not completion of CU-01; Identity/OIDC remains pending. PostgreSQL RLS is implemented and exercised with isolated integration fixtures; the deployed runtime login has not been inspected. The separate Admin frontend is available in the frontend repository.
 
 Backend de la plataforma multioperador de distribución de última milla del Taller .NET 2026. Este repositorio usa .NET 10 y está organizado como base de un **monolito modular**, con un Worker independiente. La entrega de análisis y diseño del 04/10/2026 y el enunciado del laboratorio fundamentan las decisiones resumidas aquí.
 
-> **Estado actual:** están implementados los recortes del primer monitoreo: [CU-01 — autenticación y roles propios](docs/cu/CU-01-comercios-usuarios.md), [CU-07 — alta individual de envíos](docs/cu/CU-07-alta-envios.md) y [CU-08 — bulto](docs/cu/CU-08-bultos.md), con EF Core/PostgreSQL. M05 incorpora seguimiento público, recuperación de enlaces y Outbox transaccional con procesos separados para RabbitMQ y Kafka. CU-01 incorpora login JWT y administración de roles propios; RLS sigue pendiente.
+> **Estado actual:** están implementados recortes de primer monitoreo, no los casos completos: [CU-01 — autenticación y roles propios](docs/cu/CU-01-comercios-usuarios.md), [CU-07 — alta individual](docs/cu/CU-07-alta-envios.md) y [CU-08 — un bulto por alta](docs/cu/CU-08-bultos.md). CU-07 completo exige también archivo e idempotencia y sigue pendiente; CU-08 es obligatorio y separado y el flujo de un bulto no demuestra uno-o-más. M05 incorpora seguimiento, Outbox transaccional y publisher/worker RabbitMQ y Kafka. RLS está implementado; su aislamiento y el camino de creación/outbox se ejecutaron con PostgreSQL de integración aislado, no en el despliegue productivo. Ver `../docs/auditorias/cu07/05-verificacion-flujo-existente.md` en el repositorio raíz.
 
 ## Estructura y estado verificado
 
@@ -23,7 +23,7 @@ tests/
 Dockerfile
 ```
 
-La solución compila con .NET 10 e incluye pruebas unitarias, integración PostgreSQL y pruebas de arquitectura. ArchitectureTests comprueba la independencia de las capas internas respecto de HTTP y persistencia y que las respuestas de envíos pertenezcan a la API. El workflow de backend compila y ejecuta las pruebas en PRs de `develop` hacia `main`; su presencia no acredita una ejecución remota. Worker registra actividad periódica y todavía no procesa envíos.
+La solución compila con .NET 10 e incluye pruebas unitarias, integración PostgreSQL y pruebas de arquitectura. ArchitectureTests comprueba la independencia de las capas internas respecto de HTTP y persistencia y que las respuestas de envíos pertenezcan a la API. El workflow de backend compila y ejecuta las pruebas en PRs de `develop` hacia `main`; su presencia no acredita una ejecución remota. Worker tiene dispatcher outbox para RabbitMQ/Kafka y consumidor Rabbit para generación de seguimiento; no se encontró consumidor local del evento Kafka `EnvioCreado`. La entrega puede repetirse y los reintentos actuales usan intervalos fijos.
 
 ## Requisitos y comandos locales
 
@@ -81,7 +81,7 @@ la corrección cultural de límites decimales no implica OpenAPI idéntico.
 
 El [alcance del refactor](docs/workflow/refactor-envios.md) distingue estas unidades
 y sus límites. Los cambios de frontend se revisan en su propio repositorio y no
-se incorporan automáticamente al PR backend. Ese refactor histórico no incorporaba autenticación real ni RLS; CU-01 ahora agrega JWT, roles propios y sus migraciones. RLS sigue pendiente.
+se incorporan automáticamente al PR backend. Ese refactor histórico no incorporaba autenticación real ni RLS; CU-01 luego agregó JWT y roles propios, y migraciones posteriores implementaron RLS. La prueba de aislamiento se ejecuta actualmente en fixtures PostgreSQL efímeros; no implica verificación del rol de una instalación productiva. La tabla de roles documentada en la ADR y el estado NOLOGIN de la migración presentan una discrepancia registrada en el informe de verificación CU-07.
 
 ## Decisiones de arquitectura
 

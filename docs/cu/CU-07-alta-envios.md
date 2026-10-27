@@ -1,6 +1,6 @@
 # CU-07 — Alta individual de envíos: primer monitoreo
 
-- **Estado:** implementado; el comercio elige un operador disponible para cada envío.
+- **Estado de este primer monitoreo:** implementado para alta individual; no representa el cierre del CU-07 completo. El requisito obligatorio también incluye alta por archivo e idempotencia al reimportar lotes completos o parciales; ambas están pendientes.
 - **Módulo:** M02 — Envíos y depósito.
 - **Fuente:** Monitoreo_2026-10-08_CU.xlsx, CU-07 y T-02.
 
@@ -27,6 +27,6 @@ CrearEnvioUseCase valida actor, destinatario, dirección y bulto. La escritura p
 - backend/tests/NexoRuta.IntegrationTests/Administracion/PlataformaHttpTests.cs: CreatedCommerceCanSelectDifferentOperatorsWhileEachActorSeesOnlyItsShipments.
 - backend/tests/NexoRuta.IntegrationTests/Seguridad/RlsPolicyTests.cs y RlsRestrictedHttpFlowTests.cs: roles restringidos, visibilidad de ambas partes, filas hijas y operaciones directas limitadas por privilegios/RLS.
 
-Importación masiva, tarifas y máquina de estados completa pertenecen a otros casos/hitos.
+La importación de archivos y su idempotencia son parte obligatoria del CU-07 completo (PDF `Laboratorio__NET_2026.pdf`, §5.2 n.° 7; XLSM `CU obligatorios!A10:I10`, `D10`), aunque no estaban cubiertas por este primer monitoreo. Siguen sin implementar a la fecha de la verificación del 23/10/2026. Tarifas corresponden a CU-09; la máquina de estados completa se cierra por su caso de uso.
 
 El comercio revisa y confirma las coordenadas antes de planificar el envío. [Contrato de destinos y geocodificación](destinos-envios.md).

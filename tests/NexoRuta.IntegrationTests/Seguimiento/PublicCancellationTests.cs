@@ -15,6 +15,7 @@ using Testcontainers.RabbitMq;
 using NexoRuta.Application.Administracion.Interfaces;
 using NexoRuta.Domain.Envios;
 using NexoRuta.Infrastructure.Outbox;
+using NexoRuta.Infrastructure.Envios;
 using NexoRuta.Infrastructure.Persistence;
 using NexoRuta.Infrastructure.Seguimiento.Processing;
 using NexoRuta.IntegrationTests.Fixtures;
@@ -41,11 +42,37 @@ public sealed class PublicCancellationTests(PostgresFixture postgres) : IClassFi
         var auditoria = await db.CancelacionesEnvio.SingleAsync();
         Assert.Null(auditoria.UsuarioId); Assert.Null(auditoria.AccesoId); Assert.Null(auditoria.TipoActor); Assert.Null(auditoria.OrganizacionActorId);
         Assert.Equal(comando.CodigoId, auditoria.AutorizacionPublicaId);
+        var history = Assert.Single(await db.EnvioEventos.Where(x => x.CancelacionEnvioId == auditoria.Id).ToArrayAsync());
+        Assert.Equal(("Publico", comando.CodigoId, "Cancelado"),
+            (history.ActorTipo, history.AutorizacionPublicaId, history.EstadoNuevo));
+        Assert.Null(history.ActorUsuarioId); Assert.Null(history.ActorAccesoId);
         Assert.NotNull((await db.CodigosCancelacionPublica.SingleAsync()).ConsumidoEnUtc);
         Assert.Empty(await db.AvisosReparto.ToArrayAsync());
         Assert.DoesNotContain("destinatario", await respuesta.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() => db.GetService<IMigrator>().MigrateAsync("20261019225313_RequireRecipientEmail"));
         Assert.Equal("55000", Assert.IsType<PostgresException>(error.InnerException).SqlState); // No elimina hechos públicos para volver al modelo anterior.
+    }
+
+    [Fact]
+    public async Task CancelacionPublicaAdmiteEnDevolucion()
+    {
+        using var p = await Preparar();
+        await using (var db = p.Data.CreateDbContext())
+        {
+            var envio = await db.Envios.SingleAsync(e => e.Id == p.Envio.Id);
+            envio.CambiarEstado(EstadoEnvio.EnDeposito, envio.Version);
+            envio.CambiarEstado(EstadoEnvio.EnDevolucion, envio.Version);
+            await db.SaveChangesAsync();
+        }
+
+        var codigo = await Solicitar(p);
+        using var confirmacion = await Confirmar(p, codigo.Codigo);
+        Assert.Equal(HttpStatusCode.OK, confirmacion.StatusCode);
+        using var repetir = await Confirmar(p, codigo.Codigo);
+        Assert.Equal(HttpStatusCode.OK, repetir.StatusCode);
+        await using var final = p.Data.CreateDbContext();
+        Assert.Equal(EstadoEnvio.Cancelado, (await final.Envios.SingleAsync(e => e.Id == p.Envio.Id)).Estado);
+        Assert.Single(await final.CancelacionesEnvio.ToArrayAsync());
     }
 
     [Fact]
@@ -295,7 +322,9 @@ public sealed class PublicCancellationTests(PostgresFixture postgres) : IClassFi
     {
         await using var db = p.Data.CreateDbContext(); var envio = await db.Envios.SingleAsync(x => x.Id == p.Envio.Id);
         envio.CambiarEstado(EstadoEnvio.EnDeposito, envio.Version); envio.CambiarEstado(EstadoEnvio.AsignadoRuta, envio.Version);
-        envio.CambiarEstado(EstadoEnvio.EnTransito, envio.Version); envio.DeclararEntregaFisica(DateTimeOffset.UtcNow, completa, envio.Version);
+        var instante = DateTimeOffset.UtcNow;
+        envio.CambiarEstado(EstadoEnvio.EnTransito, envio.Version);
+        envio.DeclararEntregaFisica(instante, instante, 60, completa, envio.Version);
         await db.SaveChangesAsync();
     }
     private static async Task Publicar(Preparado p, Guid mensaje)

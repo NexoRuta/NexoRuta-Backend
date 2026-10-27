@@ -114,12 +114,13 @@ public sealed partial class EfRutasRepository(NexoRutaDbContext db, TimeProvider
             else bulto.RecibirEnDeposito();
         if (envio.Estado == EstadoEnvio.Admitido) envio.CambiarEstado(EstadoEnvio.EnDeposito, version);
         else if (envio.Estado == EstadoEnvio.EnDevolucion) envio.CambiarEstado(EstadoEnvio.Devuelto, version);
-        else if (pendientes.Length > 0 && envio.Estado is (EstadoEnvio.EnTransito or EstadoEnvio.NoEntregado))
+        else if (pendientes.Length > 0 && envio.Estado == EstadoEnvio.EnTransito)
             envio.CambiarEstado(EstadoEnvio.Reprogramado, version);
         else if (pendientes.Length > 0 && envio.Estado == EstadoEnvio.AsignadoRuta
             && !await db.ParadasRuta.AnyAsync(p => p.OperadorId == operadorId && p.EnvioId == envioId && p.Activa, ct))
             envio.CambiarEstado(EstadoEnvio.EnDeposito, version);
-        else if (envio.Estado is not (EstadoEnvio.Reprogramado or EstadoEnvio.Cancelado or EstadoEnvio.AsignadoRuta or EstadoEnvio.EnDeposito))
+        else if (envio.Estado is not (EstadoEnvio.Reprogramado or EstadoEnvio.Cancelado or EstadoEnvio.AsignadoRuta
+            or EstadoEnvio.EnDeposito or EstadoEnvio.NoEntregado))
             throw new ConflictoRepartoException("El estado del envío no admite recepción.");
         await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return true;
     }
@@ -144,6 +145,16 @@ public sealed partial class EfRutasRepository(NexoRutaDbContext db, TimeProvider
         var reglas = await db.VersionesReglasOperativas.AsNoTracking().Include(v => v.RequisitosPrueba).Include(v => v.Motivos)
             .Where(v => v.OperadorId == hoja.OperadorId && versiones.Contains(v.Id) && v.Estado == EstadoVersionReglasOperativas.Publicada)
             .ToDictionaryAsync(v => v.Id, ct);
+        var intentosAplicados = await db.OperacionesJornada.AsNoTracking().Where(x => x.OperadorId == hoja.OperadorId
+            && x.EnvioId != null && ids.Contains(x.EnvioId.Value)
+            && x.Tipo == "IntentoFallido" && x.Resultado == "Aplicada")
+            .Select(x => new { EnvioId = x.EnvioId!.Value, x.Payload }).ToArrayAsync(ct);
+        var resumenesIntentos = envios.ToDictionary(x => x.Envio.Id, x =>
+        {
+            var version = reglas[x.Envio.VersionReglasId];
+            return ResumenIntentosEntrega.Calcular(intentosAplicados.Where(a => a.EnvioId == x.Envio.Id)
+                .Select(a => a.Payload), version.IntervaloEntreIntentosMinutos!.Value);
+        });
         var paradas = hoja.Paradas.OrderBy(x => x.Orden).Select(p =>
         {
             var detalle = envios.Single(x => x.Envio.Id == p.EnvioId);
@@ -153,7 +164,8 @@ public sealed partial class EfRutasRepository(NexoRutaDbContext db, TimeProvider
                 detalle.Direccion.Longitud ?? throw new InvalidOperationException("El destino no está confirmado."),
                 bultos.Where(b => b.EnvioId == p.EnvioId).Select(b => new BultoRutaDatos(b.Id, b.Codigo, b.PesoGramos,
                     b.LargoCentimetros * b.AnchoCentimetros * b.AltoCentimetros, b.Custodia.ToString(), b.Version)).ToArray(),
-                ReglasDatos(reglas[detalle.Envio.VersionReglasId]));
+                ReglasDatos(reglas[detalle.Envio.VersionReglasId]), resumenesIntentos[p.EnvioId].Cantidad,
+                resumenesIntentos[p.EnvioId].ProximoIntentoElegibleUtc);
         }).ToArray();
         var cierres = await db.OperacionesJornada.AsNoTracking().Where(o => o.OperadorId == hoja.OperadorId && o.RutaId == hoja.Id
             && o.Tipo == "FinJornada" && o.Resultado == "Aplicada").Select(o => o.IncidenciasCierre).ToArrayAsync(ct);

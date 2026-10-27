@@ -27,6 +27,8 @@ var connectionString = builder.Configuration.GetConnectionString("Postgres")
     ?? throw new InvalidOperationException("ConnectionStrings:Postgres is required for this Worker.");
 builder.Services.AddDbContext<NexoRutaDbContext>(options => options.UseNexoRutaPostgres(connectionString));
 builder.Services.AddScoped<EfOutboxRepository>();
+builder.Services.AddSingleton<TimeProvider>(TimeProvider.System);
+builder.Services.AddHostedService<ProofValidationDeadlineWorker>();
 
 if (transport == WorkerTransportNames.RabbitMq)
 {

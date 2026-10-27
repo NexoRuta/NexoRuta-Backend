@@ -61,7 +61,7 @@ public sealed class ReglasOperativasHttpTests(PostgresFixture postgres) : IClass
 
         using var incompleteSave = await client.PutAsJsonAsync(BasePath + "/borrador", Configuration(0,
             maxAttempts: null, interval: null, policy: null, standard: null, urgent: null,
-            requirements: [], motives: []));
+            requirements: [], motives: [], proofDeadline: null));
         Assert.Equal(HttpStatusCode.OK, incompleteSave.StatusCode);
         var incompleteDraft = await incompleteSave.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(1, incompleteDraft.GetProperty("versionConcurrencia").GetInt64());
@@ -75,7 +75,7 @@ public sealed class ReglasOperativasHttpTests(PostgresFixture postgres) : IClass
         var missingFields = incompleteError.RootElement.GetProperty("errors");
         foreach (var field in new[] { "maxIntentosEntrega", "intervaloEntreIntentosMinutos",
                      "politicaDevolucionAlAgotarIntentos", "plazoEstandarMinutos", "plazoUrgenteMinutos",
-                     "requisitosPrueba", "motivos" })
+                     "plazoValidacionPruebaMinutos", "requisitosPrueba", "motivos" })
             Assert.True(missingFields.TryGetProperty(field, out _), $"Missing field error {field}.");
 
         using var missingVersion = await PutJsonAsync(client, BasePath + "/borrador", """
@@ -122,6 +122,10 @@ public sealed class ReglasOperativasHttpTests(PostgresFixture postgres) : IClass
         Assert.Equal(2, completeDraft.GetProperty("versionConcurrencia").GetInt64());
         Assert.Equal(3, completeDraft.GetProperty("maxIntentosEntrega").GetInt32());
         Assert.Equal("DecisionOperativa", completeDraft.GetProperty("politicaDevolucionAlAgotarIntentos").GetString());
+        Assert.Equal(60, completeDraft.GetProperty("plazoValidacionPruebaMinutos").GetInt32());
+        using var nonPositiveDeadline = await client.PutAsJsonAsync(BasePath + "/borrador",
+            Configuration(2, proofDeadline: 0));
+        Assert.Equal(HttpStatusCode.BadRequest, nonPositiveDeadline.StatusCode);
 
         using var duplicateMotive = await client.PutAsJsonAsync(BasePath + "/borrador", Configuration(2,
             motives: [Motive("DOMICILIO_CERRADO", "Cerrado"), Motive("DOMICILIO_CERRADO", "También cerrado")]));
@@ -142,20 +146,25 @@ public sealed class ReglasOperativasHttpTests(PostgresFixture postgres) : IClass
         Assert.Equal(originalDraftId, published.GetProperty("versionReglasOperativasId").GetGuid());
         Assert.Equal("Publicada", published.GetProperty("estado").GetString());
         Assert.Equal(1, published.GetProperty("numeroVersionPublicada").GetInt32());
+        Assert.Equal(60, published.GetProperty("plazoValidacionPruebaMinutos").GetInt32());
 
         using var copiedResponse = await client.PostAsync(BasePath + "/borrador", null);
         Assert.Equal(HttpStatusCode.Created, copiedResponse.StatusCode);
         var copy = await copiedResponse.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(0, copy.GetProperty("versionConcurrencia").GetInt64());
         Assert.Equal(JsonValueKind.Null, copy.GetProperty("numeroVersionPublicada").ValueKind);
+        Assert.Equal(60, copy.GetProperty("plazoValidacionPruebaMinutos").GetInt32());
         Assert.Equal("DOMICILIO_CERRADO", copy.GetProperty("motivos")[0].GetProperty("codigo").GetString());
 
-        using var editedCopy = await client.PutAsJsonAsync(BasePath + "/borrador", Configuration(0,
+        using var editedCopy = await client.PutAsJsonAsync(BasePath + "/borrador", Configuration(0, proofDeadline: 90,
             motives: [Motive("DOMICILIO_CERRADO", "Descripción nueva", available: false)]));
         Assert.Equal(HttpStatusCode.OK, editedCopy.StatusCode);
+        var editedDraft = await editedCopy.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(90, editedDraft.GetProperty("plazoValidacionPruebaMinutos").GetInt32());
         using var publicationDetail = await client.GetAsync($"{BasePath}/publicaciones/{originalDraftId}");
         Assert.Equal(HttpStatusCode.OK, publicationDetail.StatusCode);
         var original = await publicationDetail.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(60, original.GetProperty("plazoValidacionPruebaMinutos").GetInt32());
         Assert.Equal("Domicilio cerrado", original.GetProperty("motivos")[0].GetProperty("descripcion").GetString());
         Assert.True(original.GetProperty("motivos")[0].GetProperty("disponible").GetBoolean());
 
@@ -311,7 +320,7 @@ public sealed class ReglasOperativasHttpTests(PostgresFixture postgres) : IClass
 
     private static object Configuration(long version, int? maxAttempts = 3, int? interval = 1440,
         string? policy = "DecisionOperativa", int? standard = 4320, int? urgent = 1440,
-        string[]? requirements = null, object[]? motives = null)
+        string[]? requirements = null, object[]? motives = null, int? proofDeadline = 60)
         => new
         {
             versionConcurrencia = version,
@@ -320,6 +329,7 @@ public sealed class ReglasOperativasHttpTests(PostgresFixture postgres) : IClass
             politicaDevolucionAlAgotarIntentos = policy,
             plazoEstandarMinutos = standard,
             plazoUrgenteMinutos = urgent,
+            plazoValidacionPruebaMinutos = proofDeadline,
             requisitosPrueba = requirements ?? ["FirmaEnPantalla", "NombreReceptor"],
             motivos = motives ?? [Motive("DOMICILIO_CERRADO", "Domicilio cerrado")]
         };

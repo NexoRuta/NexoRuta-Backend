@@ -20,6 +20,8 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
     public DbSet<NexoRuta.Domain.Reparto.Vehiculo> Vehiculos => Set<NexoRuta.Domain.Reparto.Vehiculo>();
     public DbSet<NexoRuta.Domain.Reparto.HojaRuta> HojasRuta => Set<NexoRuta.Domain.Reparto.HojaRuta>();
     public DbSet<NexoRuta.Domain.Reparto.ParadaRuta> ParadasRuta => Set<NexoRuta.Domain.Reparto.ParadaRuta>();
+    public DbSet<NexoRuta.Domain.Reparto.DecisionDevolucionEnvio> DecisionesDevolucionEnvio => Set<NexoRuta.Domain.Reparto.DecisionDevolucionEnvio>();
+    public DbSet<NexoRuta.Domain.Reparto.ConfirmacionExtravioEnvio> ConfirmacionesExtravioEnvio => Set<NexoRuta.Domain.Reparto.ConfirmacionExtravioEnvio>();
     public DbSet<NexoRuta.Infrastructure.Reparto.OperacionJornada> OperacionesJornada => Set<NexoRuta.Infrastructure.Reparto.OperacionJornada>();
     public DbSet<NexoRuta.Infrastructure.Reparto.EvidenciaReparto> EvidenciasReparto => Set<NexoRuta.Infrastructure.Reparto.EvidenciaReparto>();
     public DbSet<NexoRuta.Infrastructure.Reparto.PruebaEntrega> PruebasEntrega => Set<NexoRuta.Infrastructure.Reparto.PruebaEntrega>();
@@ -42,6 +44,8 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
     public DbSet<Destinatario> Destinatarios => Set<Destinatario>();
     public DbSet<Direccion> Direcciones => Set<Direccion>();
     public DbSet<Envio> Envios => Set<Envio>();
+    public DbSet<NexoRuta.Infrastructure.Envios.IdentidadEnvioImportado> IdentidadesEnvioImportado => Set<NexoRuta.Infrastructure.Envios.IdentidadEnvioImportado>();
+    public DbSet<NexoRuta.Infrastructure.Envios.EnvioEvento> EnvioEventos => Set<NexoRuta.Infrastructure.Envios.EnvioEvento>();
     public DbSet<NexoRuta.Infrastructure.Envios.CancelacionEnvio> CancelacionesEnvio => Set<NexoRuta.Infrastructure.Envios.CancelacionEnvio>();
     public DbSet<Bulto> Bultos => Set<Bulto>();
     public DbSet<EnlaceSeguimiento> EnlacesSeguimiento => Set<EnlaceSeguimiento>();
@@ -75,6 +79,7 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
         base.OnModelCreating(modelBuilder);
         modelBuilder.ApplyConfiguration(new CodigoCancelacionPublicaConfiguration());
         modelBuilder.ApplyConfiguration(new NexoRuta.Infrastructure.Envios.CancelacionEnvioConfiguration());
+        modelBuilder.ApplyConfiguration(new NexoRuta.Infrastructure.Envios.EnvioEventoConfiguration());
         modelBuilder.ApplyConfiguration(new Reparto.RepartidorConfiguration());
         modelBuilder.ApplyConfiguration(new Reparto.ConfiguracionRepartoConfiguration());
         modelBuilder.ApplyConfiguration(new Reparto.VehiculoConfiguration());
@@ -86,6 +91,8 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
         modelBuilder.ApplyConfiguration(new Reparto.EvidenciaRepartoConfiguration());
         modelBuilder.ApplyConfiguration(new Reparto.PruebaEntregaConfiguration());
         modelBuilder.ApplyConfiguration(new Reparto.ParadaRutaConfiguration());
+        modelBuilder.ApplyConfiguration(new Reparto.DecisionDevolucionEnvioConfiguration());
+        modelBuilder.ApplyConfiguration(new Reparto.ConfirmacionExtravioEnvioConfiguration());
         modelBuilder.ApplyConfiguration(new SesionMovilConfiguration());
         modelBuilder.ApplyConfiguration(new TokenRenovacionMovilConfiguration());
         modelBuilder.HasAnnotation("NexoRuta:RlsVersion", 1);
@@ -325,10 +332,18 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
             {
                 t.HasCheckConstraint("CK_Envios_Version", "\"Version\" >= 0");
                 t.HasCheckConstraint("CK_Envios_EntregaFisica", "\"Estado\" NOT IN ('Entregado','EntregaPendienteValidacion','EntregaSinValidacion') OR \"EntregaFisicaEnUtc\" IS NOT NULL");
-                t.HasCheckConstraint("CK_Envios_Cancelacion", "\"Estado\" <> 'Cancelado' OR \"EntregaFisicaEnUtc\" IS NULL");
+                t.HasCheckConstraint("CK_Envios_ProofDeadlineRequiresPhysicalDelivery",
+                    "\"EntregaFisicaRecibidaEnUtc\" IS NULL OR \"EntregaFisicaEnUtc\" IS NOT NULL");
+                t.HasCheckConstraint("CK_Envios_ProofDeadlineRequiresReceipt",
+                    "\"PlazoPruebaVenceEnUtc\" IS NULL OR (\"EntregaFisicaRecibidaEnUtc\" IS NOT NULL AND \"PlazoPruebaVenceEnUtc\" > \"EntregaFisicaRecibidaEnUtc\")");
             });
             entity.HasKey(x => x.Id);
+            entity.HasIndex(x => x.ComercioId);
+            entity.HasIndex(x => x.PlazoPruebaVenceEnUtc)
+                .HasFilter("\"Estado\" = 'EntregaPendienteValidacion' AND \"PlazoPruebaVenceEnUtc\" IS NOT NULL")
+                .HasDatabaseName("IX_Envios_ProofValidationDeadline");
             entity.HasAlternateKey(x => new { x.OperadorId, x.Id });
+            entity.HasAlternateKey(x => new { x.ComercioId, x.Id });
             entity.Property(x => x.Estado).HasConversion<string>().HasMaxLength(32).IsRequired();
             entity.Property(x => x.Version).IsConcurrencyToken();
             entity.HasOne<VersionReglasOperativas>().WithMany()
@@ -345,6 +360,23 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
                 .HasForeignKey(x => new { x.OperadorId, x.DireccionId })
                 .HasPrincipalKey(x => new { x.OperadorId, x.Id })
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<NexoRuta.Infrastructure.Envios.IdentidadEnvioImportado>(entity =>
+        {
+            entity.ToTable("IdentidadesEnvioImportado", table =>
+                table.HasCheckConstraint("CK_IdentidadesEnvioImportado_Huella", "\"VersionHuella\" > 0 AND octet_length(\"Huella\") = 32"));
+            entity.HasKey(x => new { x.ComercioId, x.ReferenciaExterna });
+            entity.Property(x => x.ReferenciaExterna).UseCollation("C").HasMaxLength(128).IsRequired();
+            entity.Property(x => x.VersionHuella).IsRequired();
+            entity.Property(x => x.Huella).HasColumnType("bytea").IsRequired();
+            entity.HasIndex(x => new { x.ComercioId, x.EnvioId }).IsUnique();
+            entity.HasOne<Envio>().WithMany()
+                .HasForeignKey(x => new { x.ComercioId, x.EnvioId })
+                .HasPrincipalKey(x => new { x.ComercioId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Envio>().WithMany()
+                .HasForeignKey(x => new { x.OperadorId, x.EnvioId })
+                .HasPrincipalKey(x => new { x.OperadorId, x.Id }).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<Bulto>(entity =>
@@ -757,6 +789,8 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
                     "\"PlazoEstandarMinutos\" IS NULL OR \"PlazoEstandarMinutos\" BETWEEN 1 AND 525600");
                 table.HasCheckConstraint("CK_VersionesReglasOperativas_UrgentDeadline",
                     "\"PlazoUrgenteMinutos\" IS NULL OR \"PlazoUrgenteMinutos\" BETWEEN 1 AND 525600");
+                table.HasCheckConstraint("CK_VersionesReglasOperativas_ProofValidationDeadline",
+                    "\"PlazoValidacionPruebaMinutos\" IS NULL OR \"PlazoValidacionPruebaMinutos\" BETWEEN 1 AND 525600");
                 table.HasCheckConstraint("CK_VersionesReglasOperativas_ReturnPolicy",
                     "\"PoliticaDevolucionAlAgotarIntentos\" IS NULL OR \"PoliticaDevolucionAlAgotarIntentos\" IN ('DecisionOperativa', 'IniciarAutomaticamente')");
             });

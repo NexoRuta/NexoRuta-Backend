@@ -91,9 +91,19 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
             var createdAccess = await verifyRls.AccesosUsuario.SingleAsync(x => x.UsuarioId == result.UsuarioId);
             var otherOperator = await verifyRls.Operadores.SingleAsync(x => x.Nombre == "RLS operator");
             var otherOwnerAccess = await verifyRls.AccesosUsuario.SingleAsync(x => x.OperadorId == otherOperator.Id && x.EsPropietario);
+            var dispatcher = await verifyRls.Roles.SingleAsync(x => x.OperadorId == createdAccess.OperadorId
+                && x.Codigo == "despachador_operador");
             var manager = new RlsActorContext(RlsActorKind.Plataforma, CanManageOrganizations: true);
 
             Assert.NotNull(createdAccess.RolId);
+            Assert.True(dispatcher.EsProtegidoSistema);
+            Assert.Contains(await verifyRls.RolesPermisos.Where(x => x.RolId == dispatcher.Id)
+                .Join(verifyRls.Permisos, grant => grant.PermisoId, permission => permission.Id,
+                    (_, permission) => permission.Codigo).ToArrayAsync(), code => code == "envios.gestionar");
+            Assert.Contains(await verifyRls.RolesPermisos.Where(x => x.RolId == dispatcher.Id)
+                .Join(verifyRls.Permisos, grant => grant.PermisoId, permission => permission.Id,
+                    (_, permission) => permission.Codigo).ToArrayAsync(), code => code == "envios.consultar");
+            Assert.False(await verifyRls.AccesosUsuario.AnyAsync(x => x.RolId == dispatcher.Id));
             Assert.True(await CanReadAccessAsAsync(runtime, createdAccess.Id, manager,
                 createdAccess.OrganizacionId, createdAccess.UsuarioId, createdAccess.RolId.Value));
             Assert.False(await CanReadAccessAsAsync(runtime, createdAccess.Id, manager,
@@ -113,6 +123,33 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
         using var conflict = await platformClient.PostAsJsonAsync("/api/admin/operadores",
             Request("Must roll back", "authorized-operator@example.test"));
         Assert.Equal(HttpStatusCode.Conflict, conflict.StatusCode);
+
+        using (var operatorFactory = new IntegrationApiFactory(runtime,
+            settings: NexoRuta.IntegrationTests.Seguridad.RlsRestrictedHttpFlowTests.ApiSettings()))
+        using (var operatorClient = operatorFactory.CreateHttpClient())
+        {
+            await Login(operatorClient, "authorized-operator@example.test");
+            using (var currentResponse = await operatorClient.GetAsync("/api/usuarios/actual"))
+            {
+                Assert.Equal(HttpStatusCode.OK, currentResponse.StatusCode);
+                using var current = System.Text.Json.JsonDocument.Parse(await currentResponse.Content.ReadAsStringAsync());
+                Assert.True(current.RootElement.GetProperty("puedeGestionarDecisionesOperativasEnvio").GetBoolean());
+            }
+            using var assignableResponse = await operatorClient.GetAsync("/api/roles/asignables");
+            Assert.Equal(HttpStatusCode.OK, assignableResponse.StatusCode);
+            var assignable = await assignableResponse.Content.ReadFromJsonAsync<JsonElement[]>();
+            var dispatcher = Assert.Single(assignable!, role => role.GetProperty("codigo").GetString() == "despachador_operador");
+            Assert.True(dispatcher.GetProperty("esProtegidoSistema").GetBoolean());
+            using var assignedUser = await operatorClient.PostAsJsonAsync("/api/usuarios", new
+            {
+                Email = "dispatcher-from-existing-flow@example.test", Password, RolId = dispatcher.GetProperty("id").GetGuid()
+            });
+            Assert.Equal(HttpStatusCode.Created, assignedUser.StatusCode);
+            await using var assignmentCheck = database.CreateDbContext();
+            Assert.True(await assignmentCheck.AccesosUsuario.AnyAsync(x => x.UsuarioId ==
+                assignmentCheck.Usuarios.Where(u => u.Email == "dispatcher-from-existing-flow@example.test")
+                    .Select(u => u.Id).Single() && x.RolId == dispatcher.GetProperty("id").GetGuid()));
+        }
 
         using var organizationClient = factory.CreateHttpClient();
         await Login(organizationClient, initial.OperadorUsuarioEmail);

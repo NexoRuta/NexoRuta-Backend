@@ -31,12 +31,12 @@ public sealed partial class OperacionesRepartoHttpTests
         Assert.Equal("Conflicto", (await Intentar(4, 0, "Ausente")).Resultado);
         Assert.Equal("Aplicada", (await Intentar(5, 0)).Resultado);
         Assert.Equal("Conflicto", (await Intentar(6, 30)).Resultado);
-        Assert.Equal("Aplicada", (await Intentar(7, 60)).Resultado);
-        Assert.Equal("Aplicada", (await Intentar(8, 120)).Resultado);
+        Assert.Equal("Conflicto", (await Intentar(7, 60)).Resultado);
+        Assert.Equal("Conflicto", (await Intentar(8, 120)).Resultado);
         Assert.Equal("Conflicto", (await Intentar(9, 180)).Resultado);
         await using var db = data.CreateDbContext();
         Assert.Equal(EstadoEnvio.NoEntregado, (await db.Envios.SingleAsync(e => e.Id == parada.EnvioId)).Estado);
-        Assert.Equal(3, await db.OperacionesJornada.CountAsync(o => o.Tipo == "IntentoFallido" && o.Resultado == "Aplicada"));
+        Assert.Equal(1, await db.OperacionesJornada.CountAsync(o => o.Tipo == "IntentoFallido" && o.Resultado == "Aplicada"));
     }
 
     [Theory]
@@ -78,7 +78,7 @@ public sealed partial class OperacionesRepartoHttpTests
         var repo = new EfReglasOperativasRepository(db);
         await repo.CrearBorradorAsync(operador.OperadorId!.Value, operador.UsuarioId);
         await repo.EditarBorradorAsync(operador.OperadorId.Value, operador.UsuarioId, 0,
-            new(1, 30, PoliticaDevolucionAlAgotarIntentos.IniciarAutomaticamente, 2880, 1440,
+            new(1, 30, PoliticaDevolucionAlAgotarIntentos.IniciarAutomaticamente, 2880, 1440, 60,
                 [TipoPruebaEntrega.NombreReceptor], [new("AUSENTE", "Ausente", false), new("RECHAZADO", "Rechazado", true)]));
         await repo.PublicarBorradorAsync(operador.OperadorId.Value, operador.UsuarioId, 1);
     }

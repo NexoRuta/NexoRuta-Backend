@@ -2,14 +2,16 @@
 
 Decisión D18 confirmada el 20/10/2026: el repartidor puede terminar la jornada aunque haya bultos sin entrega ni rendición. No se inventan entregas, pérdidas ni recepciones en depósito.
 
+**Aclaración vigente DEC-01 (25/10/2026, opción B):** se reemplaza únicamente la regla anterior que hacía que `FinJornada` moviera `EntregaPendienteValidacion` a `EntregaSinValidacion`. El cierre deja el envío pendiente; una prueba completa recibida antes del vencimiento o el Worker al alcanzar el vencimiento son los únicos disparadores de esas transiciones. La regla no modifica las demás condiciones de cierre, custodia e incidencias de D18.
+
 `FinJornada` se procesa después de todas las operaciones anteriores de su secuencia. Por cada bulto que sigue bajo custodia del repartidor de esa ruta, el servidor conserva en `OperacionesJornada.IncidenciasCierre` su envío, identificador, código y versión, la operación de cierre y los instantes del dispositivo y de recepción. Ruta, operador y acceso responsable pertenecen al mismo registro inmutable. No se acepta una lista de faltantes elegida por el cliente.
 
 El cierre y las incidencias se guardan en la misma transacción. El UUID y hash del comando conservan la respuesta al reintentar; el trigger existente impide editar o borrar el historial. La columna JSON comparte las restricciones RLS del diario. Migración: `20261020224947_RecordClosingIncidents`.
 
-- Entrega física pendiente de prueba: pasa a `EntregaSinValidacion` al cerrar; no se pide rendir un bulto que recibió el destinatario.
+- Entrega física pendiente de prueba: conserva `EntregaPendienteValidacion` al cerrar; no se pide rendir un bulto que recibió el destinatario. La regla y fecha de vencimiento quedan fijadas desde la primera recepción válida del servidor para la versión del envío. La evidencia recibida antes del instante de vencimiento puede completar la prueba aunque la jornada haya cerrado; en el instante límite o después, no valida el envío automáticamente.
 - Bulto con rendición declarada: conserva `PendienteDeposito`, sin incidencia de faltante.
 - Bulto sin entrega ni rendición: conserva `Repartidor`, su ruta y acceso custodios. Una carga parcial tampoco se convierte automáticamente en `EnDeposito`.
-- La hoja queda finalizada y el seguimiento local se detiene. El plazo de prueba no se reabre y no se admiten nuevas entregas de esa jornada.
+- La hoja queda finalizada y el seguimiento local se detiene. El plazo persistido no se reabre ni reinicia por el cierre. La jornada cerrada solo admite sincronizar evidencia de la operación física original bajo las comprobaciones existentes; no habilita nuevas cargas, entregas, intentos ni cambios de ruta.
 
 La app advierte cuántos bultos generan incidencia antes de confirmar. Hoja propia y Backoffice exponen el historial; este permanece visible aunque cambie la custodia después. No se agrega una decisión de aceptación o rechazo del despachador.
 

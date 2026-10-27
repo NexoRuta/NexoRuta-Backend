@@ -10,11 +10,55 @@ using NexoRuta.Infrastructure.Outbox;
 using NexoRuta.Application.Administracion.Exceptions;
 using NexoRuta.Domain.Administracion;
 using Npgsql;
+using System.Data;
+using Microsoft.EntityFrameworkCore.Storage;
+using NexoRuta.Application.Envios.Importacion;
 
 namespace NexoRuta.Infrastructure.Envios.Repositories;
 
 public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
 {
+    public async Task<IEnviosImportTransaction> IniciarImportacionAsync(CancellationToken cancellationToken = default)
+    {
+        var transaction = await db.BeginOrJoinAsync(cancellationToken);
+        try
+        {
+            if (db.Database.CurrentTransaction?.GetDbTransaction().IsolationLevel != IsolationLevel.ReadCommitted)
+                throw new InvalidOperationException("CSV import requires a READ COMMITTED transaction for post-lock identity reads.");
+            return transaction;
+        }
+        catch
+        {
+            await transaction.DisposeAsync();
+            throw;
+        }
+    }
+
+    public async Task BloquearReferenciasImportacionAsync(
+        IReadOnlyCollection<string> referencias,
+        CancellationToken cancellationToken = default)
+    {
+        ExigirTransaccionImportacion();
+        if (referencias.Count == 0)
+            return;
+        await db.Database.ExecuteSqlRawAsync(
+            $"SELECT {RlsSqlFunctionContract.LockImportReferences}({{0}}::text[])",
+            [(object)referencias.Distinct(StringComparer.Ordinal).ToArray()], cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<IdentidadEnvioImportadoEncontrada>> BuscarIdentidadesImportacionAsync(
+        IReadOnlyCollection<string> referencias,
+        CancellationToken cancellationToken = default)
+    {
+        ExigirTransaccionImportacion();
+        if (referencias.Count == 0)
+            return [];
+        return await db.Database.SqlQueryRaw<IdentidadEnvioImportadoEncontrada>(
+                "SELECT * FROM " + RlsSqlFunctionContract.FindImportReferences + "({0}::text[])",
+                (object)referencias.Distinct(StringComparer.Ordinal).ToArray())
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task<Guid?> ObtenerVersionReglasParaAdmisionAsync(Guid operadorId, CancellationToken cancellationToken = default)
     {
         try { return await db.Database.SqlQuery<Guid?>($"SELECT nexoruta_app.shipment_rules_for_admission({operadorId}) AS \"Value\"").SingleAsync(cancellationToken); }
@@ -28,50 +72,65 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
         Bulto bulto,
         CancellationToken cancellationToken = default)
     {
-        if (destinatario.OperadorId != envio.OperadorId || direccion.OperadorId != envio.OperadorId ||
-            bulto.OperadorId != envio.OperadorId || bulto.EnvioId != envio.Id)
-            throw new ArgumentException("Shipment aggregate tenant keys must refer to the same shipment and operator.");
         await using var transaction = await db.BeginOrJoinAsync(cancellationToken);
-        // Keep the commerce lock on the API path; the scoped SECURITY DEFINER insert locks only the
-        // chosen operator because commerce SELECT cannot lock inactive operators under RLS.
+        await VerificarOrganizacionesParaAltaAsync(envio.ComercioId, envio.OperadorId, cancellationToken);
+        await CrearEnBaseAsync(envio, destinatario, direccion, bulto, null, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    public async Task GuardarImportadosAsync(
+        IReadOnlyList<EnvioImportadoParaPersistir> envios,
+        CancellationToken cancellationToken = default)
+    {
+        if (envios.Count == 0)
+            return;
+        var commerceId = envios[0].Envio.ComercioId;
+        var operatorId = envios[0].Envio.OperadorId;
+        if (envios.Any(x => x.Envio.ComercioId != commerceId || x.Envio.OperadorId != operatorId))
+            throw new ArgumentException("An import batch must use one commerce and one operator.", nameof(envios));
+
+        await using var transaction = await db.BeginOrJoinAsync(cancellationToken);
+        await VerificarOrganizacionesParaAltaAsync(commerceId, operatorId, cancellationToken);
+        foreach (var item in envios)
+        {
+            await CrearEnBaseAsync(item.Envio, item.Destinatario, item.Direccion, item.Bulto, item, cancellationToken);
+            // The RLS INSERT policy scopes each outbox pair to the currently selected shipment.
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    private async Task VerificarOrganizacionesParaAltaAsync(Guid commerceId, Guid operatorId, CancellationToken cancellationToken)
+    {
+        // Keep the commerce lock on the API path; create_shipment locks the chosen operator under its scoped function role.
         var commerce = await db.Comercios.FromSqlInterpolated(
-            $"SELECT * FROM \"Comercios\" WHERE \"Id\" = {envio.ComercioId} FOR UPDATE")
+            $"SELECT * FROM \"Comercios\" WHERE \"Id\" = {commerceId} FOR UPDATE")
             .SingleOrDefaultAsync(cancellationToken);
-        var operatorEntity = await db.Operadores.SingleOrDefaultAsync(x => x.Id == envio.OperadorId, cancellationToken);
+        var operatorEntity = await db.Operadores.SingleOrDefaultAsync(x => x.Id == operatorId, cancellationToken);
         if (commerce is null || operatorEntity is null)
             throw new OrganizacionSuspendidaException("No se puede crear el envío porque una organización ya no está disponible.");
         if (commerce.Estado != EstadoOrganizacion.Activa || operatorEntity.Estado != EstadoOrganizacion.Activa)
             throw new OrganizacionSuspendidaException("No se puede crear el envío mientras una organización esté suspendida.");
+    }
 
+    private async Task CrearEnBaseAsync(
+        Envio envio,
+        Destinatario destinatario,
+        Direccion direccion,
+        Bulto bulto,
+        EnvioImportadoParaPersistir? identidad,
+        CancellationToken cancellationToken)
+    {
+        if (destinatario.OperadorId != envio.OperadorId || direccion.OperadorId != envio.OperadorId ||
+            bulto.OperadorId != envio.OperadorId || bulto.EnvioId != envio.Id)
+            throw new ArgumentException("Shipment aggregate tenant keys must refer to the same shipment and operator.");
+
+        await db.SetShipmentHistoryContextAsync(
+            identidad is null ? "AltaIndividual" : "Importacion",
+            envio.Id,
+            cancellationToken: cancellationToken);
         await db.SetShipmentAsync(envio.OperadorId, envio.Id, destinatario.Id, direccion.Id, bulto.Id, cancellationToken);
-
-        // Trabajo asíncrono: generar el seguimiento.
-        var trabajoSeguimiento = OutboxMessage.ForShipment(
-            operatorId: envio.OperadorId,
-            shipmentId: envio.Id,
-            type: OutboxMessageTypes.TrackingRequested,
-            destination: OutboxDestino.RabbitMq,
-            payload: JsonSerializer.Serialize(new
-            {
-                envioId = envio.Id,
-                operadorId = envio.OperadorId
-            }));
-
-        // Evento de negocio: informar que se creó un envío.
-        var eventoEnvioCreado = OutboxMessage.ForShipment(
-            operatorId: envio.OperadorId,
-            shipmentId: envio.Id,
-            type: OutboxMessageTypes.ShipmentCreated,
-            destination: OutboxDestino.Kafka,
-            payload: JsonSerializer.Serialize(new
-            {
-                envioId = envio.Id,
-                operadorId = envio.OperadorId,
-                comercioId = envio.ComercioId,
-                estado = envio.Estado.ToString()
-            }));
-
-        // EF Core guarda todo en la misma operación.
         Guid createdId;
         try
         {
@@ -92,10 +151,40 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
         if (createdId != envio.Id)
             throw new InvalidOperationException("The database did not create the requested shipment.");
 
-        db.AddRange(trabajoSeguimiento, eventoEnvioCreado);
+        if (identidad is not null)
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                $"SELECT {RlsSqlFunctionContract.BindImportIdentity}({{0}}, {{1}}, {{2}}, {{3}}, {{4}})",
+                [identidad.ReferenciaExterna, envio.Id, envio.OperadorId, identidad.VersionHuella, identidad.Huella],
+                cancellationToken);
+        }
 
-        await db.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+        var trackingRequested = OutboxMessage.ForShipment(
+            operatorId: envio.OperadorId,
+            shipmentId: envio.Id,
+            type: OutboxMessageTypes.TrackingRequested,
+            destination: OutboxDestino.RabbitMq,
+            payload: JsonSerializer.Serialize(new { envioId = envio.Id, operadorId = envio.OperadorId }));
+        var shipmentCreated = OutboxMessage.ForShipment(
+            operatorId: envio.OperadorId,
+            shipmentId: envio.Id,
+            type: OutboxMessageTypes.ShipmentCreated,
+            destination: OutboxDestino.Kafka,
+            payload: JsonSerializer.Serialize(new
+            {
+                envioId = envio.Id,
+                operadorId = envio.OperadorId,
+                comercioId = envio.ComercioId,
+                estado = envio.Estado.ToString()
+            }));
+        db.AddRange(trackingRequested, shipmentCreated);
+    }
+
+    private void ExigirTransaccionImportacion()
+    {
+        if (db.Database.CurrentTransaction is null
+            || db.Database.CurrentTransaction.GetDbTransaction().IsolationLevel != IsolationLevel.ReadCommitted)
+            throw new InvalidOperationException("Import lock and lookup require the request READ COMMITTED transaction.");
     }
 
     public async Task<IReadOnlyList<EnvioDetalle>> ListarAsync(
