@@ -1,3 +1,4 @@
+using NexoRuta.Infrastructure.Hosting;
 using System.Net.Mail;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
@@ -17,6 +18,7 @@ using NexoRuta.Worker.Messaging;
 using NexoRuta.Worker;
 
 var builder = Host.CreateApplicationBuilder(args);
+builder.Services.AddHostingTelemetry(builder.Configuration, "NexoRuta.Worker." + (builder.Configuration["Messaging:Transport"] ?? "RabbitMq"));
 builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.Warning);
 
 var transport = builder.Configuration[WorkerConfigurationKeys.Transport] ?? WorkerTransportNames.RabbitMq;
@@ -52,6 +54,7 @@ if (transport == WorkerTransportNames.RabbitMq)
     builder.Services.AddSingleton<ICorreoSender, SmtpCorreoSender>();
     var keysDirectory = builder.Configuration[PasswordRecoveryDataProtection.KeysDirectoryConfigurationKey]
         ?? throw new InvalidOperationException("Data protection key directory is required by the RabbitWorker.");
+    if (!builder.Services.AddSharedDataProtection(builder.Configuration, PasswordRecoveryDataProtection.ApplicationName, "api"))
     builder.Services.AddDataProtection()
         .SetApplicationName(PasswordRecoveryDataProtection.ApplicationName)
         .PersistKeysToFileSystem(new DirectoryInfo(keysDirectory));
