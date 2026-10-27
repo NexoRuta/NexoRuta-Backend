@@ -32,14 +32,10 @@ public sealed class ReleaseConfigurationTests
         Assert.Equal("", access.UsuarioEmail);
     }
 
-    [Theory]
-    [InlineData(null)]
-    [InlineData("false")]
-    [InlineData("true")]
-    [InlineData("invalid")]
-    public void BootstrapUsesExplicitValuesRegardlessOfLegacySetting(string? legacySetting)
+    [Fact]
+    public void BootstrapUsesExplicitValues()
     {
-        using var services = Build(Values(legacySetting));
+        using var services = Build(Values());
         var access = services.GetRequiredService<AccesoInicial>();
         Assert.Equal("custom@example.test", access.UsuarioEmail);
         Assert.Equal("Custom Commerce", access.ComercioNombre);
@@ -62,7 +58,7 @@ public sealed class ReleaseConfigurationTests
     [InlineData("OperadorUsuarioEmail", " ")]
     public void BootstrapRequiresEachConfiguredValue(string field, string? value)
     {
-        var values = Values("true");
+        var values = Values();
         values[$"AccesoInicial:{field}"] = value;
         using var services = Build(values);
         var exception = Assert.Throws<InvalidOperationException>(() => services.GetRequiredService<AccesoInicial>());
@@ -123,11 +119,9 @@ public sealed class ReleaseConfigurationTests
         Assert.Contains($"AccesoInicial:{field}", error.Message);
     }
 
-    private static Dictionary<string, string?> Values(string? legacySetting = null) => new()
+    private static Dictionary<string, string?> Values() => new()
     {
         ["ConnectionStrings:Postgres"] = "Host=localhost;Database=unused",
-        // Regression input only: the retired setting must not alter bootstrap behavior.
-        ["Demo:Enabled"] = legacySetting,
         ["DatabaseInitialization:SeedData"] = "true",
         ["AccesoInicial:OperadorId"] = Guid.NewGuid().ToString(),
         ["AccesoInicial:ComercioId"] = Guid.NewGuid().ToString(),

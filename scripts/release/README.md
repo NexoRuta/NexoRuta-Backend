@@ -11,9 +11,9 @@ las decisiones de seguridad y recuperación.
 - `deploy.py`: herramienta opcional para una VPS **Linux** con Docker Compose.
   Reemplaza a `deploy.sh`; el workflow actual sigue usando el pipeline central,
   por lo que no invoca este despliegue directo.
-- `test-deploy.py`: reemplaza a `test-deploy.sh`. Simula Docker y usa directorios
-  temporales, sin acceder a GHCR, a la VPS ni a servicios reales. Comprueba
-  actualización, identidad de ejecución, rollback, señales y bloqueo compartido.
+- `test-deploy.py`: simula Docker y usa directorios temporales, sin acceder a
+  GHCR, a la VPS ni a servicios reales. Comprueba
+  actualización, identidad de ejecución, fallos, señales y bloqueo compartido.
 
 Para ejecutar las pruebas en Linux o WSL:
 
@@ -33,10 +33,10 @@ No pasarlo como argumento ni escribirlo en el historial. El directorio destino
 debe contener `compose.vps.yaml` y `.env`; Python debe estar instalado en la VPS.
 Ya no se debe enviar el script a `bash -s`.
 
-El script mantiene `.release.lock` durante toda la operación y el rollback.
+El script mantiene `.release.lock` durante toda la operación.
 Registra el número de ejecución antes de descargar imágenes, para rechazar
 ejecuciones viejas incluso si la nueva falla. Actualiza solamente el servicio
 `api` y `NEXORUTA_API_TAG`; `.env` nunca se interpreta como código. Ante un fallo
-restaura sus bytes originales y la imagen inmutable anterior. Si no puede
-restaurar, conserva los archivos privados de recuperación y lo informa por
-stderr; elimina las credenciales temporales de Docker antes de conservarlos.
+el tag objetivo permanece en `.env` y no se reinicia una imagen anterior. Corregir
+el despliegue y volver a ejecutar una release nueva; el watermark bloquea jobs
+viejos que intenten reemplazarla.

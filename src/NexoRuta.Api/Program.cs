@@ -36,8 +36,7 @@ if (catalogImportCommand && (args.Length > 2 || (args.Length == 2 && !catalogImp
     Environment.ExitCode = 2;
     return;
 }
-var keyImportCommand = args.Length == 2 && args[0] == "keys-import";
-var commandMode = keyImportCommand || platformCommand || localBootstrapCommand || migrationCommand || catalogImportCommand;
+var commandMode = platformCommand || localBootstrapCommand || migrationCommand || catalogImportCommand;
 var builder = WebApplication.CreateBuilder(commandMode ? [] : args);
 if (localBootstrapCommand)
 {
@@ -56,11 +55,13 @@ builder.Services.AddOpenApi(options => options.AddSchemaTransformer((schema, con
 builder.Services.AddNexoRutaPersistence(builder.Configuration);
 var dataProtection = builder.Services.AddDataProtection().SetApplicationName(PasswordRecoveryDataProtection.ApplicationName);
 var dataProtectionKeys = builder.Configuration[PasswordRecoveryDataProtection.KeysDirectoryConfigurationKey];
-if (builder.Services.AddSharedDataProtection(builder.Configuration, PasswordRecoveryDataProtection.ApplicationName, "api")) { }
-else if (!string.IsNullOrWhiteSpace(dataProtectionKeys))
+var sharedDataProtection = builder.Services.AddSharedDataProtection(
+    builder.Configuration, PasswordRecoveryDataProtection.ApplicationName, "api");
+if (!sharedDataProtection && builder.Environment.IsProduction()
+    && !platformCommand && !localBootstrapCommand && !migrationCommand && !catalogImportCommand)
+    throw new InvalidOperationException("Production requires shared Data Protection storage.");
+else if (!sharedDataProtection && !string.IsNullOrWhiteSpace(dataProtectionKeys))
     dataProtection.PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeys));
-else if (builder.Environment.IsProduction() && !platformCommand && !localBootstrapCommand && !migrationCommand && !catalogImportCommand)
-    throw new InvalidOperationException("Production requires a persistent DataProtection:KeysDirectory.");
 builder.Services.AddOptions<PasswordRecoveryOptions>()
     .Bind(builder.Configuration.GetSection("PasswordRecovery"))
     .Validate(options => options.TokenLifespanSeconds is > 0 and <= 3600
@@ -72,12 +73,6 @@ builder.Services.AddOptions<PasswordRecoveryOptions>()
     .ValidateOnStart();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IUsuarioActual, UsuarioActualHttp>();
-if (keyImportCommand)
-{
-    await using var keyApp = builder.Build();
-    await SharedDataProtection.ImportAsync(keyApp.Services, args[1]);
-    return;
-}
 if (platformCommand)
 {
     await using var commandApp = builder.Build();

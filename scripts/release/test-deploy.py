@@ -17,10 +17,9 @@ from deploy import Release, ReleaseError, arguments
 class FakeRelease(Release):
     """Simula los resultados de Docker sin reemplazar la lógica de despliegue."""
 
-    def __init__(self, args, failure=None, previous=True):
+    def __init__(self, args, failure=None):
         super().__init__(args)
         self.failure = failure
-        self.has_previous = previous
         self.calls = []
 
     def command(self, command, **kwargs):
@@ -32,27 +31,21 @@ class FakeRelease(Release):
             (Path(self.env["DOCKER_CONFIG"]) / "config.json").write_text("credential")
         elif command[1] == "inspect":
             field = command[3]
-            value = {"{{.Image}}": "sha256:" + "1" * 64,
-                     "{{.Config.Image}}": self.image + ":" + self.args.tag}.get(field)
+            value = {"{{.Config.Image}}": self.image + ":" + self.args.tag}.get(field)
             if value is None:
                 value = "running unhealthy" if self.failure == "health" else "running healthy"
             if self.failure == "image" and field == "{{.Config.Image}}":
                 value = "unexpected:latest"
             return subprocess.CompletedProcess(command, 0, value)
         elif "ps" in command:
-            return subprocess.CompletedProcess(command, 0, "container-api" if self.has_previous else "")
+            return subprocess.CompletedProcess(command, 0, "container-api")
         elif "pull" in command and self.failure == "pull":
             raise subprocess.CalledProcessError(31, command)
         elif "up" in command:
-            rollback = any(str(part).endswith("rollback.yaml") for part in command)
-            if rollback:
-                self.rollback_contents = (self.tmp / "rollback.yaml").read_text()
-            if self.failure == "signal" and not rollback:
+            if self.failure == "signal":
                 raise SystemExit(143)
-            if self.failure in ("up", "rollback", "restore") and not rollback:
+            if self.failure == "up":
                 raise subprocess.CalledProcessError(32, command)
-            if self.failure == "rollback" and rollback:
-                raise subprocess.CalledProcessError(34, command)
         return subprocess.CompletedProcess(command, 0, "")
 
 
@@ -70,11 +63,11 @@ class DeployTests(unittest.TestCase):
         self.env.start()
         self.addCleanup(self.env.stop)
 
-    def release(self, failure=None, previous=True, run="10", attempt="1", sha="1" * 40):
+    def release(self, failure=None, run="10", attempt="1", sha="1" * 40):
         # Construir una ejecución válida; cada caso cambia solo la condición que quiere probar.
         args = arguments([str(self.directory), sha, run, attempt, "100",
                           f"sha-{sha}-run-100-attempt-{attempt}", "pull-user"])
-        return FakeRelease(args, failure, previous)
+        return FakeRelease(args, failure)
 
     def execute(self, release):
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
@@ -127,57 +120,26 @@ class DeployTests(unittest.TestCase):
         with self.assertRaises(ReleaseError):
             self.execute(self.release())
 
-    def test_failures_restore_exact_env_and_immutable_images(self):
-        # Repetir la misma garantía de recuperación para descarga, arranque, salud y señales.
+    def test_failures_leave_the_target_release_selected_without_restarting_old_images(self):
         for failure in ("pull", "up", "health", "image", "signal"):
             with self.subTest(failure=failure):
                 (self.directory / ".env").write_bytes(self.original)
                 release = self.release(failure)
                 with self.assertRaises((subprocess.CalledProcessError, ReleaseError, SystemExit)):
                     self.execute(release)
-                self.assertEqual((self.directory / ".env").read_bytes(), self.original)
-                self.assertIn("result=failed_rolled_back", self.journal())
-                rollback = [call for call in release.calls if any(str(p).endswith("rollback.yaml") for p in call)]
-                self.assertEqual(len(rollback), 1)
-                self.assertIn('image: "sha256:' + "1" * 64, release.rollback_contents)
+                self.assertIn(f"NEXORUTA_API_TAG={release.args.tag}".encode(), (self.directory / ".env").read_bytes())
+                self.assertIn("result=failed", self.journal())
+                self.assertFalse(any(any(str(part).endswith("rollback.yaml") for part in call)
+                                     for call in release.calls))
                 self.assertFalse(release.tmp.exists())
                 with self.assertRaises(ReleaseError):
                     self.execute(self.release(run="9"))
 
-    def test_first_release_failure_has_no_previous_images(self):
+    def test_first_release_failure_keeps_the_requested_tag(self):
         with self.assertRaises(subprocess.CalledProcessError):
-            self.execute(self.release("up", previous=False))
-        self.assertEqual((self.directory / ".env").read_bytes(), self.original)
-        self.assertIn("result=failed_no_previous_images", self.journal())
-
-    def test_rollback_failure_preserves_recovery_without_credentials(self):
-        release = self.release("rollback")
-        with self.assertRaises(subprocess.CalledProcessError):
-            self.execute(release)
-        self.assertIn("result=failed_rollback_failed", self.journal())
-        self.assertEqual((release.tmp / "env.before").read_bytes(), self.original)
-        self.assertIn("sha256:" + "1" * 64, (release.tmp / "rollback.yaml").read_text())
-        self.assertTrue((release.tmp / "recovery.txt").exists())
-        self.assertFalse((release.tmp / "docker").exists())
-
-    def test_env_restore_failure_does_not_claim_rollback(self):
-        # Forzar un fallo al copiar .env comprueba que nunca se informe una recuperación falsa.
-        import shutil
-        copy = shutil.copy2
-
-        def copy_with_failure(source, destination):
-            if Path(destination).name == "env.restore":
-                raise OSError("simulated restoration failure")
-            return copy(source, destination)
-
-        release = self.release("restore")
-        with patch("deploy.shutil.copy2", side_effect=copy_with_failure):
-            with self.assertRaises(subprocess.CalledProcessError):
-                self.execute(release)
-        self.assertIn("result=failed_env_restore", self.journal())
-        self.assertNotIn("result=failed_rolled_back", self.journal())
-        self.assertEqual((release.tmp / "env.before").read_bytes(), self.original)
-        self.assertFalse((release.tmp / "docker").exists())
+            self.execute(self.release("up"))
+        self.assertIn(b"NEXORUTA_API_TAG=sha-" + b"1" * 40 + b"-run-100-attempt-1", (self.directory / ".env").read_bytes())
+        self.assertIn("result=failed", self.journal())
 
     def test_invalid_arguments(self):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):

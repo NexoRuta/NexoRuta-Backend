@@ -68,7 +68,7 @@ Authenticate through `POST /api/auth/login` using the platform account. Send its
 | GET | `/api/admin/operadores/{id}` | Organization ID and name, or `404` |
 | GET | `/api/admin/comercios/{id}` | Organization ID and name, or `404` |
 
-All six operations require the platform capability: anonymous callers receive `401`; organization accounts receive `403`. Lists return `{ items, pagina, tamanoPagina, total }`, default page 1/size 20, size 1–100, ordered by name then UUID (including organizations with identical names). Invalid bounds/overflow receive `400`. These routes are separate from the unchanged Commerce operator catalog (`/api/comercio/operadores`, compatibility alias `/api/operadores`).
+All six operations require the platform capability: anonymous callers receive `401`; organization accounts receive `403`. Lists return `{ items, pagina, tamanoPagina, total }`, default page 1/size 20, size 1–100, ordered by name then UUID (including organizations with identical names). Invalid bounds/overflow receive `400`. These routes are separate from the Commerce operator catalog at `GET /api/operadores`; `/api/comercio/operadores` has been removed.
 
 Both POST routes use this shape (illustrative values only; replace the password placeholder with a securely supplied password):
 

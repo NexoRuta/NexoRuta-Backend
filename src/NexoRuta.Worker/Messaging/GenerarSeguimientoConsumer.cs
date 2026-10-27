@@ -95,9 +95,7 @@ public sealed class GenerarSeguimientoConsumer(
                 try
                 {
                     intentosPrevios = LeerContador(entrega.BasicProperties, HeaderIntentos);
-                    // Legacy messages only counted non-transient processing retries.
-                    fallosPrevios = LeerContador(entrega.BasicProperties,
-                        HeaderFallosProcesamiento, Math.Min(intentosPrevios, MaximoIntentos));
+                    fallosPrevios = LeerContador(entrega.BasicProperties, HeaderFallosProcesamiento);
 
                     if (!Guid.TryParse(
                             entrega.BasicProperties.MessageId,
@@ -308,15 +306,14 @@ public sealed class GenerarSeguimientoConsumer(
             fallos);
     }
 
-    private static int LeerContador(
-        IReadOnlyBasicProperties propiedades, string nombre, int predeterminado = 0)
+    private static int LeerContador(IReadOnlyBasicProperties propiedades, string nombre)
     {
         if (propiedades.Headers is null ||
             !propiedades.Headers.TryGetValue(
                 nombre,
                 out var valor))
         {
-            return predeterminado;
+            return 0;
         }
 
         return valor switch

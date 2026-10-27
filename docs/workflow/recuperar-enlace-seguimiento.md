@@ -50,7 +50,7 @@ These are manual HTTP commands, not deployment/startup commands. Normal startup 
     $headers = @{ Authorization = "Bearer $jwt" }
 
     # Create a shipment (or use an ID from GET /api/envios instead).
-    $operators = @(Invoke-RestMethod "$api/api/comercio/operadores" -Headers $headers)
+    $operators = @(Invoke-RestMethod "$api/api/operadores" -Headers $headers)
     if ($operators.Count -eq 0) { throw 'No operator available' }
     $body = @{
         operadorId = $operators[0].operadorId

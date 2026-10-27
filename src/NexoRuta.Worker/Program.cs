@@ -52,12 +52,16 @@ if (transport == WorkerTransportNames.RabbitMq)
             "Email:Smtp requires a host, valid port and from address; SMTP credentials must be provided together.")
         .ValidateOnStart();
     builder.Services.AddSingleton<ICorreoSender, SmtpCorreoSender>();
-    var keysDirectory = builder.Configuration[PasswordRecoveryDataProtection.KeysDirectoryConfigurationKey]
-        ?? throw new InvalidOperationException("Data protection key directory is required by the RabbitWorker.");
     if (!builder.Services.AddSharedDataProtection(builder.Configuration, PasswordRecoveryDataProtection.ApplicationName, "api"))
-    builder.Services.AddDataProtection()
-        .SetApplicationName(PasswordRecoveryDataProtection.ApplicationName)
-        .PersistKeysToFileSystem(new DirectoryInfo(keysDirectory));
+    {
+        if (builder.Environment.IsProduction())
+            throw new InvalidOperationException("Production RabbitWorker requires shared Data Protection storage.");
+        var dataProtection = builder.Services.AddDataProtection()
+            .SetApplicationName(PasswordRecoveryDataProtection.ApplicationName);
+        var keysDirectory = builder.Configuration[PasswordRecoveryDataProtection.KeysDirectoryConfigurationKey];
+        if (!string.IsNullOrWhiteSpace(keysDirectory))
+            dataProtection.PersistKeysToFileSystem(new DirectoryInfo(keysDirectory));
+    }
     builder.Services.AddSingleton<IOutboxMessageHandler, RabbitCancellationCodeOutboxHandler>();
     builder.Services.AddScoped<ProcesarCorreoCodigoCancelacion>();
     builder.Services.AddHostedService<CancellationCodeEmailConsumer>();

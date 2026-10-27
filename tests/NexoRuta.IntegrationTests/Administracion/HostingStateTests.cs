@@ -13,7 +13,7 @@ namespace NexoRuta.IntegrationTests.Administracion;
 public sealed class HostingStateTests(PostgresFixture postgres) : IClassFixture<PostgresFixture>
 {
     [Fact]
-    public async Task SharedRingImportsLegacyKeysAndWorksAcrossIndependentHosts()
+    public async Task SharedRingWorksAcrossIndependentHosts()
     {
         var database = await postgres.CreateDatabaseAsync();
         var directory = Directory.CreateTempSubdirectory("nexoruta-hosting-keys-");
@@ -21,14 +21,7 @@ public sealed class HostingStateTests(PostgresFixture postgres) : IClassFixture<
         {
             var connection = await CreateRingAsync(database, "api");
             var certificate = WriteCertificate(directory.FullName);
-            var legacy = DataProtectionProvider.Create(new DirectoryInfo(Path.Combine(directory.FullName, "legacy")),
-                builder => builder.SetApplicationName("NexoRuta.Api"));
-            var protectedLegacyMessage = legacy.CreateProtector("pending-email").Protect("pending payload");
             await using var first = Provider(connection, "api", "NexoRuta.Api", certificate);
-            Assert.Equal(1, await SharedDataProtection.ImportAsync(first, Path.Combine(directory.FullName, "legacy")));
-            Assert.Equal(0, await SharedDataProtection.ImportAsync(first, Path.Combine(directory.FullName, "legacy")));
-            Assert.Equal("pending payload", first.GetRequiredService<IDataProtectionProvider>()
-                .CreateProtector("pending-email").Unprotect(protectedLegacyMessage));
 
             first.GetRequiredService<IKeyManager>().CreateNewKey(DateTimeOffset.UtcNow,
                 DateTimeOffset.UtcNow.AddDays(90));
