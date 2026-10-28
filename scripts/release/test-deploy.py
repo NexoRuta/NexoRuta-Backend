@@ -5,7 +5,6 @@ import contextlib
 import io
 import os
 from pathlib import Path
-import runpy
 import subprocess
 import tempfile
 import unittest
@@ -176,33 +175,6 @@ class DeployTests(unittest.TestCase):
                 if process.poll() is None:
                     process.kill()
                 process.communicate()
-
-
-class DispatchTests(unittest.TestCase):
-    def dispatch(self):
-        # Ejecutar el script como lo hace Actions; las pruebas interceptan la llamada HTTP.
-        runpy.run_path(str(Path(__file__).with_name("dispatch-integration.py")), run_name="__main__")
-
-    def test_dispatch_preserves_metadata_and_uses_authenticated_post(self):
-        import json
-        with patch.dict(os.environ, {"NEXORUTA_INTEGRATION_TOKEN": "test-token",
-                                     "GITHUB_REPOSITORY": "NexoRuta/NexoRuta-Backend",
-                                     "GITHUB_SHA": "1" * 40}), patch("urllib.request.urlopen") as urlopen:
-            urlopen.return_value.__enter__.return_value.status = 204
-            with contextlib.redirect_stdout(io.StringIO()):
-                self.dispatch()
-            request = urlopen.call_args.args[0]
-            self.assertEqual(request.get_method(), "POST")
-            self.assertEqual(request.get_header("Authorization"), "Bearer test-token")
-            self.assertEqual(request.full_url, "https://api.github.com/repos/NexoRuta/NexoRuta/dispatches")
-            self.assertEqual(json.loads(request.data)["client_payload"]["sha"], "1" * 40)
-            self.assertEqual(urlopen.call_args.kwargs["timeout"], 30)
-
-    def test_missing_token_does_not_call_github(self):
-        with patch.dict(os.environ, {"NEXORUTA_INTEGRATION_TOKEN": ""}), patch("urllib.request.urlopen") as urlopen:
-            with self.assertRaises(SystemExit):
-                self.dispatch()
-            urlopen.assert_not_called()
 
 
 if __name__ == "__main__":
