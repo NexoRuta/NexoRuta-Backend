@@ -26,7 +26,8 @@ public sealed class PostgresRateLimiter : RateLimiter
 
         this.dataSource = dataSource;
         this.permitLimit = permitLimit;
-        key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{policy}:{partitionKey}")));
+        key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{policy}:{partitionKey}")))
+            .ToLowerInvariant();
     }
 
     public override TimeSpan? IdleDuration => null;
