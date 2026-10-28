@@ -1,4 +1,5 @@
-name: Integrated delivery
+name: Notify NexoRuta integration / backend
+run-name: Notify integration / backend / ${{ github.sha }}
 on:
   push:
     branches: [main]
@@ -6,16 +7,14 @@ on:
 permissions:
   contents: read
 jobs:
-  notify:
+  dispatch:
     if: github.ref == 'refs/heads/main'
     environment: nexoruta-demo
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: Test Python release scripts (no external services)
-        run: python3 scripts/release/test-deploy.py
-      - name: Trigger the NexoRuta integration pipeline
+      - name: Dispatch this backend SHA to NexoRuta
         env:
           NEXORUTA_INTEGRATION_TOKEN: ${{ secrets.NEXORUTA_INTEGRATION_TOKEN }}
         run: python3 scripts/release/dispatch-integration.py
