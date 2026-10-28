@@ -1,0 +1,247 @@
+{
+  "schema_version": 1,
+  "shard_count": 3,
+  "duration_source": "Local TRX run 2026-10-28; 456 integration test cases; each class duration is the sum of test case durations.",
+  "classes": {
+    "NexoRuta.IntegrationTests.Administracion.AltaPropiaHttpTests": {
+      "duration_ms": 61777,
+      "test_cases": 15
+    },
+    "NexoRuta.IntegrationTests.Administracion.BootstrapTests": {
+      "duration_ms": 23917,
+      "test_cases": 8
+    },
+    "NexoRuta.IntegrationTests.Administracion.Cu01MigrationTests": {
+      "duration_ms": 20433,
+      "test_cases": 3
+    },
+    "NexoRuta.IntegrationTests.Administracion.HostingStateTests": {
+      "duration_ms": 8370,
+      "test_cases": 3
+    },
+    "NexoRuta.IntegrationTests.Administracion.IdentidadVisualOperadorHttpTests": {
+      "duration_ms": 12991,
+      "test_cases": 3
+    },
+    "NexoRuta.IntegrationTests.Administracion.IdentityAccountStoreTests": {
+      "duration_ms": 13020,
+      "test_cases": 2
+    },
+    "NexoRuta.IntegrationTests.Administracion.OrganizacionPropiaHttpTests": {
+      "duration_ms": 22857,
+      "test_cases": 5
+    },
+    "NexoRuta.IntegrationTests.Administracion.OrganizacionPropiedadMigrationTests": {
+      "duration_ms": 9254,
+      "test_cases": 1
+    },
+    "NexoRuta.IntegrationTests.Administracion.OrganizationStateMigrationTests": {
+      "duration_ms": 9737,
+      "test_cases": 2
+    },
+    "NexoRuta.IntegrationTests.Administracion.PasswordRecoveryHttpTests": {
+      "duration_ms": 27177,
+      "test_cases": 6
+    },
+    "NexoRuta.IntegrationTests.Administracion.PlataformaCommandTests": {
+      "duration_ms": 318,
+      "test_cases": 2
+    },
+    "NexoRuta.IntegrationTests.Administracion.PlataformaHttpTests": {
+      "duration_ms": 84823,
+      "test_cases": 18
+    },
+    "NexoRuta.IntegrationTests.Administracion.PlatformSeederTests": {
+      "duration_ms": 51261,
+      "test_cases": 13
+    },
+    "NexoRuta.IntegrationTests.Administracion.PostgresRateLimiterTests": {
+      "duration_ms": 177,
+      "test_cases": 2
+    },
+    "NexoRuta.IntegrationTests.Administracion.ProtectedRoleMigrationTests": {
+      "duration_ms": 9735,
+      "test_cases": 1
+    },
+    "NexoRuta.IntegrationTests.Administracion.RegistroErrorHttpTests": {
+      "duration_ms": 476,
+      "test_cases": 5
+    },
+    "NexoRuta.IntegrationTests.Administracion.RolesHttpTests": {
+      "duration_ms": 42372,
+      "test_cases": 9
+    },
+    "NexoRuta.IntegrationTests.Administracion.SolicitudesBajaHttpTests": {
+      "duration_ms": 15297,
+      "test_cases": 3
+    },
+    "NexoRuta.IntegrationTests.Administracion.SolicitudesReactivacionHttpTests": {
+      "duration_ms": 24635,
+      "test_cases": 5
+    },
+    "NexoRuta.IntegrationTests.Administracion.SuspensionSessionHttpTests": {
+      "duration_ms": 14094,
+      "test_cases": 2
+    },
+    "NexoRuta.IntegrationTests.Administracion.UsuariosHttpTests": {
+      "duration_ms": 80792,
+      "test_cases": 16
+    },
+    "NexoRuta.IntegrationTests.DatabaseInitializationTests": {
+      "duration_ms": 291,
+      "test_cases": 4
+    },
+    "NexoRuta.IntegrationTests.Envios.CrearEnvioRequestTests": {
+      "duration_ms": 7,
+      "test_cases": 8
+    },
+    "NexoRuta.IntegrationTests.Envios.DestinosEnvioHttpTests": {
+      "duration_ms": 16544,
+      "test_cases": 4
+    },
+    "NexoRuta.IntegrationTests.Envios.EnvioPostgresRoundTripTests": {
+      "duration_ms": 28209,
+      "test_cases": 13
+    },
+    "NexoRuta.IntegrationTests.Envios.OperadoresDisponiblesHttpTests": {
+      "duration_ms": 7360,
+      "test_cases": 2
+    },
+    "NexoRuta.IntegrationTests.Envios.RecipientEmailHttpTests": {
+      "duration_ms": 14681,
+      "test_cases": 6
+    },
+    "NexoRuta.IntegrationTests.Envios.ReglasEnvioAdmisionHttpTests": {
+      "duration_ms": 4219,
+      "test_cases": 1
+    },
+    "NexoRuta.IntegrationTests.Messaging.KafkaOutboxReservationTests": {
+      "duration_ms": 18930,
+      "test_cases": 6
+    },
+    "NexoRuta.IntegrationTests.Messaging.KafkaOutboxTests": {
+      "duration_ms": 52094,
+      "test_cases": 5
+    },
+    "NexoRuta.IntegrationTests.Notificaciones.PushOutboxTests": {
+      "duration_ms": 116319,
+      "test_cases": 35
+    },
+    "NexoRuta.IntegrationTests.ReglasOperativas.ReglasOperativasHttpTests": {
+      "duration_ms": 17092,
+      "test_cases": 3
+    },
+    "NexoRuta.IntegrationTests.ReglasOperativas.ReglasOperativasPersistenceTests": {
+      "duration_ms": 17671,
+      "test_cases": 4
+    },
+    "NexoRuta.IntegrationTests.ReleaseConfigurationTests": {
+      "duration_ms": 127,
+      "test_cases": 21
+    },
+    "NexoRuta.IntegrationTests.Reparto.ConfiguracionRepartoHttpTests": {
+      "duration_ms": 29100,
+      "test_cases": 6
+    },
+    "NexoRuta.IntegrationTests.Reparto.OperacionesRepartoHttpTests": {
+      "duration_ms": 104771,
+      "test_cases": 18
+    },
+    "NexoRuta.IntegrationTests.Reparto.RepartidoresHttpTests": {
+      "duration_ms": 24894,
+      "test_cases": 6
+    },
+    "NexoRuta.IntegrationTests.Reparto.RepartoRestrictedHttpTests": {
+      "duration_ms": 4651,
+      "test_cases": 1
+    },
+    "NexoRuta.IntegrationTests.Reparto.RutasHttpTests": {
+      "duration_ms": 32868,
+      "test_cases": 6
+    },
+    "NexoRuta.IntegrationTests.Seguimiento.CreacionAutomaticaSeguimientoTests": {
+      "duration_ms": 6593,
+      "test_cases": 2
+    },
+    "NexoRuta.IntegrationTests.Seguimiento.EnlaceSeguimientoPostgresTests": {
+      "duration_ms": 3374,
+      "test_cases": 8
+    },
+    "NexoRuta.IntegrationTests.Seguimiento.GenerarSeguimientoConsumerExitoTests": {
+      "duration_ms": 21872,
+      "test_cases": 2
+    },
+    "NexoRuta.IntegrationTests.Seguimiento.GenerarSeguimientoConsumerTests": {
+      "duration_ms": 75847,
+      "test_cases": 14
+    },
+    "NexoRuta.IntegrationTests.Seguimiento.ProcesarGeneracionSeguimientoTests": {
+      "duration_ms": 22331,
+      "test_cases": 4
+    },
+    "NexoRuta.IntegrationTests.Seguimiento.PublicCancellationTests": {
+      "duration_ms": 67314,
+      "test_cases": 17
+    },
+    "NexoRuta.IntegrationTests.Seguimiento.RabbitMqSeguimientoTopologyTests": {
+      "duration_ms": 15403,
+      "test_cases": 2
+    },
+    "NexoRuta.IntegrationTests.Seguimiento.RecuperarEnlaceSeguimientoTests": {
+      "duration_ms": 45174,
+      "test_cases": 13
+    },
+    "NexoRuta.IntegrationTests.Seguridad.JwtRbacHttpTests": {
+      "duration_ms": 133685,
+      "test_cases": 38
+    },
+    "NexoRuta.IntegrationTests.Seguridad.RlsActorContractTests": {
+      "duration_ms": 51,
+      "test_cases": 10
+    },
+    "NexoRuta.IntegrationTests.Seguridad.RlsPolicyTests": {
+      "duration_ms": 65853,
+      "test_cases": 17
+    },
+    "NexoRuta.IntegrationTests.Seguridad.RlsResponseOrderingProbeTests": {
+      "duration_ms": 14252,
+      "test_cases": 4
+    },
+    "NexoRuta.IntegrationTests.Seguridad.RlsRestrictedHttpFlowTests": {
+      "duration_ms": 7771,
+      "test_cases": 2
+    },
+    "NexoRuta.IntegrationTests.Seguridad.RlsSqlFunctionContractTests": {
+      "duration_ms": 2967,
+      "test_cases": 1
+    },
+    "NexoRuta.IntegrationTests.Seguridad.SesionesMovilesHttpTests": {
+      "duration_ms": 75091,
+      "test_cases": 20
+    },
+    "NexoRuta.IntegrationTests.Seguridad.UsuarioActualHttpTests": {
+      "duration_ms": 5,
+      "test_cases": 6
+    },
+    "NexoRuta.IntegrationTests.Tarifas.TarifarioHttpTests": {
+      "duration_ms": 25813,
+      "test_cases": 5
+    },
+    "NexoRuta.IntegrationTests.Tarifas.TarifarioPersistenceTests": {
+      "duration_ms": 15946,
+      "test_cases": 4
+    },
+    "NexoRuta.IntegrationTests.ZonasCobertura.UruguayCatalogAndTerritoryTests": {
+      "duration_ms": 215549,
+      "test_cases": 5
+    },
+    "NexoRuta.IntegrationTests.ZonasCobertura.ZonaCoberturaPostgisTests": {
+      "duration_ms": 28057,
+      "test_cases": 8
+    },
+    "NexoRuta.IntegrationTests.ZonasCobertura.ZonasCoberturaHttpTests": {
+      "duration_ms": 87991,
+      "test_cases": 1
+    }
+  }
+}

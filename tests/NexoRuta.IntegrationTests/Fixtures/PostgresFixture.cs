@@ -1,4 +1,6 @@
 using System.Security.Cryptography;
+using System.Diagnostics;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using NexoRuta.Infrastructure.Persistence;
@@ -23,7 +25,7 @@ public sealed class PostgresFixture : IAsyncLifetime
         container = createdContainer;
         try
         {
-            await createdContainer.StartAsync();
+            await MeasureAsync("start_container", async () => await createdContainer.StartAsync());
         }
         catch (Exception startException)
         {
@@ -48,38 +50,73 @@ public sealed class PostgresFixture : IAsyncLifetime
         var source = new NpgsqlConnectionStringBuilder(startedContainer.GetConnectionString());
         Assert.Equal(initialDatabase, source.Database);
         Assert.Equal(username, source.Username);
-        await using var owned = new NpgsqlConnection(source.ConnectionString);
-        await owned.OpenAsync();
-        await using (var identity = new NpgsqlCommand(
-            "SELECT current_database(), current_user, current_setting('server_version_num')::int", owned))
-        await using (var reader = await identity.ExecuteReaderAsync())
+        await MeasureAsync("verify_container_identity", async () =>
         {
+            await using var owned = new NpgsqlConnection(source.ConnectionString);
+            await owned.OpenAsync();
+            await using var identity = new NpgsqlCommand(
+                "SELECT current_database(), current_user, current_setting('server_version_num')::int", owned);
+            await using var reader = await identity.ExecuteReaderAsync();
             Assert.True(await reader.ReadAsync());
             Assert.Equal(initialDatabase, reader.GetString(0));
             Assert.Equal(username, reader.GetString(1));
             Assert.InRange(reader.GetInt32(2), 180000, 189999);
-        }
+        });
         // Only this owned container can supply a connection; external settings are ignored.
         var connection = new NpgsqlConnectionStringBuilder(container.GetConnectionString())
         {
             Database = $"integration_{Guid.NewGuid():N}",
             Pooling = false
         };
-        await using (var create = new NpgsqlCommand($"CREATE DATABASE \"{connection.Database}\"", owned))
-            await create.ExecuteNonQueryAsync();
-        await using (var target = new NpgsqlConnection(connection.ConnectionString))
+        await MeasureAsync("create_isolated_database", async () =>
         {
+            await using var owned = new NpgsqlConnection(source.ConnectionString);
+            await owned.OpenAsync();
+            await using var create = new NpgsqlCommand($"CREATE DATABASE \"{connection.Database}\"", owned);
+            await create.ExecuteNonQueryAsync();
+        }, connection.Database);
+        await MeasureAsync("verify_isolated_database", async () =>
+        {
+            await using var target = new NpgsqlConnection(connection.ConnectionString);
             await target.OpenAsync();
             await using var identity = new NpgsqlCommand("SELECT current_database(), current_user", target);
             await using var reader = await identity.ExecuteReaderAsync();
             Assert.True(await reader.ReadAsync());
             Assert.Equal(connection.Database, reader.GetString(0));
             Assert.Equal(username, reader.GetString(1));
-        }
+        }, connection.Database);
         var database = new IntegrationDatabase(connection.ConnectionString);
         await using var db = database.CreateDbContext();
-        await db.Database.MigrateAsync(targetMigration);
+        await MeasureAsync("apply_migrations", () => db.Database.MigrateAsync(targetMigration), connection.Database,
+            targetMigration);
         return database;
+    }
+
+    private static async Task MeasureAsync(string phase, Func<Task> operation, string? database = null,
+        string? targetMigration = null)
+    {
+        var timer = Stopwatch.StartNew();
+        var status = "passed";
+        try
+        {
+            await operation();
+        }
+        catch
+        {
+            status = "failed";
+            throw;
+        }
+        finally
+        {
+            Console.WriteLine("NEXORUTA_FIXTURE_TIMING " + JsonSerializer.Serialize(new
+            {
+                phase,
+                duration_ms = timer.ElapsedMilliseconds,
+                status,
+                database,
+                target_migration = targetMigration
+            }));
+        }
     }
 
     // All per-test databases disappear with the owned container. No database deletion SQL.
