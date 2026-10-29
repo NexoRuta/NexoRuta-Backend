@@ -418,7 +418,7 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
             await platform.InicializarAsync("platform-bootstrap@example.test", AuthenticationTestData.Password);
             var seeder = new DatosInicialesSeeder(db, initial, configuration, identityUsers, platform);
             await seeder.SeedAsync();
-            await platform.InicializarAsync("platform-bootstrap@example.test", AuthenticationTestData.Password, permitirExistente: true);
+            await platform.InicializarAsync("platform-bootstrap@example.test", AuthenticationTestData.Password, sincronizarPasswordExistente: true);
             await seeder.SeedAsync();
         }
 

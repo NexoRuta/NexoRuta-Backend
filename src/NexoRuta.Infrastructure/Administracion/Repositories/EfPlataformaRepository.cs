@@ -22,7 +22,7 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, UserManager<Usu
             row.PuedeGestionarOrganizaciones, row.UsuarioEmail);
     }
 
-    public async Task InicializarAsync(string email, string password, CancellationToken ct = default, bool permitirExistente = false)
+    public async Task InicializarAsync(string email, string password, CancellationToken ct = default, bool sincronizarPasswordExistente = false)
     {
         var normalized = ValidacionCredenciales.Validar(email, password);
         await using var transaction = await db.BeginOrJoinAsync(ct);
@@ -37,7 +37,7 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, UserManager<Usu
         var codes = CatalogoPermisos.Plataforma.Select(x => x.Codigo).ToArray();
         if (existing is not null)
         {
-            if (!permitirExistente)
+            if (!sincronizarPasswordExistente)
                 throw new InvalidOperationException("Platform initialization has already completed; no account was changed.");
             var grants = await (from grant in db.RolesPlataformaPermisos
                                 join permission in db.Permisos on grant.PermisoId equals permission.Id
@@ -47,6 +47,7 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, UserManager<Usu
                 !grants.ToHashSet(StringComparer.Ordinal).SetEquals(codes) ||
                 await db.AccesosUsuario.AnyAsync(x => x.UsuarioId == existing.account.Id, ct))
                 throw new InvalidOperationException("Existing platform account is incompatible with configured initialization (identity, state or permissions); no account was changed.");
+            await SincronizarPasswordConfiguradaAsync(existing.account, password, ct);
             await transaction.CommitAsync(ct);
             return;
         }
@@ -75,6 +76,22 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, UserManager<Usu
         {
             throw new InvalidOperationException("Platform initialization conflicts with an existing account or initialization; no account was changed.");
         }
+    }
+
+    private async Task SincronizarPasswordConfiguradaAsync(Usuario account, string password, CancellationToken ct)
+    {
+        if (await identityUsers.CheckPasswordAsync(account, password)) return;
+
+        var removed = await identityUsers.RemovePasswordAsync(account);
+        if (!removed.Succeeded)
+            throw new InvalidOperationException("Configured platform password could not be synchronized; initialization was rolled back.");
+
+        var added = await identityUsers.AddPasswordAsync(account, password);
+        if (!added.Succeeded)
+            throw new InvalidOperationException("Configured platform password could not be synchronized; initialization was rolled back.");
+
+        account.RevocarSesionesPorCambioDePassword();
+        await db.SaveChangesAsync(ct);
     }
 
     public Task<AltaOrganizacion> CrearAsync(TipoAccesoUsuario tipo, string nombre, string email, string password, CancellationToken ct)

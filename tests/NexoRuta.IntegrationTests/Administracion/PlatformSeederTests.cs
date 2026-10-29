@@ -47,7 +47,7 @@ public sealed class PlatformSeederTests(PostgresFixture postgres) : IClassFixtur
         }).Build(), AuthenticationTestData.UserManager(db), AuthenticationTestData.PlatformRepository(db));
 
     [Fact]
-    public async Task RepeatedInitializationPreservesIdentityPasswordAndProtectedCatalogGrants()
+    public async Task RepeatedInitializationSynchronizesIdentityPasswordAndPreservesProtectedCatalogGrants()
     {
         var database = await postgres.CreateDatabaseAsync();
         await using var db = database.CreateDbContext();
@@ -58,13 +58,16 @@ public sealed class PlatformSeederTests(PostgresFixture postgres) : IClassFixtur
         db.ChangeTracker.Clear();
         var actual = await db.Usuarios.SingleAsync();
         Assert.Equal(user.Id, actual.Id);
-        Assert.Equal(user.PasswordHash, actual.PasswordHash);
+        Assert.NotEqual(user.PasswordHash, actual.PasswordHash);
+        Assert.Equal(user.VersionCredencial + 1, actual.VersionCredencial);
         Assert.Equal(access.AccesoId, (await db.AccesosPlataforma.SingleAsync()).AccesoId);
         Assert.True((await db.RolesPlataforma.SingleAsync()).EsProtegidoSistema);
         var codes = await (from grant in db.RolesPlataformaPermisos join permission in db.Permisos on grant.PermisoId equals permission.Id select permission.Codigo).ToArrayAsync();
         Assert.Equal(CatalogoPermisos.Plataforma.Select(x => x.Codigo), codes);
         Assert.DoesNotContain(CatalogoPermisos.Todos, x => codes.Contains(x.Codigo));
-        Assert.Equal(PasswordVerificationResult.Success, new PasswordHasher<string>().VerifyHashedPassword(actual.Email, actual.PasswordHash!, AuthenticationTestData.Password));
+        var hasher = new PasswordHasher<string>();
+        Assert.Equal(PasswordVerificationResult.Failed, hasher.VerifyHashedPassword(actual.Email, actual.PasswordHash!, AuthenticationTestData.Password));
+        Assert.Equal(PasswordVerificationResult.Success, hasher.VerifyHashedPassword(actual.Email, actual.PasswordHash!, "Different-valid-password-2026!"));
         await Assert.ThrowsAsync<InvalidOperationException>(() => AuthenticationTestData.PlatformRepository(db).InicializarAsync(user.Email, AuthenticationTestData.Password));
     }
 
