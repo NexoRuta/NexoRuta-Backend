@@ -112,7 +112,7 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
             join direccion in db.Direcciones on envio.DireccionId equals direccion.Id
             where (operadorId != null && envio.OperadorId == operadorId)
                 || (comercioId != null && envio.ComercioId == comercioId)
-            orderby envio.Id descending
+            orderby envio.CreadoEnUtc descending, envio.Id descending
             select new
             {
                 envio.Id,
@@ -125,7 +125,8 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
                 DestinatarioNombre = destinatario.Nombre,
                 Direccion = direccion.Descripcion,
                 Estado = envio.Estado.ToString(),
-                envio.Version
+                envio.Version,
+                envio.CreadoEnUtc
             }).ToListAsync(cancellationToken);
 
         if (shipments.Count == 0)
@@ -157,6 +158,7 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
             Direccion: x.Direccion,
             Estado: x.Estado,
             Version: x.Version,
-            Bultos: packagesByShipment[x.Id].ToArray())).ToArray();
+            Bultos: packagesByShipment[x.Id].ToArray(),
+            CreadoEnUtc: x.CreadoEnUtc)).ToArray();
     }
 }

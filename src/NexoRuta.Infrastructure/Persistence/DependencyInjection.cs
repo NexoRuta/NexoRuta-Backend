@@ -161,6 +161,7 @@ public static class DependencyInjection
 
 
         services.AddScoped<DatosInicialesSeeder>();
+        services.AddScoped<DatosDemoSeeder>();
 
         // M05 - Seguimiento
         services.AddScoped<

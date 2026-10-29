@@ -11,6 +11,7 @@ public sealed class Envio
     public Guid VersionReglasId { get; private set; }
     public EstadoEnvio Estado { get; private set; }
     public long Version { get; private set; }
+    public DateTimeOffset CreadoEnUtc { get; private set; }
     public DateTimeOffset? EntregaFisicaEnUtc { get; private set; }
 
     public Envio(
@@ -19,7 +20,8 @@ public sealed class Envio
         Guid creadoPorUsuarioId,
         Guid destinatarioId,
         Guid direccionId,
-        Guid versionReglasId)
+        Guid versionReglasId,
+        DateTimeOffset creadoEnUtc = default)
     {
         if (operadorId == Guid.Empty)
             throw new ArgumentException("El operador es obligatorio.", nameof(operadorId));
@@ -41,6 +43,10 @@ public sealed class Envio
         DestinatarioId = destinatarioId;
         DireccionId = direccionId;
         VersionReglasId = versionReglasId;
+        var creado = creadoEnUtc == default ? DateTimeOffset.UtcNow : creadoEnUtc;
+        if (creado.Offset != TimeSpan.Zero)
+            throw new ArgumentException("La fecha de creación debe estar en UTC.", nameof(creadoEnUtc));
+        CreadoEnUtc = creado;
         Estado = EstadoEnvio.Admitido;
     }
 

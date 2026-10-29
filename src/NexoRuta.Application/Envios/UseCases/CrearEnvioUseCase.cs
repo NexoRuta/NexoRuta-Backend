@@ -59,6 +59,7 @@ public sealed class CrearEnvioUseCase(IEnviosRepository repository, IUsuarioActu
                 PesoGramos: bulto.PesoGramos,
                 LargoCentimetros: bulto.LargoCentimetros,
                 AnchoCentimetros: bulto.AnchoCentimetros,
-                AltoCentimetros: bulto.AltoCentimetros));
+                AltoCentimetros: bulto.AltoCentimetros),
+            CreadoEnUtc: envio.CreadoEnUtc);
     }
 }

@@ -8,4 +8,5 @@ public sealed record EnvioDetalle(
     string Direccion,
     string Estado,
     long Version,
-    IReadOnlyList<BultoDetalle> Bultos);
+    IReadOnlyList<BultoDetalle> Bultos,
+    DateTimeOffset CreadoEnUtc);

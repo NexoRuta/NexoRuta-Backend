@@ -31,6 +31,7 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
     public DbSet<AccesoPlataforma> AccesosPlataforma => Set<AccesoPlataforma>();
     public DbSet<RolPlataforma> RolesPlataforma => Set<RolPlataforma>();
     public DbSet<RolPlataformaPermiso> RolesPlataformaPermisos => Set<RolPlataformaPermiso>();
+    public DbSet<EjecucionSeedDemo> EjecucionesSeedDemo => Set<EjecucionSeedDemo>();
 
     public DbSet<Operador> Operadores => Set<Operador>();
     public DbSet<Comercio> Comercios => Set<Comercio>();
@@ -112,6 +113,15 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
             entity.Property(x => x.VersionSesion).IsConcurrencyToken();
             entity.HasOne<Usuario>().WithMany().HasForeignKey(x => x.UsuarioId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<RolPlataforma>().WithMany().HasForeignKey(x => x.RolId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<EjecucionSeedDemo>(entity =>
+        {
+            entity.ToTable("EjecucionSeedDemo", table => table.HasCheckConstraint(
+                "CK_EjecucionSeedDemo_IdUnico", "\"Id\" = 1"));
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).ValueGeneratedNever();
+            entity.Property(x => x.SembradoEnUtc).IsRequired();
         });
 
         modelBuilder.Entity<Operador>(entity =>
@@ -329,6 +339,7 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
             });
             entity.HasKey(x => x.Id);
             entity.HasAlternateKey(x => new { x.OperadorId, x.Id });
+            entity.Property(x => x.CreadoEnUtc).HasDefaultValueSql("now()").IsRequired();
             entity.Property(x => x.Estado).HasConversion<string>().HasMaxLength(32).IsRequired();
             entity.Property(x => x.Version).IsConcurrencyToken();
             entity.HasOne<VersionReglasOperativas>().WithMany()

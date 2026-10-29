@@ -12,7 +12,8 @@ public sealed record EnvioDetalle(
     string Direccion,
     string Estado,
     long Version,
-    IReadOnlyList<BultoDetalle> Bultos)
+    IReadOnlyList<BultoDetalle> Bultos,
+    DateTimeOffset CreadoEnUtc)
 {
     public static EnvioDetalle Desde(Application.Envios.Results.EnvioDetalle envio) => new(
         Id: envio.Id,
@@ -26,6 +27,7 @@ public sealed record EnvioDetalle(
         Direccion: envio.Direccion,
         Estado: envio.Estado,
         Version: envio.Version,
+        CreadoEnUtc: envio.CreadoEnUtc,
         Bultos: envio.Bultos.Select(bulto => new BultoDetalle(
             Codigo: bulto.Codigo,
             PesoGramos: bulto.PesoGramos,
