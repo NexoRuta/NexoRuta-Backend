@@ -33,7 +33,8 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, UserManager<Usu
         var existing = await (from access in db.AccesosPlataforma.AsNoTracking()
                               join account in db.Usuarios on access.UsuarioId equals account.Id
                               join platformRole in db.RolesPlataforma on access.RolId equals platformRole.Id
-                              select new { access, account, platformRole }).SingleOrDefaultAsync(ct);
+                              select new { access, account, platformRole })
+            .AsNoTracking().SingleOrDefaultAsync(ct);
         var codes = CatalogoPermisos.Plataforma.Select(x => x.Codigo).ToArray();
         if (existing is not null)
         {
@@ -82,16 +83,18 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, UserManager<Usu
     {
         if (await identityUsers.CheckPasswordAsync(account, password)) return;
 
-        var removed = await identityUsers.RemovePasswordAsync(account);
-        if (!removed.Succeeded)
-            throw new InvalidOperationException("Configured platform password could not be synchronized; initialization was rolled back.");
+        foreach (var validator in identityUsers.PasswordValidators)
+        {
+            var validation = await validator.ValidateAsync(identityUsers, account, password);
+            if (!validation.Succeeded)
+                throw new InvalidOperationException("Configured platform password could not be synchronized; initialization was rolled back.");
+        }
 
-        var added = await identityUsers.AddPasswordAsync(account, password);
-        if (!added.Succeeded)
-            throw new InvalidOperationException("Configured platform password could not be synchronized; initialization was rolled back.");
-
+        account.ActualizarPasswordHash(identityUsers.PasswordHasher.HashPassword(account, password));
         account.RevocarSesionesPorCambioDePassword();
-        await db.SaveChangesAsync(ct);
+        var update = await identityUsers.UpdateAsync(account);
+        if (!update.Succeeded)
+            throw new InvalidOperationException("Configured platform password could not be synchronized; initialization was rolled back.");
     }
 
     public Task<AltaOrganizacion> CrearAsync(TipoAccesoUsuario tipo, string nombre, string email, string password, CancellationToken ct)
