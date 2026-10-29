@@ -592,6 +592,12 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
             => await new EfAccesosUsuarioRepository(db).ObtenerAsync(accesoId, cancellationToken)
                 ?? throw new AccesoActualNoDisponibleException();
     }
-    private static Task MigrarActualConCorreosDeFixture(NexoRutaDbContext db, IMigrator migrator) => HistoricRecipientEmail.MigrateAsync(db);
+    private static async Task MigrarActualConCorreosDeFixture(NexoRutaDbContext db, IMigrator migrator)
+    {
+        await HistoricRecipientEmail.MigrateAsync(db);
+        // These round-trip fixtures stop before the breaking shipment-rules migration, while the
+        // current repository projection includes the later shipment creation timestamp.
+        await db.Database.ExecuteSqlRawAsync("ALTER TABLE \"Envios\" ADD COLUMN IF NOT EXISTS \"CreadoEnUtc\" timestamp with time zone NOT NULL DEFAULT now()");
+    }
 
 }
