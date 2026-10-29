@@ -39,11 +39,7 @@ public sealed partial class EfOperacionesRepartoRepository
             Exigir(!politica.BloquearDiscrepanciasCarga || incompletos.Length == 0, "Hay diferencias de carga pendientes de resolver en depósito.");
             foreach (var parada in incompletos)
             {
-                var envio = envios.Single(x => x.Id == parada.EnvioId);
-                Exigir(envio.Estado == EstadoEnvio.AsignadoRuta, "Un envío cambió durante la preparación de carga.");
-                envio.CambiarEstado(bultos.Any(b => b.EnvioId == envio.Id && b.Custodia == EstadoCustodiaBulto.Repartidor)
-                    ? EstadoEnvio.Reprogramado : EstadoEnvio.EnDeposito, envio.Version);
-                hoja.SuspenderParada(envio.Id, "Carga incompleta: requiere revisión en depósito.");
+                hoja.SuspenderParada(parada.EnvioId, "Carga incompleta: requiere revisión en depósito; no se cambió el estado comercial.");
             }
             foreach (var parada in hoja.Paradas.Where(p => p.Activa))
             {
@@ -63,8 +59,6 @@ public sealed partial class EfOperacionesRepartoRepository
             foreach (var bulto in seleccionados) bulto.DeclararRendicion(hoja.RepartidorAccesoId, hoja.Id);
             foreach (var envio in envios.Where(e => seleccionados.Any(b => b.EnvioId == e.Id) && e.Estado is EstadoEnvio.EnTransito or EstadoEnvio.NoEntregado))
             {
-                if (envio.Estado == EstadoEnvio.EnTransito)
-                    envio.CambiarEstado(EstadoEnvio.Reprogramado, envio.Version);
                 if (hoja.Paradas.Any(p => p.EnvioId == envio.Id && p.Activa))
                     hoja.SuspenderParada(envio.Id, envio.Estado == EstadoEnvio.NoEntregado
                         ? "Intento fallido; se requiere reprogramación explícita. Recepción pendiente en depósito."
@@ -74,16 +68,21 @@ public sealed partial class EfOperacionesRepartoRepository
         }
         if (op.Tipo == "FinJornada")
         {
+            var asignadosSinSalida = envios.Count(e => e.Estado == EstadoEnvio.AsignadoRuta);
             foreach (var parada in hoja.Paradas.Where(x => x.Activa))
             {
                 var envio = envios.Single(e => e.Id == parada.EnvioId);
-                if (envio.Estado == EstadoEnvio.AsignadoRuta && bultos.Where(b => b.EnvioId == envio.Id)
-                    .All(b => b.Custodia == EstadoCustodiaBulto.Deposito)) envio.CambiarEstado(EstadoEnvio.EnDeposito, envio.Version);
-                parada.Completar();
+                if (envio.Estado == EstadoEnvio.AsignadoRuta)
+                    hoja.SuspenderParada(envio.Id, "Jornada cerrada antes de la salida; requiere reasignación operativa.");
+                else
+                    parada.Completar();
             }
             hoja.RegistrarFin(op.OcurridaEn);
             var faltantes = bultos.Count(b => b.RutaCustodiaId == hoja.Id && b.Custodia == EstadoCustodiaBulto.Repartidor);
-            return faltantes == 0 ? null : $"Jornada cerrada con incidencia: {faltantes} bulto(s) sin entrega ni rendición. Se conserva su custodia; no se confirmó recepción en depósito.";
+            var avisos = new List<string>();
+            if (asignadosSinSalida > 0) avisos.Add($"{asignadosSinSalida} envío(s) permanecen asignados sin salida y requieren reasignación operativa.");
+            if (faltantes > 0) avisos.Add($"{faltantes} bulto(s) siguen sin entrega ni rendición. Se conserva su custodia; no se confirmó recepción en depósito.");
+            return avisos.Count == 0 ? null : $"Jornada cerrada. {string.Join(" ", avisos)}";
         }
         var actual = envios.SingleOrDefault(x => x.Id == op.EnvioId);
         var paradaActual = hoja.Paradas.SingleOrDefault(x => x.EnvioId == op.EnvioId);
@@ -95,7 +94,7 @@ public sealed partial class EfOperacionesRepartoRepository
         if (op.Tipo == "EvidenciaEntrega")
             return await AplicarEvidenciaEntrega(hoja, op, datos, actual!, propios, reglas, ct);
         if (op.Tipo == "EntregaFisica" && op.VersionEnvio is >= 0 && op.VersionEnvio < actual!.Version
-            && actual.Estado is (EstadoEnvio.Cancelado or EstadoEnvio.Reprogramado or EstadoEnvio.AsignadoRuta))
+            && actual.Estado == EstadoEnvio.Cancelado)
         {
             Exigir(hoja.SalidaEnUtc is not null && propios.Length > 0 && propios.All(x => x.Custodia == EstadoCustodiaBulto.Repartidor
                 && x.AccesoCustodioId == hoja.RepartidorAccesoId && x.RutaCustodiaId == hoja.Id),
@@ -110,9 +109,7 @@ public sealed partial class EfOperacionesRepartoRepository
             foreach (var bulto in propios) bulto.Entregar(hoja.RepartidorAccesoId, hoja.Id);
             foreach (var otra in otras) otra.SuspenderParada(actual.Id, "Entrega física registrada en la ruta original; no corresponde otra entrega.");
             paradaActual!.Completar();
-            return actual.Estado == EstadoEnvio.Cancelado
-                ? "Entrega física conciliada; el envío conserva el estado Cancelado y su prueba conserva los requisitos fijados al crearlo."
-                : "Entrega física conciliada automáticamente; una cancelación posterior requiere devolución. La prueba conserva los requisitos fijados al crear el envío.";
+            return "Entrega física conciliada; el envío conserva el estado Cancelado y su prueba conserva los requisitos fijados al crearlo.";
         }
         Exigir(op.VersionEnvio == actual!.Version, "El envío cambió en el servidor; se conservan el hecho y su evidencia como conflicto de sincronización.");
         if (op.Tipo == "CargarBulto")
@@ -137,6 +134,9 @@ public sealed partial class EfOperacionesRepartoRepository
             if (anteriores.Length + 1 == reglas.MaxIntentosEntrega!.Value
                 && reglas.PoliticaDevolucionAlAgotarIntentos == PoliticaDevolucionAlAgotarIntentos.IniciarAutomaticamente)
             {
+                // Keep both authorized edges visible to the database history trigger;
+                // the surrounding request transaction still commits or rolls back the whole command.
+                await db.SaveChangesAsync(ct);
                 actual.CambiarEstado(EstadoEnvio.EnDevolucion, actual.Version);
                 hoja.SuspenderParada(actual.Id, "Intentos agotados: devolución iniciada; requiere rendición y recepción en depósito.");
                 return "Intentos agotados; devolución iniciada sin modificar la custodia física.";

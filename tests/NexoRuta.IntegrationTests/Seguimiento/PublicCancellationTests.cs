@@ -61,6 +61,13 @@ public sealed class PublicCancellationTests(PostgresFixture postgres) : IClassFi
         {
             var envio = await db.Envios.SingleAsync(e => e.Id == p.Envio.Id);
             envio.CambiarEstado(EstadoEnvio.EnDeposito, envio.Version);
+            await db.SaveChangesAsync();
+            envio.CambiarEstado(EstadoEnvio.AsignadoRuta, envio.Version);
+            await db.SaveChangesAsync();
+            envio.CambiarEstado(EstadoEnvio.EnTransito, envio.Version);
+            await db.SaveChangesAsync();
+            envio.CambiarEstado(EstadoEnvio.NoEntregado, envio.Version);
+            await db.SaveChangesAsync();
             envio.CambiarEstado(EstadoEnvio.EnDevolucion, envio.Version);
             await db.SaveChangesAsync();
         }
@@ -321,9 +328,13 @@ public sealed class PublicCancellationTests(PostgresFixture postgres) : IClassFi
     private static async Task Entregar(Preparado p, bool completa)
     {
         await using var db = p.Data.CreateDbContext(); var envio = await db.Envios.SingleAsync(x => x.Id == p.Envio.Id);
-        envio.CambiarEstado(EstadoEnvio.EnDeposito, envio.Version); envio.CambiarEstado(EstadoEnvio.AsignadoRuta, envio.Version);
+        envio.CambiarEstado(EstadoEnvio.EnDeposito, envio.Version);
+        await db.SaveChangesAsync();
+        envio.CambiarEstado(EstadoEnvio.AsignadoRuta, envio.Version);
+        await db.SaveChangesAsync();
         var instante = DateTimeOffset.UtcNow;
         envio.CambiarEstado(EstadoEnvio.EnTransito, envio.Version);
+        await db.SaveChangesAsync();
         envio.DeclararEntregaFisica(instante, instante, 60, completa, envio.Version);
         await db.SaveChangesAsync();
     }

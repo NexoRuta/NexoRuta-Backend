@@ -67,6 +67,13 @@ public sealed class Envio
     public void ConfirmarExtravio(long versionEsperada)
         => CambiarEstado(EstadoEnvio.Extraviado, versionEsperada);
 
+    public void RegistrarReasignacionSinCambioDeEstado(long versionEsperada)
+    {
+        if (Estado != EstadoEnvio.AsignadoRuta || Version != versionEsperada || EntregaFisicaEnUtc is not null)
+            throw new InvalidOperationException("La reasignación sin transición requiere un envío asignado, sin entrega física y con su versión vigente.");
+        Version = checked(Version + 1);
+    }
+
     public void DeclararEntregaFisica(DateTimeOffset instanteFisico, DateTimeOffset recibidoEnUtc,
         int? plazoValidacionMinutos, bool pruebaCompleta, long versionEsperada)
     {
@@ -78,8 +85,8 @@ public sealed class Envio
     public void ConciliarEntregaFisica(DateTimeOffset instanteFisico, DateTimeOffset recibidoEnUtc,
         int? plazoValidacionMinutos, bool pruebaCompleta, long versionEsperada)
     {
-        if (Estado is not (EstadoEnvio.Cancelado or EstadoEnvio.Reprogramado or EstadoEnvio.AsignadoRuta))
-            throw new InvalidOperationException("La conciliación requiere una cancelación o reprogramación concurrente con la entrega física.");
+        if (Estado != EstadoEnvio.Cancelado)
+            throw new InvalidOperationException("La conciliación tardía solo conserva una entrega física concurrente con una cancelación.");
         RegistrarEntregaFisica(instanteFisico, recibidoEnUtc, plazoValidacionMinutos, pruebaCompleta, versionEsperada);
     }
 
@@ -138,14 +145,13 @@ public sealed class Envio
     private static bool Permite(EstadoEnvio origen, EstadoEnvio destino) => (origen, destino) switch
     {
         (EstadoEnvio.Admitido, EstadoEnvio.EnDeposito or EstadoEnvio.Cancelado) => true,
-        (EstadoEnvio.EnDeposito, EstadoEnvio.AsignadoRuta or EstadoEnvio.EnDevolucion or EstadoEnvio.Extraviado or EstadoEnvio.Cancelado) => true,
-        (EstadoEnvio.AsignadoRuta, EstadoEnvio.EnTransito or EstadoEnvio.EnDeposito or EstadoEnvio.Reprogramado or EstadoEnvio.Extraviado or EstadoEnvio.Cancelado) => true,
-        (EstadoEnvio.EnTransito, EstadoEnvio.Entregado or EstadoEnvio.EntregaPendienteValidacion or EstadoEnvio.NoEntregado or EstadoEnvio.Reprogramado or EstadoEnvio.Extraviado or EstadoEnvio.Cancelado) => true,
+        (EstadoEnvio.EnDeposito, EstadoEnvio.AsignadoRuta or EstadoEnvio.Extraviado or EstadoEnvio.Cancelado) => true,
+        (EstadoEnvio.AsignadoRuta, EstadoEnvio.EnTransito or EstadoEnvio.Extraviado or EstadoEnvio.Cancelado) => true,
+        (EstadoEnvio.EnTransito, EstadoEnvio.Entregado or EstadoEnvio.EntregaPendienteValidacion or EstadoEnvio.NoEntregado or EstadoEnvio.Extraviado or EstadoEnvio.Cancelado) => true,
         (EstadoEnvio.NoEntregado, EstadoEnvio.Reprogramado or EstadoEnvio.EnDevolucion or EstadoEnvio.Cancelado) => true,
-        (EstadoEnvio.Reprogramado, EstadoEnvio.AsignadoRuta or EstadoEnvio.EnDevolucion or EstadoEnvio.Cancelado) => true,
+        (EstadoEnvio.Reprogramado, EstadoEnvio.AsignadoRuta or EstadoEnvio.Cancelado) => true,
         (EstadoEnvio.EnDevolucion, EstadoEnvio.Devuelto or EstadoEnvio.Extraviado or EstadoEnvio.Cancelado) => true,
-        (EstadoEnvio.EntregaPendienteValidacion, EstadoEnvio.Entregado or EstadoEnvio.EntregaSinValidacion or EstadoEnvio.EnDevolucion) => true,
-        (EstadoEnvio.Entregado or EstadoEnvio.EntregaSinValidacion, EstadoEnvio.EnDevolucion) => true,
+        (EstadoEnvio.EntregaPendienteValidacion, EstadoEnvio.Entregado or EstadoEnvio.EntregaSinValidacion) => true,
         _ => false
     };
 }

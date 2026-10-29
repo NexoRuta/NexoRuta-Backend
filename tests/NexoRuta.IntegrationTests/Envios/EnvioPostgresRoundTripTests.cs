@@ -220,6 +220,14 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         Assert.Equal(32m, bulto.LargoCentimetros);
         Assert.Equal(21m, bulto.AnchoCentimetros);
         Assert.Equal(11m, bulto.AltoCentimetros);
+        Assert.False(persistido.DestinoConfirmado);
+
+        var envioDb = await consulta.Envios.SingleAsync(e => e.Id == dos.Id);
+        var direccionDb = await consulta.Direcciones.SingleAsync(d => d.Id == envioDb.DireccionId);
+        direccionDb.ConfirmarUbicacion(-34.9, -56.2, cuenta.UsuarioId, DateTimeOffset.UtcNow, direccionDb.Version);
+        await consulta.SaveChangesAsync();
+        var confirmado = Assert.Single(await Listar(consulta, cuenta.AccesoId), e => e.Id == dos.Id);
+        Assert.True(confirmado.DestinoConfirmado);
     }
 
     [Fact]

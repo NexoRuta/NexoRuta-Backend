@@ -53,11 +53,14 @@ public sealed partial class EfRutasRepository(NexoRutaDbContext db, TimeProvider
             throw new ConflictoRepartoException("El comercio debe confirmar todos los destinos antes de planificar.");
         var bultos = await db.Bultos.Where(x => x.OperadorId == operadorId && ids.Contains(x.EnvioId)).ToArrayAsync(ct);
         if (envios.Any(x => !bultos.Any(b => b.EnvioId == x.Id))) throw new ConflictoRepartoException("Todos los envíos deben tener bultos.");
+        if (bultos.Any(x => x.Custodia != EstadoCustodiaBulto.Deposito))
+            throw new ConflictoRepartoException("La planificación requiere que todos los bultos estén recibidos físicamente en depósito.");
         if (bultos.Sum(x => x.PesoGramos) > vehiculo.PesoMaximoGramos
             || bultos.Sum(x => x.LargoCentimetros * x.AnchoCentimetros * x.AltoCentimetros) > vehiculo.VolumenMaximoCm3)
             throw new ConflictoRepartoException("La ruta supera la capacidad de peso o volumen del vehículo.");
         var hoja = new HojaRuta(operadorId, datos.RepartidorAccesoId, vehiculo, datos.Fecha, politica.Version);
         var zona = TimeZoneInfo.FindSystemTimeZoneById(politica.ZonaHoraria);
+        await db.SetShipmentHistoryContextAsync("PlanificacionRuta", hoja.Id, hoja.Id, reloj.GetUtcNow(), cancellationToken: ct);
         foreach (var parada in datos.Paradas)
         {
             if (DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(parada.LlegadaEstimadaUtc, zona).DateTime) != datos.Fecha)
@@ -114,14 +117,15 @@ public sealed partial class EfRutasRepository(NexoRutaDbContext db, TimeProvider
             else bulto.RecibirEnDeposito();
         if (envio.Estado == EstadoEnvio.Admitido) envio.CambiarEstado(EstadoEnvio.EnDeposito, version);
         else if (envio.Estado == EstadoEnvio.EnDevolucion) envio.CambiarEstado(EstadoEnvio.Devuelto, version);
-        else if (pendientes.Length > 0 && envio.Estado == EstadoEnvio.EnTransito)
-            envio.CambiarEstado(EstadoEnvio.Reprogramado, version);
-        else if (pendientes.Length > 0 && envio.Estado == EstadoEnvio.AsignadoRuta
-            && !await db.ParadasRuta.AnyAsync(p => p.OperadorId == operadorId && p.EnvioId == envioId && p.Activa, ct))
-            envio.CambiarEstado(EstadoEnvio.EnDeposito, version);
         else if (envio.Estado is not (EstadoEnvio.Reprogramado or EstadoEnvio.Cancelado or EstadoEnvio.AsignadoRuta
-            or EstadoEnvio.EnDeposito or EstadoEnvio.NoEntregado))
+            or EstadoEnvio.EnDeposito or EstadoEnvio.NoEntregado or EstadoEnvio.EnTransito))
             throw new ConflictoRepartoException("El estado del envío no admite recepción.");
+        if (envio.Estado is EstadoEnvio.Admitido or EstadoEnvio.EnDevolucion)
+        {
+            var correlacion = Guid.CreateVersion7();
+            await db.SetShipmentHistoryContextAsync("RecepcionDeposito", correlacion, correlacion,
+                reloj.GetUtcNow(), cancellationToken: ct);
+        }
         await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return true;
     }
 

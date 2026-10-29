@@ -53,8 +53,10 @@ public sealed class EnvioLossRulesTests
             EstadoEnvio.NoEntregado => [EstadoEnvio.EnDeposito, EstadoEnvio.AsignadoRuta, EstadoEnvio.EnTransito, EstadoEnvio.NoEntregado],
             EstadoEnvio.Reprogramado => [EstadoEnvio.EnDeposito, EstadoEnvio.AsignadoRuta, EstadoEnvio.EnTransito,
                 EstadoEnvio.NoEntregado, EstadoEnvio.Reprogramado],
-            EstadoEnvio.EnDevolucion => [EstadoEnvio.EnDeposito, EstadoEnvio.EnDevolucion],
-            EstadoEnvio.Devuelto => [EstadoEnvio.EnDeposito, EstadoEnvio.EnDevolucion, EstadoEnvio.Devuelto],
+            EstadoEnvio.EnDevolucion => [EstadoEnvio.EnDeposito, EstadoEnvio.AsignadoRuta, EstadoEnvio.EnTransito,
+                EstadoEnvio.NoEntregado, EstadoEnvio.EnDevolucion],
+            EstadoEnvio.Devuelto => [EstadoEnvio.EnDeposito, EstadoEnvio.AsignadoRuta, EstadoEnvio.EnTransito,
+                EstadoEnvio.NoEntregado, EstadoEnvio.EnDevolucion, EstadoEnvio.Devuelto],
             EstadoEnvio.Extraviado => [EstadoEnvio.EnDeposito, EstadoEnvio.Extraviado],
             EstadoEnvio.Cancelado => [EstadoEnvio.EnDeposito, EstadoEnvio.Cancelado],
             EstadoEnvio.Entregado or EstadoEnvio.EntregaPendienteValidacion or EstadoEnvio.EntregaSinValidacion =>

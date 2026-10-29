@@ -88,7 +88,8 @@ public sealed partial class OperacionesRepartoHttpTests(PostgresFixture postgres
         Assert.Equal(HttpStatusCode.Conflict, prematura.StatusCode);
         var comando = Operacion(Guid.NewGuid(), 4, "FinJornada");
         var cierre = await Aplicar(client, hoja, comando);
-        Assert.Equal("Aplicada", cierre.Resultado); Assert.Contains("incidencia", cierre.Detalle);
+        Assert.Equal("Aplicada", cierre.Resultado); Assert.Contains("no se confirmó recepción en depósito", cierre.Detalle,
+            StringComparison.OrdinalIgnoreCase);
         Assert.Equal(JsonSerializer.Serialize(cierre), JsonSerializer.Serialize(await Aplicar(client, hoja, comando)));
         var actual = (await client.GetFromJsonAsync<HojaRutaResponse>($"/api/mobile/rutas/{hoja.Id}"))!;
         var incidencia = Assert.Single(actual.IncidenciasCierre);
@@ -113,7 +114,12 @@ public sealed partial class OperacionesRepartoHttpTests(PostgresFixture postgres
         var recibida = (await client.GetFromJsonAsync<HojaRutaResponse>($"/api/mobile/rutas/{hoja.Id}"))!;
         Assert.Equal(incidencia, Assert.Single(recibida.IncidenciasCierre));
         Assert.Equal("Deposito", recibida.Paradas[0].Bultos[0].Custodia);
-        Assert.Equal("Reprogramado", recibida.Paradas[0].Estado);
+        Assert.Equal("EnTransito", recibida.Paradas[0].Estado);
+        await using (var audit = data.CreateDbContext())
+        {
+            Assert.Empty(await audit.EnvioEventos.Where(x => x.EnvioId == parada.EnvioId
+                && x.Tipo == "TransicionEstado" && x.EstadoAnterior == "EnTransito" && x.EstadoNuevo == "Reprogramado").ToArrayAsync());
+        }
         Assert.Equal("Conflicto", (await Aplicar(client, hoja, Operacion(Guid.NewGuid(), 5, "EntregaFisica", parada.EnvioId, parada.EnvioVersion))).Resultado);
     }
 
@@ -128,6 +134,8 @@ public sealed partial class OperacionesRepartoHttpTests(PostgresFixture postgres
         var actual = (await client.GetFromJsonAsync<HojaRutaResponse>($"/api/mobile/rutas/{hoja.Id}"))!;
         Assert.Empty(actual.IncidenciasCierre);
         Assert.Equal("PendienteDeposito", actual.Paradas[0].Bultos[0].Custodia);
+        await using var verify = data.CreateDbContext();
+        Assert.Equal(EstadoEnvio.EnTransito, (await verify.Envios.SingleAsync(x => x.Id == hoja.Paradas[0].EnvioId)).Estado);
     }
 
     [Fact]
@@ -146,7 +154,7 @@ public sealed partial class OperacionesRepartoHttpTests(PostgresFixture postgres
         Assert.Equal(HttpStatusCode.NoContent, recibir.StatusCode);
         var recibida = (await client.GetFromJsonAsync<HojaRutaResponse>($"/api/mobile/rutas/{hoja.Id}"))!;
         Assert.Single(recibida.IncidenciasCierre);
-        Assert.Equal("EnDeposito", recibida.Paradas[0].Estado);
+        Assert.Equal("AsignadoRuta", recibida.Paradas[0].Estado);
     }
 
     [Theory]

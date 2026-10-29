@@ -213,6 +213,7 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
                 ComercioNombre = comercio.Nombre,
                 DestinatarioNombre = destinatario.Nombre,
                 Direccion = direccion.Descripcion,
+                DestinoConfirmado = direccion.ConfirmadaEnUtc != null,
                 Estado = envio.Estado.ToString(),
                 envio.Version
             }).ToListAsync(cancellationToken);
@@ -229,6 +230,7 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
                 Detail = new BultoDetalle(
                 Codigo: x.Codigo, PesoGramos: x.PesoGramos, LargoCentimetros: x.LargoCentimetros,
                 AnchoCentimetros: x.AnchoCentimetros, AltoCentimetros: x.AltoCentimetros)
+                { Custodia = x.Custodia.ToString() }
             })
             .ToListAsync(cancellationToken);
         var packagesByShipment = packages.ToLookup(x => x.EnvioId, x => x.Detail);
@@ -246,6 +248,7 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
             Direccion: x.Direccion,
             Estado: x.Estado,
             Version: x.Version,
-            Bultos: packagesByShipment[x.Id].ToArray())).ToArray();
+            Bultos: packagesByShipment[x.Id].ToArray())
+        { DestinoConfirmado = x.DestinoConfirmado }).ToArray();
     }
 }

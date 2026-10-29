@@ -91,6 +91,7 @@ public sealed partial class OperacionesRepartoHttpTests
         {
             var envio = await db.Envios.SingleAsync(e => e.Id == parada.EnvioId);
             envio.CambiarEstado(EstadoEnvio.NoEntregado, envio.Version);
+            await db.SaveChangesAsync();
             envio.CambiarEstado(EstadoEnvio.EnDevolucion, envio.Version);
             var bulto = await db.Bultos.SingleAsync(b => b.Id == parada.Bultos[0].Id);
             bulto.DeclararRendicion(hoja.RepartidorAccesoId, hoja.Id);

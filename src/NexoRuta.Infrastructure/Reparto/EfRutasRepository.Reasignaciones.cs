@@ -182,12 +182,13 @@ public sealed partial class EfRutasRepository
             || datos.LlegadaEstimadaUtc == default || string.IsNullOrWhiteSpace(datos.Motivo) || datos.Motivo.Length > 500)
             throw new ArgumentException("Indicá ruta futura, versiones, llegada estimada y motivo.");
         await using var tx = await db.BeginOrJoinAsync(ct);
+        await Contexto(operadorId, ct);
         await Bloquear(operadorId, ct);
         var envio = await db.Envios.SingleOrDefaultAsync(e => e.OperadorId == operadorId && e.Id == envioId, ct);
         if (envio is null) return null;
         if (envio.EntregaFisicaEnUtc is not null || envio.Version != datos.VersionEnvio
-            || envio.Estado is not (EstadoEnvio.AsignadoRuta or EstadoEnvio.EnTransito or EstadoEnvio.Reprogramado))
-            throw new ConflictoRepartoException("El envío cambió o ya no admite reasignación; después de la entrega física corresponde devolución.");
+            || envio.Estado is not (EstadoEnvio.AsignadoRuta or EstadoEnvio.Reprogramado))
+            throw new ConflictoRepartoException("Solo se reasignan envíos asignados aún no despachados o reprogramados; un envío en tránsito no cambia a otra ruta.");
         var destino = await db.HojasRuta.Include(h => h.Paradas)
             .SingleOrDefaultAsync(h => h.Id == datos.RutaDestinoId && h.OperadorId == operadorId, ct);
         if (destino is null) return null;
@@ -210,20 +211,23 @@ public sealed partial class EfRutasRepository
             || bultos.Sum(b => b.LargoCentimetros * b.AnchoCentimetros * b.AltoCentimetros) > destino.VehiculoVolumenMaximoCm3)
             throw new ConflictoRepartoException("La reasignación supera el peso o volumen de la ruta destino.");
         var propias = bultos.Where(b => b.EnvioId == envioId).ToArray();
-        var custodias = propias.Where(b => b.Custodia is EstadoCustodiaBulto.Repartidor or EstadoCustodiaBulto.PendienteDeposito)
-            .Select(b => b.RutaCustodiaId).Where(id => id != null).Distinct().ToArray();
-        if (custodias.Length > 1) throw new ConflictoRepartoException("La custodia del envío requiere revisión antes de reasignar.");
+        if (propias.Any(b => b.Custodia != EstadoCustodiaBulto.Deposito))
+            throw new ConflictoRepartoException("La reasignación requiere todos los bultos físicamente recibidos en depósito; no transfiere custodia entre repartidores.");
         var anteriores = await db.HojasRuta.Include(h => h.Paradas).Where(h => h.OperadorId == operadorId &&
-            (h.Paradas.Any(p => p.EnvioId == envioId && p.Activa) || custodias.Contains(h.Id))).ToArrayAsync(ct);
-        var actual = anteriores.SingleOrDefault(h => custodias.Contains(h.Id) && h.Estado is EstadoHojaRuta.Despachada or EstadoHojaRuta.EnCurso)
-            ?? anteriores.SingleOrDefault(h => h.Paradas.Any(p => p.EnvioId == envioId && p.Activa) && h.Estado is EstadoHojaRuta.Despachada or EstadoHojaRuta.EnCurso);
+            h.Paradas.Any(p => p.EnvioId == envioId && p.Activa)).ToArrayAsync(ct);
+        var actual = anteriores.SingleOrDefault(h => h.Estado is EstadoHojaRuta.Despachada or EstadoHojaRuta.EnCurso);
+        var correlacion = Guid.CreateVersion7();
+        await db.SetShipmentHistoryContextAsync("ReasignacionRuta", correlacion, correlacion,
+            reloj.GetUtcNow(), "CambioRuta", ct);
         foreach (var anterior in anteriores.Where(h => h.Paradas.Any(p => p.EnvioId == envioId && p.Activa)))
             anterior.SuspenderParada(envioId, datos.Motivo);
-        if (envio.Estado != EstadoEnvio.Reprogramado) envio.CambiarEstado(EstadoEnvio.Reprogramado, envio.Version);
         // Libera el índice de parada activa antes de insertar la nueva, dentro de la misma transacción.
         await db.SaveChangesAsync(ct);
         destino.AgregarParada(envioId, datos.LlegadaEstimadaUtc);
-        envio.CambiarEstado(EstadoEnvio.AsignadoRuta, envio.Version);
+        if (envio.Estado == EstadoEnvio.Reprogramado)
+            envio.CambiarEstado(EstadoEnvio.AsignadoRuta, envio.Version);
+        else
+            envio.RegistrarReasignacionSinCambioDeEstado(envio.Version);
         if (actual is not null)
         {
             var aviso = new AvisoReparto(operadorId, actual.RepartidorAccesoId, actual.Id, envioId, envio.Version,

@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -115,16 +116,21 @@ public sealed partial class PushOutboxTests
     [InlineData(EstadoEnvio.EntregaSinValidacion, false)]
     public async Task CancelacionAutenticadaRespetaLaMatrizDeEstados(EstadoEnvio estado, bool permitida)
     {
-        using var p = await PrepararPush(1, registrarAviso: false);
-        var origen = await CargarParaCancelar(p); var parada = origen.Paradas[0];
-        var fixture = await PrepararEstadoMatrizCancelacionAsync(p.Data, parada.EnvioId, origen.RepartidorAccesoId, origen.Id, estado);
+        var sinRuta = estado is EstadoEnvio.Admitido or EstadoEnvio.EnDeposito;
+        var agotaAutomaticamente = estado is EstadoEnvio.EnDevolucion or EstadoEnvio.Devuelto;
+        using var p = await PrepararPush(1, registrarAviso: false, recibir: estado != EstadoEnvio.Admitido,
+            planificar: !sinRuta, automatizarDevolucion: agotaAutomaticamente);
+        var ruta = await AlcanzarEstadoMatrizCancelacionAsync(p, estado);
+        var rutaId = ruta is null ? (Guid?)null : p.Aviso.RutaId;
+        var envioId = p.Aviso.EnvioId;
+        var fixture = await CapturarEstadoMatrizCancelacionAsync(p.Data, envioId, rutaId, estado);
 
-        using var response = await p.Client.PostAsJsonAsync($"/api/envios/{parada.EnvioId}/cancelacion",
+        using var response = await p.Client.PostAsJsonAsync($"/api/envios/{envioId}/cancelacion",
             new { Version = fixture.Version, Motivo = "Cancelación de prueba." });
         Assert.Equal(permitida ? HttpStatusCode.OK : HttpStatusCode.Conflict, response.StatusCode);
 
         await using var result = p.Data.CreateDbContext();
-        var envio = await result.Envios.SingleAsync(e => e.Id == parada.EnvioId);
+        var envio = await result.Envios.SingleAsync(e => e.Id == envioId);
         Assert.Equal(permitida ? EstadoEnvio.Cancelado : estado, envio.Estado);
         Assert.Equal(fixture.Version + (permitida ? 1 : 0), envio.Version);
         Assert.Equal(fixture.EntregaFisicaEnUtc, envio.EntregaFisicaEnUtc);
@@ -145,10 +151,17 @@ public sealed partial class PushOutboxTests
         Assert.Equal(fixture.AllOutboxMessages + expectedNotice, allOutboxCount);
         Assert.Equal(fixture.HistoryIds.Length + (permitida ? 1 : 0), history.Length);
         Assert.Equal(fixture.HistoryIds.Order(), history.Select(x => x.Id).Where(fixture.HistoryIds.Contains).Order());
-        Assert.Equal(fixture.VersionRuta + expectedNotice,
-            (await result.HojasRuta.SingleAsync(x => x.Id == origen.Id)).Version);
-        Assert.Equal(permitida && fixture.ShouldNotifyRoute ? false : fixture.ParadaActiva,
-            (await result.ParadasRuta.SingleAsync(x => x.EnvioId == envio.Id)).Activa);
+        if (rutaId is { } id)
+        {
+            Assert.Equal(fixture.VersionRuta!.Value + expectedNotice,
+                (await result.HojasRuta.SingleAsync(x => x.Id == id)).Version);
+            Assert.Equal(permitida && fixture.ShouldNotifyRoute ? false : fixture.ParadaActiva!.Value,
+                (await result.ParadasRuta.SingleAsync(x => x.EnvioId == envio.Id)).Activa);
+        }
+        else
+        {
+            Assert.Empty(await result.ParadasRuta.Where(x => x.EnvioId == envio.Id).ToArrayAsync());
+        }
 
         if (permitida)
         {
@@ -165,145 +178,190 @@ public sealed partial class PushOutboxTests
         }
     }
 
-    private static async Task<EstadoMatrizCancelacion> PrepararEstadoMatrizCancelacionAsync(
-        IntegrationDatabase data, Guid envioId, Guid repartidorAccesoId, Guid rutaId, EstadoEnvio estado)
+    private async Task<HojaRutaResponse?> AlcanzarEstadoMatrizCancelacionAsync(PreparadoPush prepared, EstadoEnvio target)
+    {
+        if (target is EstadoEnvio.Admitido or EstadoEnvio.EnDeposito) return null;
+        var route = (await prepared.Client.GetFromJsonAsync<HojaRutaResponse>($"/api/mobile/rutas/{prepared.Aviso.RutaId}"))!;
+        if (target == EstadoEnvio.AsignadoRuta) return route;
+        route = await CargarParaCancelar(prepared);
+        var stop = Assert.Single(route.Paradas);
+        if (target == EstadoEnvio.EnTransito) return route;
+
+        if (target == EstadoEnvio.Extraviado)
+        {
+            var version = await CurrentShipmentVersion(prepared.Data, stop.EnvioId);
+            using var loss = await prepared.Client.PostAsJsonAsync($"/api/envios/{stop.EnvioId}/confirmar-extravio",
+                new { VersionEnvio = version, ComandoId = Guid.CreateVersion7(), Motivo = "Extravío confirmado para fixture de matriz." });
+            Assert.Equal(HttpStatusCode.OK, loss.StatusCode);
+            return route;
+        }
+
+        if (target is EstadoEnvio.Entregado or EstadoEnvio.EntregaPendienteValidacion or EstadoEnvio.EntregaSinValidacion)
+        {
+            var delivery = await Operar(prepared.Client, route, 4, "EntregaFisica", stop.EnvioId, stop.EnvioVersion);
+            Assert.Equal("Aplicada", delivery.Resultado);
+            if (target == EstadoEnvio.EntregaPendienteValidacion) return route;
+            if (target == EstadoEnvio.Entregado)
+            {
+                var photoId = Guid.CreateVersion7();
+                using var upload = await prepared.Client.PutAsJsonAsync($"/api/mobile/jornadas/{route.JornadaId}/evidencias/{photoId}",
+                    new { EnvioId = stop.EnvioId, Tipo = "Foto", Contenido = MatrixEvidenceBytes });
+                Assert.Equal(HttpStatusCode.NoContent, upload.StatusCode);
+                var proof = await Operar(prepared.Client, route, 5, "EvidenciaEntrega", stop.EnvioId, delivery.VersionEnvio,
+                    new { FotoId = photoId, Nombre = "Destinatario de prueba", Latitud = -34.9, Longitud = -56.2,
+                        PrecisionMetros = 10, PosicionEnUtc = DateTimeOffset.UtcNow });
+                Assert.Equal("Aplicada", proof.Resultado);
+                Assert.Equal(EstadoEnvio.Entregado.ToString(), proof.EstadosEnvio[stop.EnvioId]);
+                return route;
+            }
+            var deadline = await ReadProofDeadline(prepared.Data, stop.EnvioId);
+            Assert.Equal(1, await ExpireProofDeadlineAsync(prepared.Data, deadline));
+            return route;
+        }
+
+        var failed = await Operar(prepared.Client, route, 4, "IntentoFallido", stop.EnvioId,
+            stop.EnvioVersion, new { Motivo = "AUSENTE" });
+        Assert.Equal("Aplicada", failed.Resultado);
+        if (target == EstadoEnvio.NoEntregado) return route;
+        if (target == EstadoEnvio.Reprogramado)
+        {
+            using var reschedule = await prepared.Client.PostAsJsonAsync($"/api/envios/{stop.EnvioId}/reprogramacion",
+                new { VersionEnvio = failed.VersionEnvio });
+            Assert.Equal(HttpStatusCode.OK, reschedule.StatusCode);
+            return route;
+        }
+        if (target is EstadoEnvio.EnDevolucion or EstadoEnvio.Devuelto)
+        {
+            Assert.Equal(EstadoEnvio.EnDevolucion.ToString(), failed.EstadosEnvio[stop.EnvioId]);
+            if (target == EstadoEnvio.Devuelto)
+            {
+                var bultoId = Assert.Single(stop.Bultos).Id;
+                Assert.Equal("Aplicada", (await Operar(prepared.Client, route, 5, "Rendicion",
+                    datos: new { BultoIds = new[] { bultoId } })).Resultado);
+                var version = await CurrentShipmentVersion(prepared.Data, stop.EnvioId);
+                using var receipt = await prepared.Client.PostAsJsonAsync($"/api/deposito/envios/{stop.EnvioId}/recepcion",
+                    new { Version = version });
+                Assert.Equal(HttpStatusCode.NoContent, receipt.StatusCode);
+            }
+            return route;
+        }
+        throw new ArgumentOutOfRangeException(nameof(target), target, "No configured business flow reaches the requested cancellation state.");
+    }
+
+    private static async Task<EstadoMatrizCancelacion> CapturarEstadoMatrizCancelacionAsync(
+        IntegrationDatabase data, Guid envioId, Guid? routeId, EstadoEnvio state)
     {
         await using var db = data.CreateDbContext();
-        await using var tx = await db.Database.BeginTransactionAsync();
-        var envio = await db.Envios.SingleAsync(e => e.Id == envioId);
-        var plazoMinutos = await db.VersionesReglasOperativas
-            .Where(r => r.OperadorId == envio.OperadorId && r.Id == envio.VersionReglasId)
-            .Select(r => r.PlazoValidacionPruebaMinutos)
-            .SingleAsync();
-        var hayHechoFisico = estado is EstadoEnvio.Entregado or EstadoEnvio.EntregaPendienteValidacion or EstadoEnvio.EntregaSinValidacion;
-        DateTimeOffset? fisica = null;
-        DateTimeOffset? recibida = null;
-        DateTimeOffset? vence = null;
-        if (hayHechoFisico)
-        {
-            Assert.True(plazoMinutos is > 0, "A new test publication must provide the proof-validation deadline used by this fixture.");
-            var retraso = estado == EstadoEnvio.EntregaSinValidacion ? plazoMinutos!.Value + 1 : 0;
-            recibida = DateTimeOffset.FromUnixTimeMilliseconds(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()).AddMinutes(-retraso);
-            fisica = recibida.Value.AddSeconds(-5);
-            vence = recibida.Value.AddMinutes(plazoMinutos!.Value);
-        }
-
-        var sourceId = Guid.CreateVersion7();
-        var versionAnterior = envio.Version;
-        var historyFixtureCreated = envio.Estado != estado || envio.EntregaFisicaEnUtc != fisica
-            || envio.EntregaFisicaRecibidaEnUtc != recibida || envio.PlazoPruebaVenceEnUtc != vence;
-        if (historyFixtureCreated)
-        {
-            await SetLocalHistoryFixtureSettingAsync(db, "nexoruta.history_source_type", "TestFixtureCancelacionMatriz");
-            await SetLocalHistoryFixtureSettingAsync(db, "nexoruta.history_source_id", sourceId.ToString("D"));
-
-            // This is an explicitly marked fixture state, not a claim that the prior workflow ran.
-            var filasActualizadas = await db.Envios.Where(e => e.Id == envioId)
-                .ExecuteUpdateAsync(update => update
-                    .SetProperty(e => e.Estado, estado)
-                    .SetProperty(e => e.Version, e => e.Version + 1)
-                    .SetProperty(e => e.EntregaFisicaEnUtc, fisica)
-                    .SetProperty(e => e.EntregaFisicaRecibidaEnUtc, recibida)
-                    .SetProperty(e => e.PlazoPruebaVenceEnUtc, vence));
-            Assert.Equal(1, filasActualizadas);
-
-            var historiaFixture = await db.EnvioEventos.SingleAsync(h => h.EnvioId == envioId
-                && h.OrigenTipo == "TestFixtureCancelacionMatriz" && h.OrigenId == sourceId);
-            Assert.Equal(TipoEventoEnvio.TransicionEstado, historiaFixture.Tipo);
-            Assert.Equal(envio.Estado.ToString(), historiaFixture.EstadoAnterior);
-            Assert.Equal(estado.ToString(), historiaFixture.EstadoNuevo);
-            Assert.Equal(versionAnterior, historiaFixture.VersionAnterior);
-            Assert.Equal(versionAnterior + 1, historiaFixture.VersionNueva);
-            Assert.Equal("Proceso", historiaFixture.ActorTipo);
-            Assert.StartsWith("database-admin:", historiaFixture.ActorProceso);
-        }
-
-        var (custodia, custodioId, rutaCustodiaId) = estado switch
-        {
-            EstadoEnvio.Admitido => (EstadoCustodiaBulto.SinRecepcion, (Guid?)null, (Guid?)null),
-            EstadoEnvio.EnDeposito or EstadoEnvio.AsignadoRuta or EstadoEnvio.Devuelto =>
-                (EstadoCustodiaBulto.Deposito, (Guid?)null, (Guid?)null),
-            EstadoEnvio.Entregado or EstadoEnvio.EntregaPendienteValidacion or EstadoEnvio.EntregaSinValidacion =>
-                (EstadoCustodiaBulto.Destinatario, repartidorAccesoId, rutaId),
-            EstadoEnvio.EnDevolucion => (EstadoCustodiaBulto.PendienteDeposito, repartidorAccesoId, rutaId),
-            _ => (EstadoCustodiaBulto.Repartidor, repartidorAccesoId, rutaId)
-        };
-        var bulto = await db.Bultos.SingleAsync(b => b.EnvioId == envioId);
-        var custodiaCambio = bulto.Custodia != custodia || bulto.AccesoCustodioId != custodioId || bulto.RutaCustodiaId != rutaCustodiaId;
-        if (custodiaCambio)
-        {
-            var actualizados = await db.Bultos.Where(b => b.Id == bulto.Id)
-                .ExecuteUpdateAsync(update => update
-                    .SetProperty(b => b.Custodia, custodia)
-                    .SetProperty(b => b.AccesoCustodioId, custodioId)
-                    .SetProperty(b => b.RutaCustodiaId, rutaCustodiaId)
-                    .SetProperty(b => b.Version, b => b.Version + 1));
-            Assert.Equal(1, actualizados);
-        }
-
-        var paradaActiva = estado is EstadoEnvio.AsignadoRuta or EstadoEnvio.EnTransito;
-        var parada = await db.ParadasRuta.SingleAsync(p => p.EnvioId == envioId && p.RutaId == rutaId);
-        var paradaCambio = parada.Activa != paradaActiva;
-        if (paradaCambio)
-        {
-            var actualizadas = await db.ParadasRuta.Where(p => p.EnvioId == envioId && p.RutaId == rutaId)
-                .ExecuteUpdateAsync(update => update
-                    .SetProperty(p => p.Activa, paradaActiva)
-                    .SetProperty(p => p.MotivoSuspension, paradaActiva ? null : "Fixture de matriz de cancelación."));
-            Assert.Equal(1, actualizadas);
-            var rutasActualizadas = await db.HojasRuta.Where(r => r.Id == rutaId)
-                .ExecuteUpdateAsync(update => update.SetProperty(r => r.Version, r => r.Version + 1));
-            Assert.Equal(1, rutasActualizadas);
-        }
-
-        var envioActual = await db.Envios.AsNoTracking().SingleAsync(e => e.Id == envioId);
-        var bultoActual = await db.Bultos.AsNoTracking().SingleAsync(b => b.EnvioId == envioId);
-        var paradaActual = await db.ParadasRuta.AsNoTracking().SingleAsync(p => p.EnvioId == envioId && p.RutaId == rutaId);
-        var rutaActual = await db.HojasRuta.AsNoTracking().SingleAsync(r => r.Id == rutaId);
+        var shipment = await db.Envios.AsNoTracking().SingleAsync(e => e.Id == envioId);
+        var parcel = await db.Bultos.AsNoTracking().SingleAsync(b => b.EnvioId == envioId);
         var historyIds = await db.EnvioEventos.Where(h => h.EnvioId == envioId).Select(h => h.Id).ToArrayAsync();
-        var fixture = new EstadoMatrizCancelacion(envioActual.Version, fisica, recibida, vence, bultoActual.Custodia,
-            bultoActual.Version, historyIds, await db.CancelacionesEnvio.CountAsync(c => c.EnvioId == envioId),
+        var activeStop = routeId is { } id
+            ? await db.ParadasRuta.AsNoTracking().Where(p => p.EnvioId == envioId && p.RutaId == id)
+                .Select(p => (bool?)p.Activa).SingleOrDefaultAsync()
+            : null;
+        var routeVersion = routeId is { } route
+            ? await db.HojasRuta.AsNoTracking().Where(r => r.Id == route).Select(r => (long?)r.Version).SingleAsync()
+            : null;
+        return new EstadoMatrizCancelacion(shipment.Version, shipment.EntregaFisicaEnUtc,
+            shipment.EntregaFisicaRecibidaEnUtc, shipment.PlazoPruebaVenceEnUtc, parcel.Custodia,
+            parcel.Version, historyIds, await db.CancelacionesEnvio.CountAsync(c => c.EnvioId == envioId),
             await db.AvisosReparto.CountAsync(a => a.EnvioId == envioId),
             await db.OutboxMessages.CountAsync(m => m.EnvioId == envioId && m.Destino == OutboxDestino.PushFcm),
-            await db.OutboxMessages.CountAsync(m => m.EnvioId == envioId), paradaActual.Activa, rutaActual.Version,
-            estado is EstadoEnvio.AsignadoRuta or EstadoEnvio.EnTransito or EstadoEnvio.NoEntregado
+            await db.OutboxMessages.CountAsync(m => m.EnvioId == envioId), activeStop, routeVersion,
+            routeId is not null && state is EstadoEnvio.AsignadoRuta or EstadoEnvio.EnTransito or EstadoEnvio.NoEntregado
                 or EstadoEnvio.Reprogramado or EstadoEnvio.EnDevolucion);
-        await tx.CommitAsync();
-        return fixture;
+    }
+
+    private static async Task<long> CurrentShipmentVersion(IntegrationDatabase data, Guid shipmentId)
+    {
+        await using var db = data.CreateDbContext();
+        return await db.Envios.AsNoTracking().Where(x => x.Id == shipmentId).Select(x => x.Version).SingleAsync();
+    }
+
+    private static async Task<DateTimeOffset> ReadProofDeadline(IntegrationDatabase data, Guid shipmentId)
+    {
+        await using var db = data.CreateDbContext();
+        return (await db.Envios.AsNoTracking().Where(x => x.Id == shipmentId)
+            .Select(x => x.PlazoPruebaVenceEnUtc).SingleAsync())!.Value;
+    }
+
+    private static async Task<int> ExpireProofDeadlineAsync(IntegrationDatabase data, DateTimeOffset now)
+    {
+        var role = $"matrix_worker_{Guid.NewGuid():N}";
+        var password = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+        await using (var owner = new NpgsqlConnection(data.ConnectionString))
+        {
+            await owner.OpenAsync();
+            await using var create = new NpgsqlCommand($"CREATE ROLE {role} LOGIN PASSWORD '{password}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS; GRANT nexoruta_worker TO {role};", owner);
+            await create.ExecuteNonQueryAsync();
+        }
+        var connectionString = new NpgsqlConnectionStringBuilder(data.ConnectionString)
+        { Username = role, Password = password, Pooling = false }.ConnectionString;
+        await using var worker = new NpgsqlConnection(connectionString);
+        await worker.OpenAsync();
+        await using var command = new NpgsqlCommand("SELECT nexoruta_app.expire_pending_proof_deadlines(@now, 100)", worker);
+        command.Parameters.AddWithValue("now", now);
+        return Convert.ToInt32(await command.ExecuteScalarAsync());
     }
 
     private static async Task SetLocalHistoryFixtureSettingAsync(NexoRutaDbContext db, string name, string value) =>
         _ = await db.Database.SqlQuery<string>($"SELECT set_config({name}, {value}, true) AS \"Value\"").SingleAsync();
 
+    private static readonly byte[] MatrixEvidenceBytes = Convert.FromBase64String(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==");
+
     private sealed record EstadoMatrizCancelacion(long Version, DateTimeOffset? EntregaFisicaEnUtc,
         DateTimeOffset? EntregaFisicaRecibidaEnUtc, DateTimeOffset? PlazoPruebaVenceEnUtc,
         EstadoCustodiaBulto Custodia, long VersionBulto, Guid[] HistoryIds, int Cancelaciones, int Avisos,
-        int PushMessages, int AllOutboxMessages, bool ParadaActiva, long VersionRuta, bool ShouldNotifyRoute);
-
+        int PushMessages, int AllOutboxMessages, bool? ParadaActiva, long? VersionRuta, bool ShouldNotifyRoute);
     [Fact]
-    public async Task CancelarReasignadoNotificaAlCustodioOriginalYNuncaAlRepartidorFuturo()
+    public async Task ReasignacionEnTransitoSeRechazaYCancelacionNotificaAlCustodioActual()
     {
         using var p = await PrepararPush(1, registrarAviso: false);
         var origen = await CargarParaCancelar(p); var parada = origen.Paradas[0];
         var destino = await CrearDestino(p, vacia: true);
+        long version; long routeVersion; EstadoCustodiaBulto custody; int historyCount;
+        await using (var before = p.Data.CreateDbContext())
+        {
+            var shipment = await before.Envios.SingleAsync(x => x.Id == parada.EnvioId);
+            Assert.Equal(EstadoEnvio.EnTransito, shipment.Estado);
+            version = shipment.Version;
+            routeVersion = (await before.HojasRuta.SingleAsync(x => x.Id == origen.Id)).Version;
+            custody = (await before.Bultos.SingleAsync(x => x.EnvioId == parada.EnvioId)).Custodia;
+            historyCount = await before.EnvioEventos.CountAsync(x => x.EnvioId == parada.EnvioId);
+        }
         using var mover = await p.Client.PostAsJsonAsync($"/api/envios/{parada.EnvioId}/reasignacion", new
         {
-            RutaDestinoId = destino.Id, VersionEnvio = parada.EnvioVersion, VersionRutaDestino = destino.Version,
+            RutaDestinoId = destino.Id, VersionEnvio = version, VersionRutaDestino = destino.Version,
             LlegadaEstimadaUtc = LlegadaEstimada.AddDays(1), Motivo = "Entrega futura."
         });
-        Assert.Equal(HttpStatusCode.OK, mover.StatusCode);
-        await using var db = p.Data.CreateDbContext();
-        var version = (await db.Envios.SingleAsync(e => e.Id == parada.EnvioId)).Version;
-        var versionCustodio = (await db.HojasRuta.AsNoTracking().SingleAsync(h => h.Id == origen.Id)).Version;
+        Assert.Equal(HttpStatusCode.Conflict, mover.StatusCode);
+        Assert.Contains("En tránsito", await mover.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+        await using (var afterRejectedMove = p.Data.CreateDbContext())
+        {
+            var shipment = await afterRejectedMove.Envios.SingleAsync(x => x.Id == parada.EnvioId);
+            Assert.Equal((EstadoEnvio.EnTransito, version), (shipment.Estado, shipment.Version));
+            Assert.Equal(custody, (await afterRejectedMove.Bultos.SingleAsync(x => x.EnvioId == parada.EnvioId)).Custodia);
+            Assert.Equal(routeVersion, (await afterRejectedMove.HojasRuta.SingleAsync(x => x.Id == origen.Id)).Version);
+            Assert.True((await afterRejectedMove.ParadasRuta.SingleAsync(x => x.RutaId == origen.Id && x.EnvioId == parada.EnvioId)).Activa);
+            Assert.Empty(await afterRejectedMove.ParadasRuta.Where(x => x.RutaId == destino.Id && x.EnvioId == parada.EnvioId).ToArrayAsync());
+            Assert.Equal(historyCount, await afterRejectedMove.EnvioEventos.CountAsync(x => x.EnvioId == parada.EnvioId));
+            Assert.Empty(await afterRejectedMove.AvisosReparto.ToArrayAsync());
+            Assert.False(await afterRejectedMove.OutboxMessages.AnyAsync(x => x.Destino == OutboxDestino.PushFcm));
+        }
         using var cancelar = await p.Client.PostAsJsonAsync($"/api/envios/{parada.EnvioId}/cancelacion", new { Version = version, Motivo = "Ya no se necesita." });
         Assert.Equal(HttpStatusCode.OK, cancelar.StatusCode);
-        var avisos = await db.AvisosReparto.ToArrayAsync(); Assert.Equal(2, avisos.Length);
+        await using var db = p.Data.CreateDbContext();
+        var avisos = await db.AvisosReparto.ToArrayAsync(); Assert.Single(avisos);
         Assert.All(avisos, aviso => Assert.Equal((origen.Id, origen.RepartidorAccesoId), (aviso.RutaId, aviso.AccesoId)));
-        Assert.False((await db.ParadasRuta.SingleAsync(x => x.RutaId == destino.Id)).Activa);
-        Assert.True((await db.HojasRuta.AsNoTracking().SingleAsync(h => h.Id == origen.Id)).Version > versionCustodio);
+        Assert.Equal(EstadoEnvio.Cancelado, (await db.Envios.SingleAsync(x => x.Id == parada.EnvioId)).Estado);
+        Assert.False((await db.ParadasRuta.SingleAsync(x => x.RutaId == origen.Id && x.EnvioId == parada.EnvioId)).Activa);
+        Assert.Empty(await db.ParadasRuta.Where(x => x.RutaId == destino.Id && x.EnvioId == parada.EnvioId).ToArrayAsync());
+        Assert.Single(await db.CancelacionesEnvio.Where(x => x.EnvioId == parada.EnvioId).ToArrayAsync());
+        Assert.Single(await db.OutboxMessages.Where(x => x.EnvioId == parada.EnvioId && x.Destino == OutboxDestino.PushFcm).ToArrayAsync());
         await using var services = await ServiciosWorker(p); var transporte = new Transporte();
         using var worker = new PushOutboxWorker(services.GetRequiredService<IServiceScopeFactory>(), transporte, NullLogger<PushOutboxWorker>.Instance);
-        Assert.True(await worker.ProcesarSiguienteAsync(default)); Assert.True(await worker.ProcesarSiguienteAsync(default));
+        Assert.True(await worker.ProcesarSiguienteAsync(default));
         Assert.Equal(p.Fids, Assert.Single(transporte.Enviados).Fids);
     }
 
@@ -351,7 +409,8 @@ public sealed partial class PushOutboxTests
         {
             var error = await Assert.ThrowsAsync<PostgresException>(() => db.Envios.Where(e => e.Id == p.Aviso.EnvioId)
                 .ExecuteUpdateAsync(update => update.SetProperty(e => e.Estado, EstadoEnvio.EnTransito)));
-            Assert.Equal("NXR02", error.SqlState);
+            Assert.Equal("23514", error.SqlState);
+            Assert.Equal("CK_Envios_TransicionEstado", error.ConstraintName);
         }
         await using var final = p.Data.CreateDbContext();
         Assert.Equal(EstadoEnvio.Cancelado, (await final.Envios.SingleAsync(e => e.Id == p.Aviso.EnvioId)).Estado);

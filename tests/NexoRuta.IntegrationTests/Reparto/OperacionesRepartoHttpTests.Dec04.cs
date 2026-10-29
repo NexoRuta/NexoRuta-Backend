@@ -520,9 +520,11 @@ public sealed partial class OperacionesRepartoHttpTests
         Assert.Equal(EstadoEnvio.EnDevolucion, envio.Estado);
         Assert.Equal(2, await verify.OperacionesJornada.CountAsync(x => x.EnvioId == parada.EnvioId
             && x.Tipo == "IntentoFallido" && x.Resultado == "Aplicada"));
-        Assert.Single(await verify.EnvioEventos.Where(x => x.EnvioId == parada.EnvioId
-            && x.Tipo == TipoEventoEnvio.TransicionEstado && x.EstadoAnterior == "EnTransito"
-            && x.EstadoNuevo == "EnDevolucion").ToArrayAsync());
+        var transitions = await verify.EnvioEventos.Where(x => x.EnvioId == parada.EnvioId
+            && x.Tipo == TipoEventoEnvio.TransicionEstado).ToArrayAsync();
+        Assert.Contains(transitions, x => x.EstadoAnterior == "EnTransito" && x.EstadoNuevo == "NoEntregado");
+        Assert.Contains(transitions, x => x.EstadoAnterior == "NoEntregado" && x.EstadoNuevo == "EnDevolucion");
+        Assert.DoesNotContain(transitions, x => x.EstadoAnterior == "EnTransito" && x.EstadoNuevo == "EnDevolucion");
     }
 
     private static async Task PublicarReglasDeReprogramacion(IntegrationDatabase data, int maximo = 3,
