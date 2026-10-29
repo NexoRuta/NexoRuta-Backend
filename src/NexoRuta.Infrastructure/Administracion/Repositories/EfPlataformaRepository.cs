@@ -31,9 +31,16 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, UserManager<Usu
         // Multi-account provisioning needs a scoped lock and an explicit administration workflow.
         await db.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock(hashtextextended('nexoruta:platform-bootstrap', 0))", ct);
         var existing = await (from access in db.AccesosPlataforma.AsNoTracking()
-                              join account in db.Usuarios on access.UsuarioId equals account.Id
-                              join platformRole in db.RolesPlataforma on access.RolId equals platformRole.Id
-                              select new { access, account, platformRole }).SingleOrDefaultAsync(ct);
+                              join account in db.Usuarios.AsNoTracking() on access.UsuarioId equals account.Id
+                              join platformRole in db.RolesPlataforma.AsNoTracking() on access.RolId equals platformRole.Id
+                              select new
+                              {
+                                  access,
+                                  accountId = account.Id,
+                                  accountEmail = account.Email,
+                                  passwordHash = account.PasswordHash,
+                                  platformRole
+                              }).SingleOrDefaultAsync(ct);
         var codes = CatalogoPermisos.Plataforma.Select(x => x.Codigo).ToArray();
         if (existing is not null)
         {
@@ -42,12 +49,15 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, UserManager<Usu
             var grants = await (from grant in db.RolesPlataformaPermisos
                                 join permission in db.Permisos on grant.PermisoId equals permission.Id
                                 where grant.RolId == existing.platformRole.Id select permission.Codigo).ToArrayAsync(ct);
-            if (existing.account.Email!.Trim().ToLowerInvariant() != normalized || string.IsNullOrWhiteSpace(existing.account.PasswordHash) ||
+            if (existing.accountEmail!.Trim().ToLowerInvariant() != normalized || string.IsNullOrWhiteSpace(existing.passwordHash) ||
                 !existing.access.Activo || !existing.platformRole.EsProtegidoSistema || !existing.platformRole.PuedeGestionarOrganizaciones ||
                 !grants.ToHashSet(StringComparer.Ordinal).SetEquals(codes) ||
-                await db.AccesosUsuario.AnyAsync(x => x.UsuarioId == existing.account.Id, ct))
+                await db.AccesosUsuario.AnyAsync(x => x.UsuarioId == existing.accountId, ct))
                 throw new InvalidOperationException("Existing platform account is incompatible with configured initialization (identity, state or permissions); no account was changed.");
-            await SincronizarPasswordConfiguradaAsync(existing.account, password, ct);
+            var account = await db.Usuarios.SingleAsync(x => x.Id == existing.accountId, ct);
+            if (account.Email!.Trim().ToLowerInvariant() != normalized || string.IsNullOrWhiteSpace(account.PasswordHash))
+                throw new InvalidOperationException("Existing platform account is incompatible with configured initialization (identity or password); no account was changed.");
+            await SincronizarPasswordConfiguradaAsync(account, password, ct);
             await transaction.CommitAsync(ct);
             return;
         }
