@@ -35,6 +35,46 @@ public sealed partial class OperacionesRepartoHttpTests(PostgresFixture postgres
     }
 
     [Fact]
+    public async Task InicioRechazadoPorFechaPuedeConfirmarseConUnComandoNuevoAlLlegarElDia()
+    {
+        var data = await postgres.CreateDatabaseAsync();
+        var fecha = FechaOperacion;
+        // Keep authentication tokens valid while preparing the route; move the business clock
+        // to the previous operator-local day only after setup is complete.
+        var reloj = new ManualClock(DateTimeOffset.UtcNow);
+        using var factory = new IntegrationApiFactory(data, timeProvider: reloj);
+        using var client = factory.CreateHttpClient();
+        var hoja = await Lista(data, client);
+        reloj.Set(new DateTimeOffset(fecha.AddDays(-1).ToDateTime(new TimeOnly(12, 0)), TimeSpan.FromHours(-3)));
+        var inicial = Operacion(Guid.NewGuid(), 1, "InicioJornada");
+
+        var conflicto = await Aplicar(client, hoja, inicial);
+        Assert.Equal("Conflicto", conflicto.Resultado);
+        Assert.Equal("La jornada nueva debe iniciarse con la hoja correspondiente al día del operador.", conflicto.Detalle);
+        Assert.Equal(JsonSerializer.Serialize(conflicto), JsonSerializer.Serialize(await Aplicar(client, hoja, inicial)));
+        var despuesDelConflicto = (await client.GetFromJsonAsync<HojaRutaResponse>($"/api/mobile/rutas/{hoja.Id}"))!;
+        Assert.Equal("Despachada", despuesDelConflicto.Estado);
+        Assert.Equal(conflicto.VersionRuta, despuesDelConflicto.Version);
+        Assert.Equal(1, despuesDelConflicto.UltimaSecuencia);
+
+        reloj.Set(new DateTimeOffset(fecha.ToDateTime(new TimeOnly(12, 0)), TimeSpan.FromHours(-3)));
+        var reintento = Operacion(Guid.NewGuid(), 2, "InicioJornada");
+        var aplicado = await Aplicar(client, hoja, reintento);
+        Assert.Equal("Aplicada", aplicado.Resultado);
+        Assert.Equal(JsonSerializer.Serialize(aplicado), JsonSerializer.Serialize(await Aplicar(client, hoja, reintento)));
+        var iniciada = (await client.GetFromJsonAsync<HojaRutaResponse>($"/api/mobile/rutas/{hoja.Id}"))!;
+        Assert.Equal("EnCurso", iniciada.Estado);
+        Assert.Equal(2, iniciada.UltimaSecuencia);
+
+        await using var db = data.CreateDbContext();
+        var operaciones = await db.OperacionesJornada.OrderBy(x => x.Secuencia).ToArrayAsync();
+        Assert.Equal(2, operaciones.Length);
+        Assert.Equal("Conflicto", operaciones[0].Resultado);
+        Assert.Equal("Aplicada", operaciones[1].Resultado);
+        Assert.NotEqual(operaciones[0].Id, operaciones[1].Id);
+    }
+
+    [Fact]
     public async Task EntregaFisicaPendienteSeConservaTambienDespuesDeCerrarLaJornada()
     {
         var data = await postgres.CreateDatabaseAsync(); using var factory = data.CreateApiFactory(); using var client = factory.CreateHttpClient();

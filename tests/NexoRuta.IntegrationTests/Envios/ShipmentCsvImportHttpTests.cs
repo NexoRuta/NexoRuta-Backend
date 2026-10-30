@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
@@ -14,6 +15,7 @@ using NexoRuta.Domain.ReglasOperativas;
 using NexoRuta.IntegrationTests.Fixtures;
 using NexoRuta.Infrastructure.Administracion;
 using NexoRuta.Infrastructure.Outbox;
+using Npgsql;
 using Xunit.Abstractions;
 
 namespace NexoRuta.IntegrationTests.Envios;
@@ -155,6 +157,15 @@ public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOu
             error => error.GetProperty("campo").GetString() == "pesoGramos");
         Assert.Equal(1, await db.Envios.CountAsync());
         Assert.Equal(beforeOutbox, await db.OutboxMessages.CountAsync());
+
+        using var correctedRetry = await ImportAsync(client, Csv(Row("NEW-2")), operatorId);
+        Assert.Equal(HttpStatusCode.OK, correctedRetry.StatusCode);
+        var retryBody = await Body(correctedRetry);
+        Assert.Equal(new[] { "Creado" }, States(retryBody));
+        Assert.Equal(1, Int(retryBody, "resumen", "creados"));
+        Assert.Equal(2, await db.Envios.CountAsync());
+        Assert.Equal(2, await db.IdentidadesEnvioImportado.CountAsync());
+        Assert.Equal(beforeOutbox + 2, await db.OutboxMessages.CountAsync());
     }
 
     [Fact]
@@ -190,6 +201,95 @@ public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOu
         Assert.Equal(2, await db.Envios.CountAsync());
         Assert.Equal(1, await db.Envios.CountAsync(x => x.ComercioId == secondCommerceId));
         Assert.Equal(4, await db.OutboxMessages.CountAsync());
+    }
+
+    [Fact]
+    public async Task Import_IsCommerceIsolatedWithRestrictedApiRole()
+    {
+        var database = await postgres.CreateDatabaseAsync();
+        const string firstCommerceEmail = "csv-rls-first@example.test";
+        const string secondCommerceEmail = "csv-rls-second@example.test";
+        const string firstOperatorName = "RLS Import Operator One";
+        const string secondOperatorName = "RLS Import Operator Two";
+        await using (var seed = database.CreateDbContext())
+        {
+            await AuthenticationTestData.Seeder(seed,
+                new AccesoInicial(firstCommerceEmail, firstOperatorName, "RLS Import Commerce One", "csv-rls-op-one@example.test"))
+                .SeedAsync();
+            await AuthenticationTestData.Seeder(seed,
+                new AccesoInicial(secondCommerceEmail, secondOperatorName, "RLS Import Commerce Two", "csv-rls-op-two@example.test"))
+                .SeedAsync();
+            await ReglasEnvioTestData.SembrarInicialesAsync(seed);
+        }
+
+        Guid firstOperatorId;
+        Guid firstCommerceAccessId;
+        Guid secondOperatorId;
+        Guid secondCommerceAccessId;
+        await using (var seed = database.CreateDbContext())
+        {
+            firstOperatorId = await seed.Operadores.Where(x => x.Nombre == firstOperatorName).Select(x => x.Id).SingleAsync();
+            secondOperatorId = await seed.Operadores.Where(x => x.Nombre == secondOperatorName).Select(x => x.Id).SingleAsync();
+            firstCommerceAccessId = await (from access in seed.AccesosUsuario
+                                           join user in seed.Usuarios on access.UsuarioId equals user.Id
+                                           where user.Email == firstCommerceEmail && access.ComercioId != null
+                                           select access.Id).SingleAsync();
+            secondCommerceAccessId = await (from access in seed.AccesosUsuario
+                                            join user in seed.Usuarios on access.UsuarioId equals user.Id
+                                            where user.Email == secondCommerceEmail && access.ComercioId != null
+                                            select access.Id).SingleAsync();
+        }
+
+        var runtimeConnection = await CreateRestrictedApiConnectionAsync(database);
+        var settings = AuthenticationTestData.Settings();
+        settings["ConnectionStrings:Postgres"] = runtimeConnection;
+        settings["DatabaseInitialization:ApplyMigrations"] = "false";
+        settings["DatabaseInitialization:SeedData"] = "false";
+        using var factory = new IntegrationApiFactory(database, settings: settings,
+            replaceDbContext: false, seedOperationalRules: false);
+        using var firstCommerce = factory.CreateHttpClient();
+        using var secondCommerce = factory.CreateHttpClient();
+        await firstCommerce.SetBearerForAccessAsync(database, firstCommerceAccessId);
+        await secondCommerce.SetBearerForAccessAsync(database, secondCommerceAccessId);
+
+        const string sharedReference = "SAME-REFERENCE-DIFFERENT-COMMERCE";
+        using var firstImport = await ImportAsync(firstCommerce, Csv(Row(sharedReference)), firstOperatorId);
+        using var secondImport = await ImportAsync(secondCommerce, Csv(Row(sharedReference)), secondOperatorId);
+        Assert.Equal(HttpStatusCode.OK, firstImport.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, secondImport.StatusCode);
+        var firstBody = await Body(firstImport);
+        var secondBody = await Body(secondImport);
+        Assert.Equal(new[] { "Creado" }, States(firstBody));
+        Assert.Equal(new[] { "Creado" }, States(secondBody));
+        var firstShipmentId = firstBody.GetProperty("filas")[0].GetProperty("envioId").GetGuid();
+        var secondShipmentId = secondBody.GetProperty("filas")[0].GetProperty("envioId").GetGuid();
+        Assert.NotEqual(firstShipmentId, secondShipmentId);
+
+        await using var verify = database.CreateDbContext();
+        Assert.Equal(2, await verify.Envios.CountAsync());
+        Assert.Equal(2, await verify.IdentidadesEnvioImportado.CountAsync());
+        Assert.Equal(4, await verify.OutboxMessages.CountAsync());
+    }
+
+    private static async Task<string> CreateRestrictedApiConnectionAsync(IntegrationDatabase database)
+    {
+        var login = $"api_csv_rls_{Guid.NewGuid():N}";
+        var password = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
+        await using var connection = new NpgsqlConnection(database.ConnectionString);
+        await connection.OpenAsync();
+        await using (var createRole = new NpgsqlCommand(
+                         $"CREATE ROLE \"{login}\" LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS PASSWORD '{password}'",
+                         connection))
+            await createRole.ExecuteNonQueryAsync();
+        await using (var grant = new NpgsqlCommand($"GRANT nexoruta_api TO \"{login}\"", connection))
+            await grant.ExecuteNonQueryAsync();
+        var builder = new NpgsqlConnectionStringBuilder(database.ConnectionString)
+        {
+            Username = login,
+            Password = password,
+            Pooling = false
+        };
+        return builder.ConnectionString;
     }
 
     [Fact]

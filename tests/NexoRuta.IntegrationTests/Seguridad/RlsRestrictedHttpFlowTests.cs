@@ -19,10 +19,14 @@ public sealed class RlsRestrictedHttpFlowTests(PostgresFixture postgres) : IClas
     {
         var database = await postgres.CreateDatabaseAsync();
         const string commerceEmail = "rls-http-commerce@example.test";
+        const string otherCommerceEmail = "rls-http-other-commerce@example.test";
         Guid operatorId;
         Guid commerceAccessId;
         Guid commerceId;
         Guid commerceUserId;
+        Guid otherCommerceAccessId;
+        Guid otherCommerceId;
+        Guid otherCommerceUserId;
         await using (var owner = database.CreateDbContext())
         {
             await AuthenticationTestData.Seeder(owner,
@@ -34,6 +38,13 @@ public sealed class RlsRestrictedHttpFlowTests(PostgresFixture postgres) : IClas
             commerceAccessId = access.Id;
             commerceId = access.ComercioId!.Value;
             commerceUserId = access.UsuarioId;
+            await AuthenticationTestData.Seeder(owner,
+                new AccesoInicial(otherCommerceEmail, "Other operator", "Other commerce", "rls-http-other-operator@example.test"))
+                .SeedAsync();
+            var otherAccess = await owner.AccesosUsuario.SingleAsync(x => x.ComercioId != null && x.ComercioId != commerceId);
+            otherCommerceAccessId = otherAccess.Id;
+            otherCommerceId = otherAccess.ComercioId!.Value;
+            otherCommerceUserId = otherAccess.UsuarioId;
         }
 
         var runtime = await RestrictApiAsync(database);
@@ -55,11 +66,41 @@ public sealed class RlsRestrictedHttpFlowTests(PostgresFixture postgres) : IClas
         var createdBody = await created.Content.ReadFromJsonAsync<JsonElement>();
         var shipmentId = createdBody.GetProperty("id").GetGuid();
 
+        using var importedCreated = await client.PostAsJsonAsync("/api/envios", new
+        {
+            OperadorId = operatorId,
+            DestinatarioNombre = "Grace Hopper", DestinatarioEmail = "grace@example.test",
+            Direccion = "18 de Julio 456",
+            CodigoBulto = "RLS-2",
+            PesoGramos = 700m,
+            LargoCentimetros = 25m,
+            AnchoCentimetros = 12m,
+            AltoCentimetros = 6m
+        });
+        Assert.Equal(HttpStatusCode.Created, importedCreated.StatusCode);
+        var importedShipmentId = (await importedCreated.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
         await using (var owner = database.CreateDbContext())
         {
+            // The second row represents the import identity; the first shipment remains an individual shipment without a reference.
+            await owner.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO "IdentidadesEnvioImportado"
+                    ("ComercioId", "ReferenciaExterna", "EnvioId", "OperadorId", "VersionHuella", "Huella")
+                VALUES ({commerceId}, {"RLS-EXTERNAL-2"}, {importedShipmentId}, {operatorId}, {1}, {RandomNumberGenerator.GetBytes(32)})
+                """);
             Assert.Equal(1, await owner.Database.SqlQueryRaw<int>(
                 "SELECT count(*)::int AS \"Value\" FROM public.\"EnvioEventos\" WHERE \"EnvioId\" = {0} AND \"Tipo\" = 'Creacion'",
                 shipmentId).SingleAsync());
+            Assert.False(await owner.Database.SqlQueryRaw<bool>(
+                "SELECT has_table_privilege('nexoruta_api', 'public.\"IdentidadesEnvioImportado\"', 'INSERT') OR has_table_privilege('nexoruta_api', 'public.\"IdentidadesEnvioImportado\"', 'UPDATE') OR has_table_privilege('nexoruta_api', 'public.\"IdentidadesEnvioImportado\"', 'DELETE') AS \"Value\"").SingleAsync());
+            Assert.True(await owner.Database.SqlQueryRaw<bool>("""
+                SELECT c.relrowsecurity AND c.relforcerowsecurity AS "Value"
+                FROM pg_class c WHERE c.oid = 'public."IdentidadesEnvioImportado"'::regclass
+                """).SingleAsync());
+            Assert.True(await owner.Database.SqlQueryRaw<bool>("""
+                SELECT NOT r.rolcanlogin AND NOT r.rolsuper AND NOT r.rolbypassrls AS "Value"
+                FROM pg_roles r WHERE r.rolname = 'nexoruta_shipment_fn'
+                """).SingleAsync());
             Assert.False(await owner.Database.SqlQueryRaw<bool>(
                 "SELECT has_table_privilege('nexoruta_api', 'public.\"EnvioEventos\"', 'INSERT') AS \"Value\"").SingleAsync());
             Assert.False(await owner.Database.SqlQueryRaw<bool>(
@@ -108,9 +149,33 @@ public sealed class RlsRestrictedHttpFlowTests(PostgresFixture postgres) : IClas
 
         using var listed = await client.GetAsync("/api/envios");
         Assert.Equal(HttpStatusCode.OK, listed.StatusCode);
+        await using (var owner = database.CreateDbContext())
+        {
+            Assert.False(await owner.Database.SqlQueryRaw<bool>(
+                "SELECT has_table_privilege('nexoruta_api', 'public.\"IdentidadesEnvioImportado\"', 'SELECT') AS \"Value\"").SingleAsync());
+            Assert.True(await owner.Database.SqlQueryRaw<bool>(
+                "SELECT has_function_privilege('nexoruta_api', 'nexoruta_app.list_import_shipment_references(uuid[])', 'EXECUTE') AS \"Value\"").SingleAsync());
+        }
         var shipments = await listed.Content.ReadFromJsonAsync<JsonElement[]>();
-        var historical = Assert.Single(shipments!, x => x.GetProperty("id").GetGuid() == shipmentId);
-        Assert.Equal("Chosen operator", historical.GetProperty("operadorNombre").GetString());
+        var individual = Assert.Single(shipments!, x => x.GetProperty("id").GetGuid() == shipmentId);
+        Assert.Equal("Ada Lovelace", individual.GetProperty("destinatarioNombre").GetString());
+        Assert.Equal("destinatario@example.test", individual.GetProperty("destinatarioEmail").GetString());
+        Assert.Null(individual.GetProperty("referenciaExterna").GetString());
+        var importedShipment = Assert.Single(shipments!, x => x.GetProperty("id").GetGuid() == importedShipmentId);
+        Assert.Equal("RLS-EXTERNAL-2", importedShipment.GetProperty("referenciaExterna").GetString());
+        Assert.Equal("Chosen operator", importedShipment.GetProperty("operadorNombre").GetString());
+
+        await using (var otherCommerce = runtime.CreateDbContext())
+        await using (var otherTransaction = await otherCommerce.BeginOrJoinAsync())
+        {
+            await otherCommerce.ApplyAsync(new RlsActorContext(RlsActorKind.Comercio, otherCommerceUserId,
+                otherCommerceAccessId, otherCommerceId, OrganizationType: TipoAccesoUsuario.Comercio));
+            var foreignReferences = await otherCommerce.Database.SqlQueryRaw<Guid>(
+                "SELECT \"EnvioId\" AS \"Value\" FROM nexoruta_app.list_import_shipment_references({0})",
+                new object[] { new[] { importedShipmentId } }).ToArrayAsync();
+            Assert.Empty(foreignReferences);
+            await otherTransaction.CommitAsync();
+        }
 
         await using var restrictedHistory = runtime.CreateDbContext();
         await using var historyTransaction = await restrictedHistory.BeginOrJoinAsync();

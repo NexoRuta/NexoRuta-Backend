@@ -17,7 +17,8 @@ public sealed partial class EfRutasRepository(NexoRutaDbContext db, TimeProvider
         await using var tx = await db.BeginOrJoinAsync(ct);
         await Contexto(operadorId, ct);
         var consulta = db.HojasRuta.AsNoTracking().Include(x => x.Paradas).Where(x => x.OperadorId == operadorId && x.Fecha == fecha);
-        if (repartidorId is { } rep) consulta = consulta.Where(x => x.RepartidorAccesoId == rep && x.Estado != EstadoHojaRuta.Planificada);
+        if (repartidorId is { } rep) consulta = consulta.Where(x => x.RepartidorAccesoId == rep
+            && x.Estado != EstadoHojaRuta.Planificada && x.Estado != EstadoHojaRuta.Cancelada);
         var hojas = await consulta.OrderBy(x => x.Id).ToArrayAsync(ct);
         var salida = new List<HojaRutaDatos>();
         foreach (var hoja in hojas) salida.Add(await Datos(hoja, ct));
@@ -37,9 +38,31 @@ public sealed partial class EfRutasRepository(NexoRutaDbContext db, TimeProvider
         if (!await RepartidorHabilitado(operadorId, datos.RepartidorAccesoId, ct)) throw new ConflictoRepartoException("El repartidor no está habilitado para ejecutar rutas.");
         var vehiculo = await db.Vehiculos.SingleOrDefaultAsync(x => x.OperadorId == operadorId && x.Id == datos.VehiculoId && x.Activo, ct)
             ?? throw new ConflictoRepartoException("El vehículo no está activo en este operador.");
-        if (await db.HojasRuta.AnyAsync(x => x.OperadorId == operadorId && x.Fecha == datos.Fecha && x.Estado != EstadoHojaRuta.Finalizada
-            && (x.VehiculoId == vehiculo.Id || x.RepartidorAccesoId == datos.RepartidorAccesoId), ct))
-            throw new ConflictoRepartoException("El repartidor o el vehículo ya tienen una ruta pendiente para ese día.");
+        var reservas = await db.HojasRuta.AsNoTracking()
+            .Where(x => x.OperadorId == operadorId && x.Fecha == datos.Fecha
+                && x.Estado != EstadoHojaRuta.Finalizada && x.Estado != EstadoHojaRuta.Cancelada
+                && x.ReservaRecursosActiva
+                && (x.VehiculoId == vehiculo.Id || x.RepartidorAccesoId == datos.RepartidorAccesoId))
+            .OrderBy(x => x.Id)
+            .Select(x => new
+            {
+                x.Id, x.Estado, x.Fecha, x.RepartidorAccesoId, x.VehiculoId, x.VehiculoMatricula,
+                Paradas = x.Paradas.Count, ParadasActivas = x.Paradas.Count(p => p.Activa)
+            }).ToArrayAsync(ct);
+        if (reservas.Length > 0)
+        {
+            var detalles = reservas.Select(r =>
+            {
+                var recursos = new List<string>();
+                if (r.RepartidorAccesoId == datos.RepartidorAccesoId) recursos.Add("el repartidor seleccionado");
+                if (r.VehiculoId == vehiculo.Id) recursos.Add($"el vehículo {r.VehiculoMatricula}");
+                var motivo = r.Estado == EstadoHojaRuta.Planificada && r.Paradas == 0
+                    ? "Es una ruta vacía que conserva la reserva para recibir reasignaciones."
+                    : $"Permanece {r.Estado} con {r.ParadasActivas} parada(s) activa(s).";
+                return $"La ruta {r.Id} del {r.Fecha:yyyy-MM-dd} reserva {string.Join(" y ", recursos)}. {motivo}";
+            });
+            throw new ConflictoRepartoException($"No se puede planificar. {string.Join(" ", detalles)}");
+        }
         var ids = datos.Paradas.Select(x => x.EnvioId).ToArray();
         var envios = await db.Envios.Where(x => x.OperadorId == operadorId && ids.Contains(x.Id)).ToArrayAsync(ct);
         if (envios.Length != ids.Length) throw new ConflictoRepartoException("Algún envío no pertenece al operador.");
@@ -88,6 +111,22 @@ public sealed partial class EfRutasRepository(NexoRutaDbContext db, TimeProvider
             || await db.Envios.CountAsync(x => x.OperadorId == operadorId && ids.Contains(x.Id) && x.Estado == EstadoEnvio.AsignadoRuta, ct) != ids.Length)
             throw new ConflictoRepartoException("Todos los envíos deben seguir asignados y sus bultos recibidos físicamente en depósito.");
         hoja.Despachar(version); await db.SaveChangesAsync(ct);
+        var salida = await Datos(hoja, ct); await tx.CommitAsync(ct); return salida;
+    }
+
+    public async Task<HojaRutaDatos?> CancelarAsync(Guid operadorId, Guid rutaId, long version, CancellationToken ct)
+    {
+        await using var tx = await db.BeginOrJoinAsync(ct);
+        await Contexto(operadorId, ct); await Bloquear(operadorId, ct);
+        var hoja = await db.HojasRuta.Include(x => x.Paradas)
+            .SingleOrDefaultAsync(x => x.OperadorId == operadorId && x.Id == rutaId, ct);
+        if (hoja is null) return null;
+        if (hoja.Version != version || hoja.Estado != EstadoHojaRuta.Planificada)
+            throw new ConflictoRepartoException("La ruta cambió o ya no está planificada.");
+        if (hoja.Paradas.Any(p => p.Activa))
+            throw new ConflictoRepartoException("Primero cancelá o reasigná las paradas activas; no se cancelan envíos al cancelar una ruta.");
+        hoja.Cancelar(version);
+        await db.SaveChangesAsync(ct);
         var salida = await Datos(hoja, ct); await tx.CommitAsync(ct); return salida;
     }
 
@@ -176,7 +215,8 @@ public sealed partial class EfRutasRepository(NexoRutaDbContext db, TimeProvider
         return new(hoja.Id, hoja.JornadaId, hoja.RepartidorAccesoId, hoja.VehiculoId, hoja.VehiculoMatricula, hoja.Fecha,
             hoja.Estado.ToString(), hoja.Version, hoja.UltimaSecuencia,
             new(politica.Version, politica.ZonaHoraria, politica.MaximoParadas,
-                politica.RequiereFotoIntento, politica.BloquearDiscrepanciasCarga), paradas, cierres.SelectMany(LeerIncidencias).ToArray());
+                politica.RequiereFotoIntento, politica.BloquearDiscrepanciasCarga), paradas, cierres.SelectMany(LeerIncidencias).ToArray(),
+            hoja.ReservaRecursosActiva);
     }
     private static ReglasEnvioDatos ReglasDatos(VersionReglasOperativas v) => new(v.Id, v.NumeroVersionPublicada!.Value,
         v.MaxIntentosEntrega!.Value, v.IntervaloEntreIntentosMinutos!.Value, v.PoliticaDevolucionAlAgotarIntentos!.Value.ToString(),

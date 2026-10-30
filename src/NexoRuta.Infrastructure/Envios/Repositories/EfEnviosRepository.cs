@@ -212,6 +212,7 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
                 OperadorNombre = selectedOperator.Nombre,
                 ComercioNombre = comercio.Nombre,
                 DestinatarioNombre = destinatario.Nombre,
+                DestinatarioEmail = destinatario.Email,
                 Direccion = direccion.Descripcion,
                 DestinoConfirmado = direccion.ConfirmadaEnUtc != null,
                 Estado = envio.Estado.ToString(),
@@ -222,6 +223,7 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
             return [];
 
         var ids = shipments.Select(x => x.Id).ToArray();
+        var referencesByShipment = await ListarReferenciasExternasAsync(ids, comercioId, cancellationToken);
         var packages = await db.Bultos
             .Where(x => ids.Contains(x.EnvioId))
             .Select(x => new
@@ -249,6 +251,44 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
             Estado: x.Estado,
             Version: x.Version,
             Bultos: packagesByShipment[x.Id].ToArray())
-        { DestinoConfirmado = x.DestinoConfirmado }).ToArray();
+        {
+            DestinoConfirmado = x.DestinoConfirmado,
+            ReferenciaExterna = referencesByShipment.GetValueOrDefault(x.Id),
+            DestinatarioEmail = x.DestinatarioEmail
+        }).ToArray();
+    }
+
+    private async Task<Dictionary<Guid, string>> ListarReferenciasExternasAsync(
+        Guid[] shipmentIds, Guid? commerceId, CancellationToken cancellationToken)
+    {
+        var references = new Dictionary<Guid, string>();
+        if (commerceId is null || shipmentIds.Length == 0)
+            return references;
+
+        var connection = db.Database.GetDbConnection();
+        var openedHere = connection.State != ConnectionState.Open;
+        if (openedHere)
+            await db.Database.OpenConnectionAsync(cancellationToken);
+        try
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT \"EnvioId\", \"ReferenciaExterna\" FROM nexoruta_app.list_import_shipment_references(@shipment_ids)";
+            command.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = "shipment_ids";
+            parameter.Value = shipmentIds;
+            command.Parameters.Add(parameter);
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+                references.Add(reader.GetGuid(0), reader.GetString(1));
+        }
+        finally
+        {
+            if (openedHere)
+                await db.Database.CloseConnectionAsync();
+        }
+
+        return references;
     }
 }

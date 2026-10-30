@@ -678,6 +678,21 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             Assert.Equal(HttpStatusCode.NoContent, receivedCandidate.StatusCode);
             var fecha = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow,
                 TimeZoneInfo.FindSystemTimeZoneById("America/Montevideo")).DateTime);
+            var fechaSeleccionada = fecha.AddDays(1);
+            var fechaDeReservaOriginal = fecha;
+            var sourceVehicleId = sourceVehicleJson.RootElement.GetProperty("id").GetGuid();
+            using var reservaVaciaOriginal = await api.PostAsJsonAsync("/api/rutas", new
+            {
+                RepartidorAccesoId = operatorAccessId,
+                VehiculoId = sourceVehicleId,
+                Fecha = fechaDeReservaOriginal,
+                Paradas = Array.Empty<object>()
+            });
+            Assert.Equal(HttpStatusCode.OK, reservaVaciaOriginal.StatusCode);
+            using var reservaVaciaJson = JsonDocument.Parse(await reservaVaciaOriginal.Content.ReadAsStringAsync());
+            var reservaVaciaId = reservaVaciaJson.RootElement.GetProperty("id").GetGuid();
+            await using (var reservedDay = database.CreateDbContext())
+                Assert.True((await reservedDay.HojasRuta.SingleAsync(x => x.Id == reservaVaciaId)).ReservaRecursosActiva);
 
             var chromium = FindChromium();
             Assert.True(File.Exists(chromium), "A cached Chromium executable is required for this isolated browser check.");
@@ -718,7 +733,10 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             Assert.True(await browser.EvaluateBooleanAsync("document.querySelector('[data-capacity-label]')?.innerText.includes('kg de capacidad') && document.querySelector('[data-capacity-label]')?.innerText.includes('m³') && !document.querySelector('[data-capacity-label]')?.innerText.includes('cm³')"),
                 $"Vehicle capacity should use the readable units shown in the approved reference: {capacitySummary}");
             Assert.Equal("Fecha de salida", await browser.EvaluateStringAsync("document.querySelector('label[for=Fecha]')?.innerText.trim() || ''"));
-            Assert.Equal("Miércoles 28 de octubre", await browser.EvaluateStringAsync("document.querySelector('[data-summary-date]')?.innerText.trim() || ''"));
+            var culturaResumen = CultureInfo.GetCultureInfo("es-UY");
+            var fechaResumenEsperada = fecha.ToDateTime(TimeOnly.MinValue).ToString("dddd d 'de' MMMM", culturaResumen);
+            fechaResumenEsperada = char.ToUpper(fechaResumenEsperada[0], culturaResumen) + fechaResumenEsperada[1..];
+            Assert.Equal(fechaResumenEsperada, await browser.EvaluateStringAsync("document.querySelector('[data-summary-date]')?.innerText.trim() || ''"));
             Assert.True(await browser.EvaluateBooleanAsync("!document.querySelector('[data-capacity-label]')?.innerText.includes('Seleccioná un vehículo')"),
                 $"Selected vehicle capacity was not reflected next to the selector: {capacitySummary}");
             Assert.True(await browser.EvaluateBooleanAsync("(()=>{const page=document.querySelector('.nr-routes-page');const family=getComputedStyle(page).fontFamily;return family.includes('sans-serif')&&[...document.querySelectorAll('.nr-planning-summary,.nr-planning-summary dt,.nr-planning-summary button,.nr-planning-row.is-selected [data-stop-order],.nr-planning-row.is-selected [data-stop-time]')].every(x=>getComputedStyle(x).fontFamily===family);})()"),
@@ -752,7 +770,11 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             await browser.ClickLinkContainingKeyboardAsync("Cancelar");
             await browser.WaitForAsync("location.pathname.toLowerCase() === '/rutas'");
             await using (var afterPlannerCancel = database.CreateDbContext())
-                Assert.Empty(await afterPlannerCancel.HojasRuta.ToArrayAsync());
+            {
+                var retainedReservation = await afterPlannerCancel.HojasRuta.SingleAsync(x => x.Id == reservaVaciaId);
+                Assert.Equal((fechaDeReservaOriginal, EstadoHojaRuta.Planificada, true),
+                    (retainedReservation.Fecha, retainedReservation.Estado, retainedReservation.ReservaRecursosActiva));
+            }
 
             await browser.NavigateAsync($"{backofficeUrl}/rutas/planificar?fecha={fecha:yyyy-MM-dd}");
             await browser.WaitForAsync("document.querySelector('[data-plan-row] [data-plan-check]') !== null");
@@ -766,16 +788,47 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             Assert.True(await browser.EvaluateBooleanAsync("(()=>{const b=document.querySelector('.nr-planning-submit [type=submit]');const r=b?.getBoundingClientRect();return Boolean(b&&r&&r.top>=0&&r.bottom<=innerHeight&&document.querySelector('[data-summary-count]')?.innerText==='1'&&document.querySelector('[data-summary-destination]')?.dataset.confirmed==='true'&&document.querySelector('[data-summary-custody]')?.dataset.confirmed==='true');})()"),
                 $"The mobile summary and save action should be reachable and reflect verified selected-shipment conditions. {mobileSummaryMetrics}");
             await browser.CaptureScreenshotAsync(ScreenshotPath("planificacion-320x900-resumen-y-guardar.png"));
+            await browser.ClickButtonContainingKeyboardAsync("Guardar planificaci\u00F3n");
+            await browser.WaitForAsync("document.querySelector('.nr-routes-alert.is-error')?.innerText.includes('No se puede planificar') === true");
+            Assert.True(await browser.EvaluateBooleanAsync($"(()=>{{const link=document.querySelector('.nr-routes-alert a');if(!link)return false;const u=new URL(link.href);return u.searchParams.get('fecha')==='{fechaDeReservaOriginal:yyyy-MM-dd}'&&u.searchParams.get('rutaSeleccionadaId')==='{reservaVaciaId:D}'&&link.innerText.includes('Revisar ruta');}})()"),
+                "The occupied-resource conflict should identify the existing intentionally empty route and link to its details.");
+            Assert.True(await browser.EvaluateBooleanAsync($"document.querySelector('#Fecha')?.value==='{fechaDeReservaOriginal:yyyy-MM-dd}'&&document.querySelector('#RepartidorAccesoId')?.value==='{operatorAccessId:D}'&&document.querySelector('#VehiculoId')?.value==='{sourceVehicleId:D}'&&document.querySelector('[data-plan-row].is-selected [data-stop-order]')?.value==='1'&&document.querySelector('[data-plan-row].is-selected [data-stop-time]')?.value==='17:30'"),
+                "A reservation conflict must preserve the selected date, resources, shipment, order and arrival time.");
+            await browser.CaptureScreenshotAsync(ScreenshotPath("planificacion-conflicto-reserva-fecha-original.png"));
+            var previousSummaryDate = await browser.EvaluateStringAsync("document.querySelector('[data-summary-date]')?.innerText.trim() || ''");
+            Assert.True(await browser.EvaluateBooleanAsync($"(()=>{{const d=document.querySelector('#Fecha');if(!d)return false;d.value='{fechaSeleccionada:yyyy-MM-dd}';d.dispatchEvent(new Event('input',{{bubbles:true}}));d.dispatchEvent(new Event('change',{{bubbles:true}}));return d.value==='{fechaSeleccionada:yyyy-MM-dd}';}})()"),
+                "The edited departure date should be a real input value before retrying the same plan.");
+            var selectedSummaryDate = await browser.EvaluateStringAsync("document.querySelector('[data-summary-date]')?.innerText.trim() || ''");
+            Assert.NotEqual(previousSummaryDate, selectedSummaryDate);
+            Assert.Contains(fechaSeleccionada.Day.ToString(CultureInfo.InvariantCulture), selectedSummaryDate, StringComparison.Ordinal);
+            Assert.Contains(fechaSeleccionada.ToString("MMMM", CultureInfo.GetCultureInfo("es-UY")), selectedSummaryDate, StringComparison.OrdinalIgnoreCase);
+            await browser.CaptureScreenshotAsync(ScreenshotPath("planificacion-fecha-editada-y-resumen-actualizado.png"), fullPage: true);
+            var fechaCambioMes = new DateOnly(fecha.Year, fecha.Month, DateTime.DaysInMonth(fecha.Year, fecha.Month)).AddDays(1);
+            Assert.True(await browser.EvaluateBooleanAsync($"(()=>{{const d=document.querySelector('#Fecha');d.value='{fechaCambioMes:yyyy-MM-dd}';d.dispatchEvent(new Event('input',{{bubbles:true}}));d.dispatchEvent(new Event('change',{{bubbles:true}}));return d.value==='{fechaCambioMes:yyyy-MM-dd}';}})()"),
+                "The date control should accept a selection across a month boundary.");
+            var summaryAfterMonthChange = await browser.EvaluateStringAsync("document.querySelector('[data-summary-date]')?.innerText.trim() || ''");
+            Assert.Contains(fechaCambioMes.Day.ToString(CultureInfo.InvariantCulture), summaryAfterMonthChange, StringComparison.Ordinal);
+            Assert.Contains(fechaCambioMes.ToString("MMMM", CultureInfo.GetCultureInfo("es-UY")), summaryAfterMonthChange, StringComparison.OrdinalIgnoreCase);
+            Assert.True(await browser.EvaluateBooleanAsync($"(()=>{{const d=document.querySelector('#Fecha');d.value='{fechaSeleccionada:yyyy-MM-dd}';d.dispatchEvent(new Event('input',{{bubbles:true}}));d.dispatchEvent(new Event('change',{{bubbles:true}}));return d.value==='{fechaSeleccionada:yyyy-MM-dd}';}})()"),
+                "Restore the requested 30/10 selection after the month-boundary summary check.");
+            Assert.Equal(selectedSummaryDate, await browser.EvaluateStringAsync("document.querySelector('[data-summary-date]')?.innerText.trim() || ''"));
             await browser.ClickButtonContainingKeyboardAsync("Guardar planificación");
             await browser.WaitForAsync("location.pathname.toLowerCase() === '/rutas' && document.querySelector('.nr-routes-alert.is-success')?.innerText.includes('Ruta planificada') === true");
 
+            await browser.WaitForAsync($"new URLSearchParams(location.search).get('fecha')==='{fechaSeleccionada:yyyy-MM-dd}'");
+            await browser.CaptureScreenshotAsync(ScreenshotPath("operacion-diaria-fecha-seleccionada.png"), fullPage: true);
+            fecha = fechaSeleccionada;
             Guid sourceRouteId;
             long sourceRouteVersion;
             await using (var afterBrowserPlan = database.CreateDbContext())
             {
                 var route = await afterBrowserPlan.HojasRuta.SingleAsync(x => x.Fecha == fecha && x.RepartidorAccesoId == operatorAccessId);
+                Assert.Equal(sourceVehicleId, route.VehiculoId);
                 sourceRouteId = route.Id;
                 sourceRouteVersion = route.Version;
+                var priorDateRoute = await afterBrowserPlan.HojasRuta.SingleAsync(x => x.Id == reservaVaciaId);
+                Assert.Equal((fechaDeReservaOriginal, EstadoHojaRuta.Planificada, true),
+                    (priorDateRoute.Fecha, priorDateRoute.Estado, priorDateRoute.ReservaRecursosActiva));
                 Assert.Equal(EstadoEnvio.AsignadoRuta, (await afterBrowserPlan.Envios.SingleAsync(x => x.Id == shipmentId)).Estado);
                 Assert.Equal(EstadoCustodiaBulto.Deposito,
                     (await afterBrowserPlan.Bultos.SingleAsync(x => x.EnvioId == shipmentId)).Custodia);

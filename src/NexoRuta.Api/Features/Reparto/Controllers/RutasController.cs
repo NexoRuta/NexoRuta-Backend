@@ -125,6 +125,19 @@ public sealed class RutasController(GestionarRutasUseCase casos, ConfigurarRepar
         catch (RepartoNoPermitidoException) { return Forbid(); }
         catch (ConflictoRepartoException ex) { return Problem(ex.Message, statusCode: 409); }
     }
+    [HttpPost("{id:guid}/cancelacion"), Authorize(Policy = "envios.gestionar")]
+    [ProducesResponseType<HojaRutaResponse>(200)]
+    [ProducesResponseType(400), ProducesResponseType(403), ProducesResponseType(404), ProducesResponseType(409)]
+    public async Task<IActionResult> Cancelar(Guid id, VersionRutaRequest request, CancellationToken ct)
+    {
+        try
+        {
+            var hoja = await casos.CancelarAsync(id, request.Version, ct);
+            return hoja is null ? NotFound() : Ok(HojaRutaResponse.Desde(hoja));
+        }
+        catch (RepartoNoPermitidoException) { return Forbid(); }
+        catch (ConflictoRepartoException ex) { return Problem(ex.Message, statusCode: 409); }
+    }
     [HttpPost("/api/deposito/envios/{id:guid}/recepcion"), Authorize(Policy = "envios.gestionar")]
     [ProducesResponseType(204), ProducesResponseType(404), ProducesResponseType(403), ProducesResponseType(409)]
     public async Task<IActionResult> Recibir(Guid id, VersionRutaRequest request, CancellationToken ct)

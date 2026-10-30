@@ -15,6 +15,8 @@ public sealed record EnvioDetalle(
     IReadOnlyList<BultoDetalle> Bultos)
 {
     public bool DestinoConfirmado { get; init; }
+    public string? ReferenciaExterna { get; init; }
+    public string DestinatarioEmail { get; init; } = string.Empty;
 
     public static EnvioDetalle Desde(Application.Envios.Results.EnvioDetalle envio) => new(
         Id: envio.Id,
@@ -34,5 +36,9 @@ public sealed record EnvioDetalle(
             LargoCentimetros: bulto.LargoCentimetros,
             AnchoCentimetros: bulto.AnchoCentimetros,
             AltoCentimetros: bulto.AltoCentimetros) { Custodia = bulto.Custodia }).ToArray())
-    { DestinoConfirmado = envio.DestinoConfirmado };
+    {
+        DestinoConfirmado = envio.DestinoConfirmado,
+        ReferenciaExterna = envio.ReferenciaExterna,
+        DestinatarioEmail = envio.DestinatarioEmail
+    };
 }

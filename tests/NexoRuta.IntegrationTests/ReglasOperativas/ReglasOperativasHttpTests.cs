@@ -300,7 +300,8 @@ public sealed class ReglasOperativasHttpTests(PostgresFixture postgres) : IClass
             [BasePath + "/borrador"] = ["get", "post", "put"],
             [BasePath + "/borrador/publicar"] = ["post"],
             [BasePath + "/publicaciones"] = ["get"],
-            [BasePath + "/publicaciones/{versionId}"] = ["get"]
+            [BasePath + "/publicaciones/{versionId}"] = ["get"],
+            ["/api/rutas/{id}/cancelacion"] = ["post"]
         };
         foreach (var (path, methods) in expected)
         {

@@ -208,11 +208,25 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         Assert.Equal(cuenta, await Cuenta(db, inicial.UsuarioEmail, TipoAccesoUsuario.Comercio));
 
         await using var consulta = new NexoRutaDbContext(options);
+        var contexto = await new EfAccesosUsuarioRepository(consulta).ObtenerAsync(cuenta.AccesoId)
+            ?? throw new InvalidOperationException("The selected commerce access is missing.");
+        await using (var transaccion = await consulta.BeginOrJoinAsync())
+        {
+            await consulta.ApplyAsync(RlsActorContext.From(contexto));
+            await consulta.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO "IdentidadesEnvioImportado"
+                    ("ComercioId", "ReferenciaExterna", "EnvioId", "OperadorId", "VersionHuella", "Huella")
+                VALUES ({cuenta.ComercioId!.Value}, {"EXT-POSTGRES-1"}, {dos.Id}, {segundo.Id}, {(short)1}, {new byte[32]})
+                """);
+            await transaccion.CommitAsync();
+        }
         var listados = await Listar(consulta, cuenta.AccesoId);
         Assert.Equal(2, listados.Count);
         var persistido = Assert.Single(listados, x => x.Id == dos.Id);
         Assert.Equal(cuenta.ComercioId, persistido.Origen.ComercioId);
         Assert.Equal("Destinatario de prueba", persistido.DestinatarioNombre);
+        Assert.Equal("destinatario@example.test", persistido.DestinatarioEmail);
+        Assert.Equal("EXT-POSTGRES-1", persistido.ReferenciaExterna);
         Assert.Equal("Av. Rivera 123", persistido.Direccion);
         var bulto = Assert.Single(persistido.Bultos);
         Assert.Equal("SEGUNDO", bulto.Codigo);

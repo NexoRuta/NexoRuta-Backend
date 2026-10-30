@@ -16,13 +16,14 @@ public sealed class HojaRutaConfiguration : IEntityTypeConfiguration<HojaRuta>
         entity.HasIndex(x => x.JornadaId).IsUnique();
         entity.Property(x => x.Estado).HasConversion<string>().HasMaxLength(30);
         entity.Property(x => x.Version).IsConcurrencyToken();
+        entity.Property(x => x.ReservaRecursosActiva).HasDefaultValue(true);
         entity.Property(x => x.VehiculoMatricula).HasMaxLength(20);
         entity.Property(x => x.VehiculoPesoMaximoGramos).HasPrecision(18, 2);
         entity.Property(x => x.VehiculoVolumenMaximoCm3).HasPrecision(24, 2);
         entity.HasIndex(x => new { x.OperadorId, x.RepartidorAccesoId, x.Fecha }).IsUnique()
-            .HasFilter("\"Estado\" <> 'Finalizada'");
+            .HasFilter("\"Estado\" NOT IN ('Finalizada', 'Cancelada') AND \"ReservaRecursosActiva\"");
         entity.HasIndex(x => new { x.OperadorId, x.VehiculoId, x.Fecha }).IsUnique()
-            .HasFilter("\"Estado\" <> 'Finalizada'");
+            .HasFilter("\"Estado\" NOT IN ('Finalizada', 'Cancelada') AND \"ReservaRecursosActiva\"");
         entity.HasOne<Repartidor>().WithMany().HasForeignKey(x => new { x.RepartidorAccesoId, x.OperadorId })
             .HasPrincipalKey(x => new { x.AccesoId, x.OperadorId }).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne<Vehiculo>().WithMany().HasForeignKey(x => new { x.OperadorId, x.VehiculoId })

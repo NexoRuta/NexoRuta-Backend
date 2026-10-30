@@ -192,9 +192,9 @@ public sealed partial class EfRutasRepository
         var destino = await db.HojasRuta.Include(h => h.Paradas)
             .SingleOrDefaultAsync(h => h.Id == datos.RutaDestinoId && h.OperadorId == operadorId, ct);
         if (destino is null) return null;
-        if (destino.Estado != EstadoHojaRuta.Planificada || destino.Version != datos.VersionRutaDestino
+        if (destino.Estado != EstadoHojaRuta.Planificada || !destino.ReservaRecursosActiva || destino.Version != datos.VersionRutaDestino
             || destino.Paradas.Any(p => p.EnvioId == envioId))
-            throw new ConflictoRepartoException("La ruta destino cambió, ya fue despachada o contiene este envío.");
+            throw new ConflictoRepartoException("La ruta destino cambió, ya fue despachada, dejó de reservar sus recursos o contiene este envío.");
         var politica = await db.ConfiguracionesReparto.SingleAsync(p => p.OperadorId == operadorId && p.Version == destino.ConfiguracionVersion, ct);
         var zona = TimeZoneInfo.FindSystemTimeZoneById(politica.ZonaHoraria);
         var hoy = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(reloj.GetUtcNow(), zona).DateTime);

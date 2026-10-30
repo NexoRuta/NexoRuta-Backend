@@ -16,6 +16,7 @@ public interface IRutasRepository
         ConfirmarExtravioEnvioDatos datos, CancellationToken ct);
     Task<HojaRutaDatos> PlanificarAsync(Guid operadorId, PlanificarRutaDatos datos, CancellationToken ct);
     Task<HojaRutaDatos?> DespacharAsync(Guid operadorId, Guid rutaId, long version, CancellationToken ct);
+    Task<HojaRutaDatos?> CancelarAsync(Guid operadorId, Guid rutaId, long version, CancellationToken ct);
     Task<bool> RecibirAsync(Guid operadorId, Guid envioId, long version, CancellationToken ct);
 
 }

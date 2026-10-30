@@ -1376,6 +1376,11 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("RepartidorAccesoId")
                         .HasColumnType("uuid");
 
+                    b.Property<bool>("ReservaRecursosActiva")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
                     b.Property<DateTimeOffset?>("SalidaEnUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -1413,11 +1418,11 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("OperadorId", "RepartidorAccesoId", "Fecha")
                         .IsUnique()
-                        .HasFilter("\"Estado\" <> 'Finalizada'");
+                        .HasFilter("\"Estado\" NOT IN ('Finalizada', 'Cancelada') AND \"ReservaRecursosActiva\"");
 
                     b.HasIndex("OperadorId", "VehiculoId", "Fecha")
                         .IsUnique()
-                        .HasFilter("\"Estado\" <> 'Finalizada'");
+                        .HasFilter("\"Estado\" NOT IN ('Finalizada', 'Cancelada') AND \"ReservaRecursosActiva\"");
 
                     b.ToTable("HojasRuta", null, t =>
                         {
