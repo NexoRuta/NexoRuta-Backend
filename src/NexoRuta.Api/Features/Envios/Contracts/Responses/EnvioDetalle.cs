@@ -15,6 +15,10 @@ public sealed record EnvioDetalle(
     IReadOnlyList<BultoDetalle> Bultos,
     DateTimeOffset CreadoEnUtc)
 {
+    public bool DestinoConfirmado { get; init; }
+    public string? ReferenciaExterna { get; init; }
+    public string DestinatarioEmail { get; init; } = string.Empty;
+
     public static EnvioDetalle Desde(Application.Envios.Results.EnvioDetalle envio) => new(
         Id: envio.Id,
         OperadorId: envio.Origen.OperadorId,
@@ -33,5 +37,10 @@ public sealed record EnvioDetalle(
             PesoGramos: bulto.PesoGramos,
             LargoCentimetros: bulto.LargoCentimetros,
             AnchoCentimetros: bulto.AnchoCentimetros,
-            AltoCentimetros: bulto.AltoCentimetros)).ToArray());
+            AltoCentimetros: bulto.AltoCentimetros) { Custodia = bulto.Custodia }).ToArray())
+    {
+        DestinoConfirmado = envio.DestinoConfirmado,
+        ReferenciaExterna = envio.ReferenciaExterna,
+        DestinatarioEmail = envio.DestinatarioEmail
+    };
 }

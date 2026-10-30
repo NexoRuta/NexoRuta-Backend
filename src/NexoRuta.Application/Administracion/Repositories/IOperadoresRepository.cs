@@ -5,5 +5,6 @@ namespace NexoRuta.Application.Administracion.Repositories;
 public interface IOperadoresRepository
 {
     Task<IReadOnlyList<OperadorDisponible>> ListarAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<OperadorDisponibleParaImportacion>> ListarParaImportacionAsync(CancellationToken cancellationToken = default);
     Task<OperadorDisponible?> ObtenerAsync(Guid operadorId, CancellationToken cancellationToken = default);
 }

@@ -1,3 +1,3 @@
 namespace NexoRuta.Domain.Reparto;
 
-public enum EstadoHojaRuta { Planificada, Despachada, EnCurso, Finalizada }
+public enum EstadoHojaRuta { Planificada, Despachada, EnCurso, Finalizada, Cancelada }

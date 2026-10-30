@@ -178,6 +178,8 @@ public sealed class CrearEnvioUseCaseTests
             => Task.FromResult(operador?.OperadorId == operadorId ? operador : null);
         public Task<IReadOnlyList<OperadorDisponible>> ListarAsync(CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
+        public Task<IReadOnlyList<OperadorDisponibleParaImportacion>> ListarParaImportacionAsync(CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
     }
 
     private sealed class FakeEnviosRepository : IEnviosRepository
@@ -188,6 +190,20 @@ public sealed class CrearEnvioUseCaseTests
 
         public (Envio Envio, Destinatario Destinatario, Direccion Direccion, Bulto Bulto)? Guardado { get; private set; }
         public (Guid? OperadorId, Guid? ComercioId)? Filtro { get; private set; }
+
+        public Task<NexoRuta.Application.Envios.Importacion.IEnviosImportTransaction> IniciarImportacionAsync(CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task BloquearReferenciasImportacionAsync(IReadOnlyCollection<string> referencias, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<IReadOnlyList<NexoRuta.Application.Envios.Importacion.IdentidadEnvioImportadoEncontrada>> BuscarIdentidadesImportacionAsync(
+            IReadOnlyCollection<string> referencias, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task GuardarImportadosAsync(IReadOnlyList<NexoRuta.Application.Envios.Importacion.EnvioImportadoParaPersistir> envios,
+            CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
 
         public Task GuardarAsync(Envio envio, Destinatario destinatario, Direccion direccion, Bulto bulto,
             CancellationToken cancellationToken = default)

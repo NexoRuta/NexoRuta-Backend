@@ -53,8 +53,17 @@ public sealed partial class PushOutboxTests
             ? await Operar(p.Client, hoja, 4, "EntregaFisica", parada.EnvioId, parada.EnvioVersion)
             : await Operar(p.Client, hoja, 4, "Rendicion", datos: new { BultoIds = new[] { parada.Bultos[0].Id } });
         Assert.Equal("Aplicada", resultado.Resultado);
+        using var repetir = await publico.PostAsJsonAsync(url, new { comando.Codigo });
+        Assert.Equal(HttpStatusCode.OK, repetir.StatusCode);
+        using var codigoInvalido = await publico.PostAsJsonAsync(url, new { Codigo = "ZZZZZZZZZZZZ" });
+        Assert.Equal(HttpStatusCode.NotFound, codigoInvalido.StatusCode);
         await using var final = p.Data.CreateDbContext();
         Assert.Equal(recibio ? EstadoCustodiaBulto.Destinatario : EstadoCustodiaBulto.PendienteDeposito, (await final.Bultos.SingleAsync()).Custodia);
-        Assert.Equal(recibio ? EstadoEnvio.EntregaPendienteValidacion : EstadoEnvio.Cancelado, (await final.Envios.SingleAsync()).Estado);
+        var envio = await final.Envios.SingleAsync();
+        Assert.Equal(EstadoEnvio.Cancelado, envio.Estado);
+        Assert.Equal(recibio, envio.EntregaFisicaEnUtc is not null);
+        Assert.Single(await final.CancelacionesEnvio.ToArrayAsync());
+        Assert.Single(await final.OutboxMessages.Where(x => x.Destino == OutboxDestino.PushFcm).ToArrayAsync());
+        Assert.Single(await final.OutboxMessages.Where(x => x.Tipo == OutboxMessageTypes.CancellationCodeEmail).ToArrayAsync());
     }
 }

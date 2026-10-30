@@ -15,6 +15,7 @@ namespace NexoRuta.IntegrationTests.Administracion;
 
 public sealed class PlatformSeederTests(PostgresFixture postgres) : IClassFixture<PostgresFixture>
 {
+
     [Fact]
     public async Task NormalApiStartupDoesNotRunTheExplicitPlatformBootstrap()
     {
@@ -78,13 +79,26 @@ public sealed class PlatformSeederTests(PostgresFixture postgres) : IClassFixtur
     [InlineData("platform@example.test", "tiny")]
     public async Task IncompleteOrInvalidConfigurationFailsWithoutSecretsOrPartialRows(string? email, string? password)
     {
+
         var database = await postgres.CreateDatabaseAsync();
         await using var db = database.CreateDbContext();
+        var permisosAntes = await db.Permisos
+        .AsNoTracking()
+        .OrderBy(x => x.Codigo)
+        .Select(x => new { x.Id, x.Codigo, x.Nombre })
+        .ToArrayAsync();
+
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() => Seeder(db, email, password).SeedPlataformaAsync());
         if (password is not null) Assert.DoesNotContain(password, error.ToString());
         Assert.Empty(await db.Usuarios.ToListAsync());
         Assert.Empty(await db.RolesPlataforma.ToListAsync());
-        Assert.Empty(await db.Permisos.ToListAsync());
+        var permisosDespues = await db.Permisos
+            .AsNoTracking()
+            .OrderBy(x => x.Codigo)
+            .Select(x => new { x.Id, x.Codigo, x.Nombre })
+            .ToArrayAsync();
+
+        Assert.Equal(permisosAntes, permisosDespues);
     }
 
     [Fact]
@@ -92,10 +106,21 @@ public sealed class PlatformSeederTests(PostgresFixture postgres) : IClassFixtur
     {
         var database = await postgres.CreateDatabaseAsync();
         await using var db = database.CreateDbContext();
+        var permisosAntes = await db.Permisos
+    .AsNoTracking()
+    .OrderBy(x => x.Codigo)
+    .Select(x => new { x.Id, x.Codigo, x.Nombre })
+    .ToArrayAsync();
         await new DatosInicialesSeeder(db, new AccesoInicial("unused@example.test", "Unused", "Unused", "Unused"), new ConfigurationBuilder().Build(),
             AuthenticationTestData.UserManager(db), AuthenticationTestData.PlatformRepository(db)).SeedPlataformaAsync();
         Assert.Empty(await db.Usuarios.ToListAsync());
-        Assert.Empty(await db.Permisos.ToListAsync());
+        var permisosDespues = await db.Permisos
+            .AsNoTracking()
+            .OrderBy(x => x.Codigo)
+            .Select(x => new { x.Id, x.Codigo, x.Nombre })
+            .ToArrayAsync();
+
+        Assert.Equal(permisosAntes, permisosDespues);
     }
 
     [Theory]
@@ -118,19 +143,40 @@ public sealed class PlatformSeederTests(PostgresFixture postgres) : IClassFixtur
     public async Task ConcurrentInitializationsAreSerializedWithoutDuplicates()
     {
         var database = await postgres.CreateDatabaseAsync();
+
         await Task.WhenAll(Enumerable.Range(0, 4).Select(async _ =>
         {
             await using var db = database.CreateDbContext();
             await Seeder(db).SeedPlataformaAsync();
         }));
+
         await using var check = database.CreateDbContext();
+
         Assert.Single(await check.Usuarios.ToListAsync());
         Assert.Single(await check.AccesosPlataforma.ToListAsync());
         Assert.Single(await check.RolesPlataforma.ToListAsync());
         Assert.Single(await check.RolesPlataformaPermisos.ToListAsync());
-        Assert.Single(await check.Permisos.ToListAsync());
-    }
 
+        Assert.Equal(
+            new[]
+            {
+                "envios.consultar",
+                "envios.gestionar",
+                "plataforma.organizaciones.gestionar"
+            },
+            await check.Permisos
+                .AsNoTracking()
+                .OrderBy(x => x.Codigo)
+                .Select(x => x.Codigo)
+                .ToArrayAsync());
+
+        var grant = await check.RolesPlataformaPermisos.SingleAsync();
+
+        var permisoPlataforma = await check.Permisos.SingleAsync(
+            x => x.Codigo == "plataforma.organizaciones.gestionar");
+
+        Assert.Equal(permisoPlataforma.Id, grant.PermisoId);
+    }
     [Fact]
     public async Task IncompatiblePlatformStateIsNotRepaired()
     {
@@ -149,38 +195,100 @@ public sealed class PlatformSeederTests(PostgresFixture postgres) : IClassFixtur
     {
         var database = await postgres.CreateDatabaseAsync();
         await using var db = database.CreateDbContext();
-        await db.GetService<IMigrator>().MigrateAsync("20261016035056_AddPlatformAdministration");
-        var user = new Usuario("legacy-platform@example.test", AuthenticationTestData.Hash("legacy-platform@example.test"));
+
+        await db.GetService<IMigrator>()
+            .MigrateAsync("20261016035056_AddPlatformAdministration");
+
+        var user = new Usuario(
+            "legacy-platform@example.test",
+            AuthenticationTestData.Hash("legacy-platform@example.test"));
+
         var role = new RolPlataforma();
         var disabledRole = new RolPlataforma();
         var access = new AccesoPlataforma(user, role);
-        // The context maps the current model; insert the legacy identity with its actual old columns.
-        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Usuarios\" (\"Id\", \"Email\", \"PasswordHash\") VALUES ({user.Id}, {user.Email}, {user.PasswordHash})");
+
+        // Insertar usando las columnas del esquema histórico.
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"INSERT INTO \"Usuarios\" (\"Id\", \"Email\", \"PasswordHash\") VALUES ({user.Id}, {user.Email}, {user.PasswordHash})");
+
         db.AddRange(role, disabledRole, access);
         await db.SaveChangesAsync();
-        await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE \"RolesPlataforma\" SET \"PuedeGestionarOrganizaciones\" = false WHERE \"Id\" = {disabledRole.Id}");
+
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE \"RolesPlataforma\" SET \"PuedeGestionarOrganizaciones\" = false WHERE \"Id\" = {disabledRole.Id}");
+
         await db.Database.MigrateAsync();
-        Assert.Equal(user.PasswordHash, (await db.Usuarios.AsNoTracking().SingleAsync()).PasswordHash);
-        Assert.Equal(0, (await db.Usuarios.AsNoTracking().SingleAsync()).Version);
-        Assert.Equal(access.AccesoId, (await db.AccesosPlataforma.AsNoTracking().SingleAsync()).AccesoId);
+
+        var persistedUser = await db.Usuarios
+            .AsNoTracking()
+            .SingleAsync();
+
+        var persistedAccess = await db.AccesosPlataforma
+            .AsNoTracking()
+            .SingleAsync();
+
+        Assert.Equal(user.PasswordHash, persistedUser.PasswordHash);
+        Assert.Equal(0, persistedUser.Version);
+        Assert.Equal(access.AccesoId, persistedAccess.AccesoId);
+
         var grant = await db.RolesPlataformaPermisos.SingleAsync();
+
         Assert.Equal(role.Id, grant.RolId);
         Assert.NotEqual(disabledRole.Id, grant.RolId);
-        Assert.Single(await db.Permisos.ToListAsync());
-    }
 
+        var permisoPlataforma = Assert.Single(
+            await db.Permisos
+                .AsNoTracking()
+                .Where(x => x.Codigo == "plataforma.organizaciones.gestionar")
+                .ToListAsync());
+
+        Assert.Equal(permisoPlataforma.Id, grant.PermisoId);
+
+        Assert.Equal(
+            new[]
+            {
+                "envios.consultar",
+                "envios.gestionar",
+                "plataforma.organizaciones.gestionar"
+            },
+            await db.Permisos
+                .AsNoTracking()
+                .OrderBy(x => x.Codigo)
+                .Select(x => x.Codigo)
+                .ToArrayAsync());
+    }
+    
     [Fact]
     public async Task FailureBeforeCommitRollsBackIdentityRoleAccessCatalogAndGrants()
     {
         var database = await postgres.CreateDatabaseAsync();
-        await using (var db = database.CreateDbContext(new FailAfterSave()))
-            await Assert.ThrowsAsync<InvalidOperationException>(() => Seeder(db).SeedPlataformaAsync());
+
         await using var check = database.CreateDbContext();
+
+        var permisosAntes = await check.Permisos
+            .AsNoTracking()
+            .OrderBy(x => x.Codigo)
+            .Select(x => new { x.Id, x.Codigo, x.Nombre })
+            .ToArrayAsync();
+
+        await using (var db = database.CreateDbContext(new FailAfterSave()))
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(
+                () => Seeder(db).SeedPlataformaAsync());
+        }
+
         Assert.Empty(await check.Usuarios.ToListAsync());
         Assert.Empty(await check.AccesosPlataforma.ToListAsync());
         Assert.Empty(await check.RolesPlataforma.ToListAsync());
         Assert.Empty(await check.RolesPlataformaPermisos.ToListAsync());
-        Assert.Empty(await check.Permisos.ToListAsync());
+
+        var permisosDespues = await check.Permisos
+            .AsNoTracking()
+            .OrderBy(x => x.Codigo)
+            .Select(x => new { x.Id, x.Codigo, x.Nombre })
+            .ToArrayAsync();
+
+        Assert.Equal(permisosAntes, permisosDespues);
     }
 
     private sealed class FailAfterSave : Microsoft.EntityFrameworkCore.Diagnostics.SaveChangesInterceptor

@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 using NexoRuta.Application.Administracion.Context;
 using NexoRuta.Domain.Administracion;
 using NexoRuta.Infrastructure.Outbox;
+using NexoRuta.Application.Envios.Importacion;
 
 namespace NexoRuta.Infrastructure.Persistence;
 
@@ -136,6 +137,28 @@ public static class RlsTransaction
             (RlsContextContract.UserId, userId.ToString("D")));
     }
 
+    internal static Task SetShipmentHistoryContextAsync(
+        this NexoRutaDbContext db,
+        string sourceType,
+        Guid? sourceId,
+        Guid? operationId = null,
+        DateTimeOffset? occurredAt = null,
+        string? factCode = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (db.Database.CurrentTransaction is null || string.IsNullOrWhiteSpace(sourceType) || sourceType.Length > 48 ||
+            sourceId == Guid.Empty || operationId == Guid.Empty || string.IsNullOrWhiteSpace(factCode) && factCode is not null ||
+            factCode?.Length > 40)
+            throw new InvalidOperationException("Shipment history context requires an active transaction and valid source metadata.");
+
+        return ExecuteSettingsAsync(db, null, cancellationToken,
+            (RlsContextContract.HistorySourceType, sourceType),
+            (RlsContextContract.HistorySourceId, sourceId?.ToString("D") ?? ""),
+            (RlsContextContract.HistoryOperationId, operationId?.ToString("D") ?? ""),
+            (RlsContextContract.HistoryOccurredAt, occurredAt?.ToUniversalTime().ToString("O") ?? ""),
+            (RlsContextContract.HistoryFactCode, factCode ?? ""));
+    }
+
     private static async Task ExecuteSettingsAsync(
         NexoRutaDbContext db,
         RlsActorContext? context,
@@ -147,6 +170,7 @@ public static class RlsTransaction
         {
             var bootstrap = context as RlsBootstrapContext;
             var worker = context as RlsWorkerContext;
+            var correlationId = Guid.CreateVersion7();
             settings.AddRange(
             [
                 (RlsContextContract.ActorKind, RlsContextContract.ActorSqlValue(context.ActorKind)),
@@ -169,7 +193,14 @@ public static class RlsTransaction
                 (RlsContextContract.AuthAccessId, ""),
                 (RlsContextContract.AuthUserId, ""),
                 (RlsContextContract.AuthOrganizationId, ""),
-                (RlsContextContract.AuthRoleId, "")
+                (RlsContextContract.AuthRoleId, ""),
+                (RlsContextContract.HistorySourceType, "Solicitud"),
+                (RlsContextContract.HistorySourceId, correlationId.ToString("D")),
+                (RlsContextContract.HistoryOperationId, ""),
+                (RlsContextContract.HistoryCorrelationId, correlationId.ToString("D")),
+                (RlsContextContract.HistoryOccurredAt, ""),
+                (RlsContextContract.HistoryFactCode, ""),
+                (RlsContextContract.HistoryProcess, worker is null ? "" : $"worker:{OutboxMessageTypes.TrackingRequested}")
             ]);
         }
         settings.AddRange(extra);
@@ -209,7 +240,7 @@ public static class RlsTransaction
     }
 }
 
-public sealed class RlsTransactionLease(IDbContextTransaction? ownedTransaction) : IAsyncDisposable
+public sealed class RlsTransactionLease(IDbContextTransaction? ownedTransaction) : IEnviosImportTransaction
 {
     public Task CommitAsync(CancellationToken cancellationToken = default)
         => ownedTransaction?.CommitAsync(cancellationToken) ?? Task.CompletedTask;

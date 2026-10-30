@@ -34,7 +34,7 @@ public sealed class DestinosEnvioHttpTests(PostgresFixture postgres) : IClassFix
         Assert.Equal(HttpStatusCode.Created, alta.StatusCode);
         var envio = await db.Envios.SingleAsync(); var url = $"/api/envios/{envio.Id}/destino";
         var actual = await client.GetFromJsonAsync<DestinoEnvioDatos>(url);
-        Assert.Null(actual!.Latitud); Assert.Null(actual.ConfirmadaEnUtc); Assert.Equal(0, actual.Version);
+        Assert.Equal("Persona", actual!.DestinatarioNombre); Assert.Null(actual.Latitud); Assert.Null(actual.ConfirmadaEnUtc); Assert.Equal(0, actual.Version);
         using var propuesta = await client.PostAsync(url + "/propuestas", null); Assert.Equal(HttpStatusCode.OK, propuesta.StatusCode);
         var candidatas = (await propuesta.Content.ReadFromJsonAsync<PropuestasDestinoDatos>())!;
         Assert.Equal(2, candidatas.Propuestas.Count); Assert.Equal("Dirección de prueba 123", Assert.Single(geo.Consultas));
@@ -50,6 +50,65 @@ public sealed class DestinosEnvioHttpTests(PostgresFixture postgres) : IClassFix
         await client.SetBearerForAccessAsync(data, comercio.Id);
         using var posterior = await client.PutAsJsonAsync(url, new { Version = 1, Latitud = -34.1, Longitud = -56.1 }); Assert.Equal(HttpStatusCode.Conflict, posterior.StatusCode);
         using var buscarPosterior = await client.PostAsync(url + "/propuestas", null); Assert.Equal(HttpStatusCode.Conflict, buscarPosterior.StatusCode);
+        Assert.Single(geo.Consultas);
+    }
+
+    [Fact]
+    public async Task ComercioPuedeCompletarDestinoPendienteDespuesDeRecepcionSinPermitirEditarUnoConfirmado()
+    {
+        var data = await postgres.CreateDatabaseAsync(); using var seed = data.CreateApiFactory(); using (seed.CreateHttpClient()) { }
+        var runtime = await RlsRestrictedHttpFlowTests.RestrictApiAsync(data);
+        using var factory = new IntegrationApiFactory(runtime, settings: RlsRestrictedHttpFlowTests.ApiSettings());
+        var geo = new GeocodificadorPrueba();
+        using var host = factory.WithWebHostBuilder(b => b.ConfigureTestServices(s => { s.RemoveAll<IGeocodificador>(); s.AddSingleton<IGeocodificador>(geo); }));
+        using var client = host.CreateClient(); await using var db = data.CreateDbContext();
+        var comercio = await db.AccesosUsuario.SingleAsync(x => x.ComercioId != null);
+        var operador = await db.AccesosUsuario.SingleAsync(x => x.OperadorId != null);
+        await client.SetBearerForAccessAsync(data, comercio.Id);
+        using var alta = await client.PostAsJsonAsync("/api/envios", new { OperadorId = operador.OperadorId,
+            DestinatarioNombre = "Persona", DestinatarioEmail = "persona@example.test", Direccion = "Av. de prueba 123",
+            CodigoBulto = "DESTINO-EN-DEPOSITO", PesoGramos = 100, LargoCentimetros = 10, AnchoCentimetros = 10, AltoCentimetros = 10 });
+        Assert.Equal(HttpStatusCode.Created, alta.StatusCode);
+        var envio = await db.Envios.SingleAsync();
+        var url = $"/api/envios/{envio.Id}/destino";
+
+        await client.SetBearerForAccessAsync(data, operador.Id);
+        using var recepcion = await client.PostAsJsonAsync($"/api/deposito/envios/{envio.Id}/recepcion", new { Version = 0 });
+        Assert.Equal(HttpStatusCode.NoContent, recepcion.StatusCode);
+        db.ChangeTracker.Clear();
+        Assert.Equal(EstadoEnvio.EnDeposito, (await db.Envios.AsNoTracking().SingleAsync()).Estado);
+        Assert.Equal(EstadoCustodiaBulto.Deposito, (await db.Bultos.AsNoTracking().SingleAsync()).Custodia);
+
+        await client.SetBearerForAccessAsync(data, comercio.Id);
+        var pendiente = await client.GetFromJsonAsync<DestinoEnvioDatos>(url);
+        Assert.NotNull(pendiente);
+        Assert.Equal("EnDeposito", pendiente.Estado);
+        Assert.Null(pendiente.ConfirmadaEnUtc);
+        using var propuestas = await client.PostAsync(url + "/propuestas", null);
+        Assert.Equal(HttpStatusCode.OK, propuestas.StatusCode);
+        Assert.Equal("Av. de prueba 123", Assert.Single(geo.Consultas));
+        Assert.Null((await db.Direcciones.AsNoTracking().SingleAsync()).ConfirmadaEnUtc);
+
+        using var confirmar = await client.PutAsJsonAsync(url,
+            new { pendiente.Version, Latitud = -34.9, Longitud = -56.2 });
+        Assert.Equal(HttpStatusCode.NoContent, confirmar.StatusCode);
+        var confirmada = await client.GetFromJsonAsync<DestinoEnvioDatos>(url);
+        Assert.NotNull(confirmada);
+        Assert.Equal(1, confirmada.Version);
+        Assert.NotNull(confirmada.ConfirmadaEnUtc);
+        Assert.Equal((-34.9, -56.2), (confirmada.Latitud, confirmada.Longitud));
+
+        using var modificar = await client.PutAsJsonAsync(url,
+            new { confirmada.Version, Latitud = -34.8, Longitud = -56.1 });
+        Assert.Equal(HttpStatusCode.Conflict, modificar.StatusCode);
+        using var nuevasPropuestas = await client.PostAsync(url + "/propuestas", null);
+        Assert.Equal(HttpStatusCode.Conflict, nuevasPropuestas.StatusCode);
+        db.ChangeTracker.Clear();
+        Assert.Equal(EstadoEnvio.EnDeposito, (await db.Envios.AsNoTracking().SingleAsync()).Estado);
+        Assert.Equal(EstadoCustodiaBulto.Deposito, (await db.Bultos.AsNoTracking().SingleAsync()).Custodia);
+        var direccion = await db.Direcciones.AsNoTracking().SingleAsync();
+        Assert.Equal(1, direccion.Version);
+        Assert.Equal((-34.9, -56.2), (direccion.Latitud, direccion.Longitud));
         Assert.Single(geo.Consultas);
     }
 

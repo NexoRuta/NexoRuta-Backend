@@ -38,7 +38,7 @@ public sealed class ReglasEnvioAdmisionHttpTests(PostgresFixture postgres) : ICl
         var repo = new EfReglasOperativasRepository(db);
         var borrador = await repo.CrearBorradorAsync(operador.OperadorId.Value, operador.UsuarioId);
         await repo.EditarBorradorAsync(operador.OperadorId.Value, operador.UsuarioId, 0,
-            new(5, 60, PoliticaDevolucionAlAgotarIntentos.IniciarAutomaticamente, 4320, 2880,
+            new(5, 60, PoliticaDevolucionAlAgotarIntentos.IniciarAutomaticamente, 4320, 2880, 60,
                 [TipoPruebaEntrega.DocumentoReceptor], [new("AUSENTE", "Ausente", false), new("RECHAZADO", "Rechazado", true)]));
         await repo.PublicarBorradorAsync(operador.OperadorId.Value, operador.UsuarioId, 1);
         using var segundaAlta = await client.PostAsJsonAsync("/api/envios", Alta("REGLAS-2"));

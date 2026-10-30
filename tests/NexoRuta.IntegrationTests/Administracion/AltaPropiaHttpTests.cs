@@ -91,6 +91,8 @@ public sealed class AltaPropiaHttpTests(PostgresFixture postgres) : IClassFixtur
         var current = await client.GetFromJsonAsync<JsonElement>("/api/usuarios/actual");
         Assert.Equal(userId, current.GetProperty("usuarioId").GetGuid());
         Assert.Equal(type.ToString(), current.GetProperty("tipo").GetString());
+        Assert.Equal(type == TipoAccesoUsuario.Operador,
+            current.GetProperty("puedeGestionarDecisionesOperativasEnvio").GetBoolean());
         foreach (var other in new[] { "comercios", "operadores" })
             Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync($"/api/alta-propia/{other}", new { Nombre = "Second" })).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.PutAsJsonAsync($"/api/roles/{organization.RolId}/permisos", new { Permisos = Array.Empty<string>() })).StatusCode);
@@ -99,13 +101,28 @@ public sealed class AltaPropiaHttpTests(PostgresFixture postgres) : IClassFixtur
         Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync("/api/usuarios", new { Email = "owner@example.test", Password, RolId = organization.RolId })).StatusCode);
         await using var db = database.CreateDbContext();
         Assert.Equal(1, await db.Usuarios.CountAsync());
-        var role = await db.Roles.SingleAsync();
-        Assert.True(role.EsProtegidoSistema);
-        var permissions = await (from grant in db.RolesPermisos join permission in db.Permisos on grant.PermisoId equals permission.Id select permission.Codigo).ToListAsync();
-        Assert.Equal(CatalogoPermisos.Para(type).Select(x => x.Codigo).Order(), permissions.Order());
-        Assert.True((await db.AccesosUsuario.SingleAsync()).Activo);
-        Assert.True((await db.AccesosUsuario.SingleAsync()).EsPropietario);
         var createdAccess = await db.AccesosUsuario.SingleAsync();
+        var role = await db.Roles.SingleAsync(x => x.Id == createdAccess.RolId);
+        Assert.True(role.EsProtegidoSistema);
+        var permissions = await (from grant in db.RolesPermisos
+            join permission in db.Permisos on grant.PermisoId equals permission.Id
+            where grant.RolId == role.Id
+            select permission.Codigo).ToListAsync();
+        Assert.Equal(CatalogoPermisos.Para(type).Select(x => x.Codigo).Order(), permissions.Order());
+        Assert.True(createdAccess.Activo);
+        Assert.True(createdAccess.EsPropietario);
+        Assert.Equal(type == TipoAccesoUsuario.Operador ? 2 : 1, await db.Roles.CountAsync());
+        if (type == TipoAccesoUsuario.Operador)
+        {
+            var dispatcher = await db.Roles.SingleAsync(x => x.Codigo == "despachador_operador");
+            Assert.True(dispatcher.EsProtegidoSistema);
+            Assert.Empty(await db.AccesosUsuario.Where(x => x.RolId == dispatcher.Id).ToArrayAsync());
+            Assert.Equal(new[] { "envios.consultar", "envios.gestionar" }, await (from grant in db.RolesPermisos
+                join permission in db.Permisos on grant.PermisoId equals permission.Id
+                where grant.RolId == dispatcher.Id
+                orderby permission.Codigo
+                select permission.Codigo).ToArrayAsync());
+        }
         var ownership = new EfAccesosUsuarioRepository(db);
         Assert.True(await ownership.EsPropietarioAsync(userId, createdAccess.Id));
         Assert.False(await ownership.EsPropietarioAsync(Guid.NewGuid(), createdAccess.Id));

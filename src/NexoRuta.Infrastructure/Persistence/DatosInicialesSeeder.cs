@@ -87,6 +87,7 @@ public sealed class DatosInicialesSeeder(NexoRutaDbContext db, AccesoInicial ini
             }
         }
         await db.SaveChangesAsync(cancellationToken);
+        await EnsureDispatcherRoleAsync(initial.OperadorId.Value, cancellationToken);
         await EnsureOwnerRolePermissionsAsync(TipoAccesoUsuario.Operador, initial.OperadorId.Value,
             initial.OperadorRolCodigo, definitions, cancellationToken);
         await EnsureOwnerRolePermissionsAsync(TipoAccesoUsuario.Comercio, initial.ComercioId.Value,
@@ -99,6 +100,33 @@ public sealed class DatosInicialesSeeder(NexoRutaDbContext db, AccesoInicial ini
         db.Entry(commerceEntity).Property<bool>("BootstrapCompletado").CurrentValue = true;
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+    }
+
+    private async Task EnsureDispatcherRoleAsync(Guid operatorId, CancellationToken ct)
+    {
+        var role = await db.Roles.SingleOrDefaultAsync(x => x.OperadorId == operatorId
+            && x.Codigo == CodigosRolesSistema.DespachadorOperador, ct);
+        if (role is null)
+        {
+            role = new Rol(CodigosRolesSistema.DespachadorOperador, "Dispatcher", operatorId, null);
+            role.ProtegerComoRolSistema();
+            db.Roles.Add(role);
+            await db.SaveChangesAsync(ct);
+        }
+        else if (!role.EsProtegidoSistema)
+        {
+            throw new InvalidOperationException("The reserved dispatcher role code is already used by an unprotected role.");
+        }
+
+        var permissions = await db.Permisos.Where(x => x.Codigo == "envios.gestionar" || x.Codigo == "envios.consultar")
+            .ToListAsync(ct);
+        if (permissions.Count != 2)
+            throw new InvalidOperationException("The registered shipment-management and consultation permissions are missing.");
+        var assigned = await db.RolesPermisos.Where(x => x.RolId == role.Id)
+            .Select(x => x.PermisoId).ToHashSetAsync(ct);
+        foreach (var permission in permissions.Where(x => !assigned.Contains(x.Id)))
+            db.RolesPermisos.Add(new RolPermiso(role.Id, permission.Id));
+        if (db.ChangeTracker.HasChanges()) await db.SaveChangesAsync(ct);
     }
 
     private async Task EnsureOwnerRolePermissionsAsync(

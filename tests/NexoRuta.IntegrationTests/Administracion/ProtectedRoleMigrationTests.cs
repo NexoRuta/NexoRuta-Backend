@@ -8,6 +8,35 @@ namespace NexoRuta.IntegrationTests.Administracion;
 public sealed class ProtectedRoleMigrationTests(PostgresFixture postgres) : IClassFixture<PostgresFixture>
 {
     [Fact]
+    public async Task LossConfirmationMigrationProvisionsDispatcherForExistingOperatorsWithoutAssigningUsers()
+    {
+        var database = await postgres.CreateDatabaseAsync("20261026123301_DecisionOperativaDevolucion");
+        Guid operatorId;
+        await using (var before = database.CreateDbContext())
+        {
+            var operatorEntity = new Operador("Existing operator before dispatcher role");
+            operatorId = operatorEntity.Id;
+            before.Operadores.Add(operatorEntity);
+            await before.SaveChangesAsync();
+        }
+
+        await using (var upgrade = database.CreateDbContext())
+            await upgrade.Database.MigrateAsync();
+
+        await using var verify = database.CreateDbContext();
+        var dispatcher = await verify.Roles.SingleAsync(x => x.OperadorId == operatorId
+            && x.Codigo == "despachador_operador");
+        Assert.True(dispatcher.EsProtegidoSistema);
+        var codes = await (from grant in verify.RolesPermisos
+                           join permission in verify.Permisos on grant.PermisoId equals permission.Id
+                           where grant.RolId == dispatcher.Id
+                           select permission.Codigo).ToArrayAsync();
+        Assert.Contains("envios.gestionar", codes);
+        Assert.Contains("envios.consultar", codes);
+        Assert.False(await verify.AccesosUsuario.AnyAsync(x => x.RolId == dispatcher.Id));
+    }
+
+    [Fact]
     public async Task AdditiveClassificationPreservesExistingOperatorIdentityAndRoleRelationships()
     {
         var database = await postgres.CreateDatabaseAsync();

@@ -216,10 +216,20 @@ public sealed class DatosDemoSeeder(
 
         var version = VersionReglasOperativas.CrearBorrador(operador.Id, operador.UsuarioId, ahoraUtc: publicadoEn);
         version.ReemplazarConfiguracion(0,
-            new(3, 120, PoliticaDevolucionAlAgotarIntentos.DecisionOperativa, 1440, 360,
-                [TipoPruebaEntrega.NombreReceptor],
-                [new("DESTINATARIO_AUSENTE", "Destinatario ausente", true),
-                 new("DIRECCION_INCORRECTA", "Dirección incompleta", true)]));
+            new(
+                MaxIntentosEntrega: 3,
+                IntervaloEntreIntentosMinutos: 120,
+                PoliticaDevolucionAlAgotarIntentos:
+                    PoliticaDevolucionAlAgotarIntentos.DecisionOperativa,
+                PlazoEstandarMinutos: 1440,
+                PlazoUrgenteMinutos: 360,
+                PlazoValidacionPruebaMinutos: 1440,
+                RequisitosPrueba: [TipoPruebaEntrega.NombreReceptor],
+                Motivos:
+                [
+                    new("DESTINATARIO_AUSENTE", "Destinatario ausente", true),
+                    new("DIRECCION_INCORRECTA", "Dirección incompleta", true)
+                ]));
         version.Publicar(1, 1, operador.UsuarioId, publicadoEn);
         db.VersionesReglasOperativas.Add(version);
         await db.SaveChangesAsync(ct);

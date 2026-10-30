@@ -143,6 +143,9 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, UserManager<Usu
         var id = operatorEntity?.Id ?? commerceEntity!.Id;
         var role = new Rol(nuevaIdentidad ? "administrador" : "dueno", nuevaIdentidad ? "Administrator" : "Owner", operatorEntity?.Id, commerceEntity?.Id);
         role.ProtegerComoRolSistema();
+        var dispatcherRole = operatorEntity is null ? null : new Rol(
+            CodigosRolesSistema.DespachadorOperador, "Dispatcher", operatorEntity.Id, null);
+        dispatcherRole?.ProtegerComoRolSistema();
         var access = new AccesoUsuario(user.Id, operatorEntity?.Id, commerceEntity?.Id, role, esPropietario: true);
         await db.SetOrganizationCreationAsync(id, user.Id, role.Id, ct);
         try
@@ -177,9 +180,13 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, UserManager<Usu
                 IdentityErrorContract.ExigirCreacionValida(userResult, identityUsers.ErrorDescriber);
             }
             db.Roles.Add(role);
+            if (dispatcherRole is not null) db.Roles.Add(dispatcherRole);
             await db.SaveChangesAsync(ct);
             db.AccesosUsuario.Add(access);
             db.AddRange(permissions.Select(p => new RolPermiso(role.Id, p.Id)));
+            if (dispatcherRole is not null)
+                db.AddRange(permissions.Where(p => p.Codigo is "envios.gestionar" or "envios.consultar")
+                    .Select(p => new RolPermiso(dispatcherRole.Id, p.Id)));
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
         }

@@ -26,6 +26,7 @@ public sealed class EfCancelacionesEnvioRepository(NexoRutaDbContext db) : ICanc
         {
             // La función limita la escritura del comercio a cancelar su envío; no amplía RLS de rutas/envíos.
             var id = Guid.CreateVersion7(); var aviso = Guid.CreateVersion7(); var mensaje = Guid.CreateVersion7();
+            await db.SetShipmentHistoryContextAsync("CancelacionEnvio", id, cancellationToken: ct);
             var auditId = await db.Database.SqlQuery<Guid>($"SELECT nexoruta_app.cancel_shipment({envioId}, {version}, {motivo}, {id}, {aviso}, {mensaje}) AS \"Value\"").SingleAsync(ct);
             var audit = await db.CancelacionesEnvio.AsNoTracking().SingleAsync(c => c.Id == auditId, ct);
             await tx.CommitAsync(ct);
