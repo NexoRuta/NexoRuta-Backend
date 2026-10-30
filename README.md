@@ -47,7 +47,7 @@ dotnet run --project src/NexoRuta.Api/NexoRuta.Api.csproj --launch-profile http
 dotnet run --project src/NexoRuta.Worker/NexoRuta.Worker.csproj
 ```
 
-El perfil `http` de la API usa `http://localhost:5041`; OpenAPI está en `/openapi/v1.json` solo en Development. Login: `POST /api/auth/login` con JWT Bearer, hashing Identity y permisos efectivos consultados en PostgreSQL en cada petición. `X-NexoRuta-Acceso` es compatibilidad exclusiva de Development, nunca un mecanismo de producción.
+El perfil `http` de la API usa `http://localhost:5041`; OpenAPI está en `/openapi/v1.json` solo en Development. Login: `POST /api/auth/login` con JWT Bearer, hashing Identity y permisos efectivos consultados en PostgreSQL en cada petición. `X-NexoRuta-Acceso` no autentica ni selecciona al usuario.
 
 El esquema (`DatabaseInitialization:ApplyMigrations`) y el bootstrap (`DatabaseInitialization:SeedData`) son operaciones independientes, desactivadas por defecto. Habilitarlas es una operación administrativa explícita sobre el destino confirmado. No ejecutar migraciones ni reinicializaciones de la base de desarrollo como parte de los tests.
 

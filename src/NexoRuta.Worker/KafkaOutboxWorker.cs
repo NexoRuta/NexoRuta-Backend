@@ -20,6 +20,7 @@ public sealed class KafkaOutboxWorker(
                 await using var scope = scopeFactory.CreateAsyncScope();
                 var repository = scope.ServiceProvider.GetRequiredService<EfOutboxRepository>();
                 var message = await repository.ReservarSiguienteAsync(procesadorId, OutboxDestino.Kafka, stoppingToken);
+                WorkerTelemetry.SqlContact("Kafka");
                 if (message is null)
                 {
                     await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
@@ -29,6 +30,7 @@ public sealed class KafkaOutboxWorker(
                 try
                 {
                     await handlers.HandleAsync(message, stoppingToken);
+                    WorkerTelemetry.Published("Kafka");
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
@@ -37,6 +39,7 @@ public sealed class KafkaOutboxWorker(
                 }
                 catch (Exception error)
                 {
+                    WorkerTelemetry.Failed("Kafka");
                     var code = error is KafkaException kafka ? $"Kafka:{kafka.Error.Code}" : error.GetType().Name;
                     var recorded = await repository.MarcarErrorAsync(message.Id, procesadorId, code, stoppingToken);
                     logger.LogWarning(
@@ -58,6 +61,7 @@ public sealed class KafkaOutboxWorker(
             catch (Exception error)
             {
                 logger.LogError("Kafka outbox iteration failed. ErrorType: {ErrorType}", error.GetType().Name);
+                WorkerTelemetry.Failed("Kafka");
                 try { await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken); }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
             }

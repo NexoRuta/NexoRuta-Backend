@@ -57,9 +57,6 @@ class Release:
         # Todos los comandos Compose usan el mismo proyecto y archivo de configuración.
         self.compose = ["docker", "compose", "--project-name", "nexoruta-demo",
                         "--env-file", ".env", "-f", "compose.vps.yaml"]
-        self.previous = []
-        # Indica si .env ya cambió y, por lo tanto, un fallo necesita rollback.
-        self.changed = False
 
     def command(self, command, **kwargs):
         # Se usan argumentos separados y check=True: no hay shell y los fallos se propagan.
@@ -111,23 +108,8 @@ class Release:
                           "--password-stdin"], input=self.token, stdout=subprocess.DEVNULL)
         finally:
             self.token = ""
-        shutil.copy2(self.directory / ".env", self.tmp / "env.before")
-        # Guardar los IDs reales de las imágenes actuales: un tag puede cambiar de contenido.
-        rollback = ["services:\n"]
-        for service in self.services:
-            container = self.output(self.compose + ["ps", "-a", "-q", service])
-            if container:
-                if "\n" in container:
-                    raise ReleaseError(f"Multiple containers for {service}")
-                image = self.output(["docker", "inspect", "--format", "{{.Image}}", container])
-                if not re.fullmatch(r"sha256:[0-9a-f]{64}", image):
-                    raise ReleaseError("Invalid previous image ID")
-                self.previous.append(service)
-                rollback.append(f'  {service}:\n    image: "{image}"\n')
-                self.record_image(f"{service} previous_image={image}")
-        (self.tmp / "rollback.yaml").write_text("".join(rollback))
         # .env es dato, nunca código. Solo reemplazamos nuestra clave; el resto mantiene sus bytes.
-        original = (self.tmp / "env.before").read_bytes()
+        original = (self.directory / ".env").read_bytes()
         pattern = rb"(?m)^[ \t]*(?:export[ \t]+)?NEXORUTA_API_TAG[ \t]*=[^\r\n]*(?:\r?\n|$)"
         replacement = f"{self.key}={self.args.tag}\n".encode()
         found = False
@@ -144,10 +126,9 @@ class Release:
         if not found:
             updated += (b"\n" if updated and not updated.endswith(b"\n") else b"") + replacement
         pending = self.tmp / "env.next"
-        shutil.copy2(self.tmp / "env.before", pending)
+        shutil.copy2(self.directory / ".env", pending)
         pending.write_bytes(updated)
-        # A partir de este punto cualquier fallo exige restaurar .env y las imágenes anteriores.
-        self.changed = True
+        # El entorno y el watermark identifican la release objetivo incluso si su arranque falla.
         pending.replace(self.directory / ".env")
         # Descargar y recrear solo la API, esperando su healthcheck sin reiniciar dependencias.
         self.command(self.compose + ["pull", *self.services])
@@ -166,71 +147,33 @@ class Release:
                 raise ReleaseError("Unexpected service image", 1)
             self.record_image(f"{service} image={image} source={self.args.sha}")
         self.record("healthy")
-        self.changed = False
         print(f"Release healthy: backend {self.args.sha}")
 
-    def rollback(self):
-        # True significa que hacen falta archivos de recuperación para intervención manual.
-        # Restaurar los bytes y permisos originales precede siempre al reinicio de contenedores.
-        try:
-            pending = self.tmp / "env.restore"
-            shutil.copy2(self.tmp / "env.before", pending)
-            pending.replace(self.directory / ".env")
-        except OSError:
-            self.record("failed_env_restore")
-            return True
-        if not self.previous:
-            self.record("failed_no_previous_images")
-            print("Release failed; no previous containers exist to restore", file=sys.stderr)
-            return False
-        try:
-            self.command(self.compose + ["-f", str(self.tmp / "rollback.yaml"), "up", "-d",
-                                        "--no-deps", "--wait", "--wait-timeout", "180", *self.previous])
-            self.record("failed_rolled_back" if len(self.previous) == len(self.services)
-                        else "failed_partial_rollback")
-            return False
-        except Exception:
-            self.record("failed_rollback_failed")
-            return True
-
     def run_locked(self):
-        # Aislar copias de .env, configuración de Docker y archivos de rollback por ejecución.
+        # Aislar la configuración temporal de Docker por ejecución.
         self.tmp = Path(tempfile.mkdtemp(prefix=".release-backend.", dir=self.directory))
         docker_config = self.tmp / "docker"
         docker_config.mkdir(mode=0o700)
         self.env["DOCKER_CONFIG"] = str(docker_config)
-        preserve = False
         try:
             self.watermark()
             self.record("started")
             self.update()
         except BaseException:
-            # También se ejecuta para señales traducidas a SystemExit.
-            if self.changed:
-                preserve = True  # Si el propio rollback falla, se conserva la evidencia.
-                preserve = self.rollback()
-            else:
-                self.record("failed_before_update")
+            self.record("failed")
             raise
         finally:
             try:
-                # Nunca conservar credenciales de registro junto a archivos de recuperación.
+                # Nunca conservar credenciales de registro en el directorio del despliegue.
                 shutil.rmtree(docker_config)
             except OSError:
-                preserve = True
                 print("Registry credential cleanup failed; remove the temporary Docker config immediately", file=sys.stderr)
                 raise
             finally:
-                if preserve:
-                    (self.tmp / "recovery.txt").write_text(
-                        f"component=backend run={self.args.run} attempt={self.args.attempt} "
-                        f"sha={self.args.sha} tag={self.args.tag}\n")
-                    print(f"Manual recovery required: {self.tmp} contains the original private .env", file=sys.stderr)
-                else:
-                    shutil.rmtree(self.tmp)
+                shutil.rmtree(self.tmp, ignore_errors=True)
 
     def run(self):
-        # flock es común a todos los componentes y se mantiene hasta terminar el rollback.
+    # flock serializa las actualizaciones del mismo proyecto.
         import fcntl
         if not all((self.directory / name).is_file() for name in ("compose.vps.yaml", ".env")):
             raise ReleaseError("Missing VPS compose or .env")
@@ -245,7 +188,7 @@ def main():
     args = arguments()
 
     def interrupted(number, frame):
-        # Convertir la señal en una salida controlada para ejecutar rollback y limpieza.
+        # Convertir la señal en una salida controlada para registrar el fallo y limpiar.
         raise SystemExit(130 if number == signal.SIGINT else 143)
 
     for number in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):

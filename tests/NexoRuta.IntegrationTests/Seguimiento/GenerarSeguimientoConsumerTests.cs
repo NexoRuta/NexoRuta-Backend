@@ -169,14 +169,14 @@ public sealed class GenerarSeguimientoConsumerTests
     }
 
     [Theory]
-    [InlineData(0, false, "processing", null)]
-    [InlineData(2, true, "processing", null)]
-    [InlineData(2, false, "timeout", null)]
-    [InlineData(int.MaxValue, false, "timeout", null)]
+    [InlineData(0, false, "processing", 0)]
+    [InlineData(2, true, "processing", 2)]
+    [InlineData(2, false, "timeout", 2)]
+    [InlineData(int.MaxValue, false, "timeout", 3)]
     [InlineData(4, false, "processing", 0)]
     [InlineData(4, true, "processing", 2)]
     [InlineData(4, false, "timeout", 2)]
-    [InlineData(2, false, "postgres", null)]
+    [InlineData(2, false, "postgres", 2)]
     public async Task ErrorDeProcesamiento_RedirigeSegunIntentos(
         int intentosPrevios,
         bool debeIrAFallidos,
@@ -319,7 +319,7 @@ public sealed class GenerarSeguimientoConsumerTests
 
             Assert.Equal(transitorio ? "transient" : "processing", Encoding.UTF8.GetString(
                 Assert.IsType<byte[]>(recibido.BasicProperties.Headers["x-nexoruta-error-kind"])));
-            var presupuestoPrevio = fallosPrevios ?? Math.Min(intentosPrevios, 3);
+            var presupuestoPrevio = fallosPrevios.GetValueOrDefault();
             Assert.Equal(transitorio ? presupuestoPrevio : Math.Min(presupuestoPrevio, 2) + 1,
                 Convert.ToInt32(recibido.BasicProperties.Headers["x-nexoruta-processing-failure-count"]));
             Assert.Equal(messageId, recibido.BasicProperties.CorrelationId);

@@ -201,7 +201,7 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
             join direccion in db.Direcciones on envio.DireccionId equals direccion.Id
             where (operadorId != null && envio.OperadorId == operadorId)
                 || (comercioId != null && envio.ComercioId == comercioId)
-            orderby envio.Id descending
+            orderby envio.CreadoEnUtc descending, envio.Id descending
             select new
             {
                 envio.Id,
@@ -216,7 +216,8 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
                 Direccion = direccion.Descripcion,
                 DestinoConfirmado = direccion.ConfirmadaEnUtc != null,
                 Estado = envio.Estado.ToString(),
-                envio.Version
+                envio.Version,
+                envio.CreadoEnUtc
             }).ToListAsync(cancellationToken);
 
         if (shipments.Count == 0)
@@ -237,7 +238,7 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
             .ToListAsync(cancellationToken);
         var packagesByShipment = packages.ToLookup(x => x.EnvioId, x => x.Detail);
 
-        return shipments.Select(x => new EnvioDetalle(
+              return shipments.Select(x => new EnvioDetalle(
             Id: x.Id,
             Origen: new OrigenEnvio(
                 OperadorId: x.OperadorId,
@@ -250,7 +251,8 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
             Direccion: x.Direccion,
             Estado: x.Estado,
             Version: x.Version,
-            Bultos: packagesByShipment[x.Id].ToArray())
+            Bultos: packagesByShipment[x.Id].ToArray(),
+            CreadoEnUtc: x.CreadoEnUtc)
         {
             DestinoConfirmado = x.DestinoConfirmado,
             ReferenciaExterna = referencesByShipment.GetValueOrDefault(x.Id),
@@ -259,7 +261,9 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
     }
 
     private async Task<Dictionary<Guid, string>> ListarReferenciasExternasAsync(
-        Guid[] shipmentIds, Guid? commerceId, CancellationToken cancellationToken)
+        Guid[] shipmentIds,
+        Guid? commerceId,
+        CancellationToken cancellationToken)
     {
         var references = new Dictionary<Guid, string>();
         if (commerceId is null || shipmentIds.Length == 0)
@@ -269,17 +273,24 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
         var openedHere = connection.State != ConnectionState.Open;
         if (openedHere)
             await db.Database.OpenConnectionAsync(cancellationToken);
+
         try
         {
             await using var command = connection.CreateCommand();
-            command.CommandText = "SELECT \"EnvioId\", \"ReferenciaExterna\" FROM nexoruta_app.list_import_shipment_references(@shipment_ids)";
-            command.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
+            command.CommandText =
+                "SELECT \"EnvioId\", \"ReferenciaExterna\" " +
+                "FROM nexoruta_app.list_import_shipment_references(@shipment_ids)";
+            command.Transaction =
+                db.Database.CurrentTransaction?.GetDbTransaction();
+
             var parameter = command.CreateParameter();
             parameter.ParameterName = "shipment_ids";
             parameter.Value = shipmentIds;
             command.Parameters.Add(parameter);
 
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            await using var reader =
+                await command.ExecuteReaderAsync(cancellationToken);
+
             while (await reader.ReadAsync(cancellationToken))
                 references.Add(reader.GetGuid(0), reader.GetString(1));
         }

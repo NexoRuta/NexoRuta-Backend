@@ -63,7 +63,7 @@ must not be silently included in the backend PR.
 | Boundary | Type / location | Responsibility |
 | --- | --- | --- |
 | Commerce form | frontend `Components/Features/Envios/Pages/CrearEnvio.razor`, `CrearEnvioRequest` | Editable input and DataAnnotations; reuse the request rather than add a duplicate form DTO. |
-| HTTP clients | frontend `EnviosApiClient`, `AccesosApiClient`, `OperadoresApiClient`, `UsuariosApiClient`; shared `ApiHttp` | Responsibilities are separated by feature; shared JSON, errors and cancellation are preserved. Access listing sends no access header; catalog retains `/api/comercio/operadores`. |
+| HTTP clients | frontend `EnviosApiClient`, `AccesosApiClient`, `OperadoresApiClient`, `UsuariosApiClient`; shared `ApiHttp` | Responsibilities are separated by feature; shared JSON, errors and cancellation are preserved. Access listing sends no access header; current catalog route is `/api/operadores`. |
 | API input | `src/NexoRuta.Api/Features/Envios/Contracts/Requests/CrearEnvioRequest.cs` | Validate HTTP input independently of Application and Domain. |
 | Command | Application `CrearEnvioCommand` | Intent/input only; named arguments distinguish operator, recipient, address and measurements. |
 | Coordination | Application `CrearEnvioUseCase` | Resolve current commerce and operator, construct entities, save once, return result. |
@@ -95,9 +95,10 @@ to the domain.
   intended lower bound is `0.01`, regardless of process culture; backend tests
   check all four properties under `es-UY` and `en-US`. This can change generated
   OpenAPI numeric bounds. Claiming byte-for-byte OpenAPI equality would be incorrect.
-- A pre-existing cross-repository mismatch made Commerce request `/api/operadores`
-  while backend published `/api/comercio/operadores`. The client, snapshot and route
-  checks now match the existing backend API, without changing operator eligibility.
+- At the time of this refactor Commerce requested `/api/operadores` while the backend
+  published `/api/comercio/operadores`. The later operator-catalog change consolidated
+  the contract on `/api/operadores` and removed `/api/comercio/operadores`; current
+  client, backend and OpenAPI use the single route.
 - Frontend xUnit runs the entire suite under `es-UY`; limit tests assert the actual
   culture. Backend checks both `es-UY` and `en-US` with all four numeric properties.
 - PostgreSQL rollback test proves an invalid tenant FK leaves no shipment, package,

@@ -34,6 +34,7 @@ public sealed class Worker(
                     procesadorId,
                     OutboxDestino.RabbitMq,
                     stoppingToken);
+                WorkerTelemetry.SqlContact("RabbitMq");
 
                 if (mensaje is null)
                 {
@@ -55,6 +56,7 @@ public sealed class Worker(
                     await handlers.HandleAsync(
                         mensaje,
                         stoppingToken);
+                    WorkerTelemetry.Published("RabbitMq");
                 }
                 catch (OperationCanceledException)
                     when (stoppingToken.IsCancellationRequested)
@@ -63,6 +65,7 @@ public sealed class Worker(
                 }
                 catch (Exception ex)
                 {
+                    WorkerTelemetry.Failed("RabbitMq");
                     logger.LogWarning(
                         "Falló la publicación del mensaje {MensajeId}. ErrorType: {ErrorType}",
                         mensaje.Id, ex.GetType().Name);
@@ -112,6 +115,7 @@ public sealed class Worker(
             }
             catch (Exception ex)
             {
+                WorkerTelemetry.Failed("RabbitMq");
                 logger.LogError(
                     "Error en el procesamiento del Outbox. ErrorType: {ErrorType}", ex.GetType().Name);
 

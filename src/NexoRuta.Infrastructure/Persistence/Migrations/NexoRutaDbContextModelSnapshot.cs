@@ -916,6 +916,11 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("ComercioId")
                         .HasColumnType("uuid");
 
+                    b.Property<DateTimeOffset>("CreadoEnUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("now()");
+
                     b.Property<Guid>("CreadoPorUsuarioId")
                         .HasColumnType("uuid");
 
@@ -2427,6 +2432,43 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                     b.HasKey("MessageId", "Consumer");
 
                     b.ToTable("ProcessedMessages", (string)null);
+                });
+
+            modelBuilder.Entity("NexoRuta.Infrastructure.Persistence.EjecucionSeedDemo", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Comercios")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("CuentasComercio")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("CuentasOperador")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Envios")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Operaciones")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Operadores")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Rutas")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("SembradoEnUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("EjecucionSeedDemo", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_EjecucionSeedDemo_IdUnico", "\"Id\" = 1");
+                        });
                 });
 
             modelBuilder.Entity("NexoRuta.Infrastructure.Reparto.EvidenciaReparto", b =>

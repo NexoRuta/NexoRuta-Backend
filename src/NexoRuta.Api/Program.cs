@@ -1,3 +1,5 @@
+using NexoRuta.Infrastructure.Hosting;
+using Npgsql;
 using Microsoft.EntityFrameworkCore;
 using NexoRuta.Api.Core.Health;
 using NexoRuta.Api.Core.Security;
@@ -53,10 +55,16 @@ builder.Services.AddOpenApi(options => options.AddSchemaTransformer((schema, con
 builder.Services.AddNexoRutaPersistence(builder.Configuration);
 var dataProtection = builder.Services.AddDataProtection().SetApplicationName(PasswordRecoveryDataProtection.ApplicationName);
 var dataProtectionKeys = builder.Configuration[PasswordRecoveryDataProtection.KeysDirectoryConfigurationKey];
-if (!string.IsNullOrWhiteSpace(dataProtectionKeys))
-    dataProtection.PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeys));
-else if (builder.Environment.IsProduction() && !platformCommand && !localBootstrapCommand && !migrationCommand && !catalogImportCommand)
-    throw new InvalidOperationException("Production requires a persistent DataProtection:KeysDirectory.");
+var sharedDataProtection = builder.Services.AddSharedDataProtection(
+    builder.Configuration, PasswordRecoveryDataProtection.ApplicationName, "api");
+if (!sharedDataProtection)
+{
+    if (!string.IsNullOrWhiteSpace(dataProtectionKeys))
+        dataProtection.PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeys));
+    else if (builder.Environment.IsProduction()
+        && !platformCommand && !localBootstrapCommand && !migrationCommand && !catalogImportCommand)
+        throw new InvalidOperationException("Production requires persistent DataProtection:KeysDirectory.");
+}
 builder.Services.AddOptions<PasswordRecoveryOptions>()
     .Bind(builder.Configuration.GetSection("PasswordRecovery"))
     .Validate(options => options.TokenLifespanSeconds is > 0 and <= 3600
@@ -185,79 +193,41 @@ builder.Services.AddAuthorization(options =>
 
 
 
-if (builder.Configuration.GetValue<bool>("OpenTelemetry:Enabled"))
-{
-    builder.Services.AddOpenTelemetry()
-        .ConfigureResource(resource => resource.AddService("NexoRuta.Api"))
-        .WithTracing(tracing => tracing
-            .AddAspNetCoreInstrumentation()
-            .AddHttpClientInstrumentation(options => options.FilterHttpRequestMessage = request =>
-                request.RequestUri?.Host != "api.geoapify.com")
-            .AddOtlpExporter())
-        .WithMetrics(metrics => metrics
-            .AddAspNetCoreInstrumentation()
-            .AddHttpClientInstrumentation()
-            .AddRuntimeInstrumentation()
-            .AddOtlpExporter());
-}
+builder.Services.AddTrustedProxyHeaders(builder.Configuration);
+builder.Services.AddHostingTelemetry(builder.Configuration, "NexoRuta.Api");
+var rateConnection = builder.Configuration.GetConnectionString("RateLimits");
+NpgsqlDataSource? rateDataSource = string.IsNullOrWhiteSpace(rateConnection) ? null : NpgsqlDataSource.Create(rateConnection);
+if (rateDataSource is not null) builder.Services.AddSingleton(rateDataSource);
+RateLimitPartition<string> RequestPartition(string policy, string key, int limit)
+    => rateDataSource is null
+        ? RateLimitPartition.GetFixedWindowLimiter(key, _ => new FixedWindowRateLimiterOptions
+            { PermitLimit = limit, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true })
+        : RateLimitPartition.Get(key, _ => new PostgresRateLimiter(rateDataSource, policy, key, limit));
 
 
 builder.Services.AddRateLimiter(options =>
 {
-    options.RejectionStatusCode =
-        StatusCodes.Status429TooManyRequests;
-
-    options.AddPolicy("geocodificacion", context => RateLimitPartition.GetFixedWindowLimiter(
-        partitionKey: context.User.FindFirst("sub")?.Value ?? context.Connection.RemoteIpAddress?.ToString() ?? "sin-ip",
-        factory: _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));
-
-    options.AddPolicy("seguimiento-publico", context =>
-        RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey:
-                context.Connection.RemoteIpAddress?.ToString()
-                ?? "sin-ip",
-
-            factory: _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = 20,
-                Window = TimeSpan.FromMinutes(1),
-                QueueLimit = 0,
-                AutoReplenishment = true
-            }));
-
-
-    foreach (var policy in new[] { "auth-login", "auth-register", "auth-refresh" })
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.OnRejected = async (context, ct) =>
     {
-        options.AddPolicy(policy, context =>
-            RateLimitPartition.GetFixedWindowLimiter(
-                partitionKey:
-                    context.Connection.RemoteIpAddress?.ToString()
-                    ?? "sin-ip",
-                factory: _ => new FixedWindowRateLimiterOptions
-                {
-                    PermitLimit = policy == "auth-refresh" ? 30 : 5,
-                    Window = TimeSpan.FromMinutes(1),
-                    QueueLimit = 0,
-                    AutoReplenishment = true
-                }));
-    }
-
-    options.AddPolicy("auth-password-recovery", context =>
-        RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "sin-ip",
-            factory: _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = 5,
-                Window = TimeSpan.FromMinutes(1),
-                QueueLimit = 0,
-                AutoReplenishment = true
-            }));
-
+        if (context.Lease.TryGetMetadata(PostgresRateLimiter.BackendUnavailableMetadataName, out var unavailable) && unavailable is true)
+            context.HttpContext.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+        else if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retry))
+            context.HttpContext.Response.Headers.RetryAfter = Math.Max(1, (int)Math.Ceiling(retry.TotalSeconds)).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        await Task.CompletedTask;
+    };
+    options.AddPolicy("geocodificacion", context => RequestPartition("geocodificacion",
+        context.User.FindFirst("sub")?.Value ?? context.Connection.RemoteIpAddress?.ToString() ?? "sin-ip", 10));
+    options.AddPolicy("seguimiento-publico", context => RequestPartition("seguimiento-publico",
+        context.Connection.RemoteIpAddress?.ToString() ?? "sin-ip", 20));
+    foreach (var policy in new[] { "auth-login", "auth-register", "auth-refresh", "auth-password-recovery" })
+        options.AddPolicy(policy, context => RequestPartition(policy,
+            context.Connection.RemoteIpAddress?.ToString() ?? "sin-ip", policy == "auth-refresh" ? 30 : 5));
 });
 
 
-
 var app = builder.Build();
+app.UseForwardedHeaders();
 {
     await using var scope = app.Services.CreateAsyncScope();
     if (app.Configuration.GetValue<bool>("DatabaseInitialization:ApplyMigrations"))

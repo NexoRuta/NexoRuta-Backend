@@ -12,7 +12,8 @@ public sealed record EnvioDetalle(
     string Direccion,
     string Estado,
     long Version,
-    IReadOnlyList<BultoDetalle> Bultos)
+    IReadOnlyList<BultoDetalle> Bultos,
+    DateTimeOffset CreadoEnUtc)
 {
     public bool DestinoConfirmado { get; init; }
     public string? ReferenciaExterna { get; init; }
@@ -30,6 +31,7 @@ public sealed record EnvioDetalle(
         Direccion: envio.Direccion,
         Estado: envio.Estado,
         Version: envio.Version,
+        CreadoEnUtc: envio.CreadoEnUtc,
         Bultos: envio.Bultos.Select(bulto => new BultoDetalle(
             Codigo: bulto.Codigo,
             PesoGramos: bulto.PesoGramos,

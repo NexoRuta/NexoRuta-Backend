@@ -19,6 +19,7 @@ public sealed class PushOutboxWorker(IServiceScopeFactory scopes, ITransporteFcm
             catch (Exception ex)
             {
                 logger.LogError("Falló el ciclo push. ErrorType: {ErrorType}", ex.GetType().Name);
+                WorkerTelemetry.Failed("Push");
                 await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
             }
         }
@@ -28,12 +29,14 @@ public sealed class PushOutboxWorker(IServiceScopeFactory scopes, ITransporteFcm
         await using var scope = scopes.CreateAsyncScope();
         var outbox = scope.ServiceProvider.GetRequiredService<EfOutboxRepository>();
         var mensaje = await outbox.ReservarSiguienteAsync(procesador, OutboxDestino.PushFcm, ct);
+        WorkerTelemetry.SqlContact("Push");
         if (mensaje is null) return false;
         try
         {
             using var limite = CancellationTokenSource.CreateLinkedTokenSource(ct);
             limite.CancelAfter(TimeSpan.FromSeconds(90));
             await PublicarAsync(mensaje, scope.ServiceProvider, limite.Token);
+            WorkerTelemetry.Published("Push");
             if (!await outbox.MarcarPublicadoAsync(mensaje.Id, procesador, ct))
                 logger.LogWarning("El resultado push {MensajeId} quedó registrado pero su reserva venció.", mensaje.Id);
         }
@@ -41,6 +44,7 @@ public sealed class PushOutboxWorker(IServiceScopeFactory scopes, ITransporteFcm
         catch (Exception ex)
         {
             logger.LogWarning("Falló push {MensajeId}. ErrorType: {ErrorType}", mensaje.Id, ex.GetType().Name);
+                WorkerTelemetry.Failed("Push");
             await outbox.MarcarErrorAsync(mensaje.Id, procesador, ex.GetType().Name, ct);
         }
         return true;

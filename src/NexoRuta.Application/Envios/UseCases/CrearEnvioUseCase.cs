@@ -97,7 +97,10 @@ public sealed class CrearEnvioUseCase(IEnviosRepository repository, IUsuarioActu
                 LargoCentimetros: prepared.Bulto.LargoCentimetros,
                 AnchoCentimetros: prepared.Bulto.AnchoCentimetros,
                 AltoCentimetros: prepared.Bulto.AltoCentimetros)
-            { Custodia = prepared.Bulto.Custodia.ToString() });
+            {
+                Custodia = prepared.Bulto.Custodia.ToString()
+            },
+            CreadoEnUtc: prepared.Envio.CreadoEnUtc);
 
     private sealed record Admission(
         NexoRuta.Application.Administracion.Context.ContextoUsuario Contexto,
