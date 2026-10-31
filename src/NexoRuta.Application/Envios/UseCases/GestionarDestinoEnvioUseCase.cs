@@ -17,7 +17,8 @@ public sealed class GestionarDestinoEnvioUseCase(IUsuarioActual usuario, IDestin
     {
         var destino = await ObtenerAsync(envioId, ct);
         if (destino is null) return null;
-        if (destino.Estado != "Admitido") throw new ConflictoRepartoException("El destino solo puede confirmarse antes de la recepción en depósito.");
+        if (destino.Estado != "Admitido" && !(destino.Estado == "EnDeposito" && destino.ConfirmadaEnUtc is null))
+            throw new ConflictoRepartoException("El destino pendiente puede confirmarse en depósito; una ubicación confirmada no puede cambiarse después de la recepción.");
         var propuestas = await geocodificador.BuscarAsync(destino.Direccion, ct);
         // La propuesta no escribe coordenadas: solo la confirmación expresa puede hacerlo.
         return new(envioId, destino.Direccion, destino.Version, geocodificador.Atribucion, propuestas);

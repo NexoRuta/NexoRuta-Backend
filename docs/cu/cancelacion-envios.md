@@ -30,20 +30,20 @@ Otros resultados: `400` entrada inválida, `401` sin sesión, `403` actor/permis
 
 ## Reglas y concurrencia
 
-- Se permite desde `Admitido`, `EnDeposito`, `AsignadoRuta`, `EnTransito`, `NoEntregado` y `Reprogramado`, sin entrega física registrada. El dominio valida la transición; la escritura SQL vuelve a comprobar versión y precondiciones bajo bloqueo.
-- Después de una entrega física, incluso con prueba pendiente o sin validación, corresponde devolución. La cancelación no deshace ese hecho.
-- Si se cancela mientras el repartidor registra offline una entrega recibida, la conciliación automática comprueba jornada, carga y custodia originales y conserva la entrega. Su prueba se valida según la política de esa jornada; no interviene despacho.
-- Si no se entregó, rendición y recepción conservan `Cancelado`, sin fecha de entrega física.
-- Estado, versión, suspensión de paradas, versiones de las rutas afectadas, auditoría y aviso/outbox se guardan en una transacción. Se incrementa también la ruta del custodio actual aunque su parada ya estuviera suspendida por reasignación, para no reutilizar una versión de vista remota con información anterior.
-- Dos cancelaciones iguales concurrentes generan un único registro y aviso. Repetir acceso, versión base y motivo devuelve la misma respuesta mientras el envío siga cancelado en esa versión. Una modificación posterior, otro motivo o actor producen conflicto; no se modifica la auditoría original.
-
-## Seguridad y persistencia
+- Se permite cancelar desde `Admitido`, `EnDeposito`, `AsignadoRuta`, `EnTransito`, `NoEntregado`, `Reprogramado` y `EnDevolucion`. Se rechaza desde `Entregado`, `Devuelto`, `Extraviado`, `EntregaPendienteValidacion` y `EntregaSinValidacion`. La regla de estado no sustituye la autorización del actor ni la validación del código público.
+- Una cancelación nueva requiere que no exista un hecho físico de entrega y que coincida la versión. Si una conciliación offline descubre la entrega después de cancelarse, persiste fecha, prueba y custodia, pero mantiene `Estado = Cancelado`; ese hecho no reactiva ni reemplaza la cancelación.
+- La carrera cancelación/entrega se resuelve contra el estado y versión persistidos: si entrega se confirma primero, la cancelación se rechaza; si cancelación se confirma primero, una entrega física tardía solo registra el hecho manteniendo `Cancelado`. Para la carrera con recepción de devolución, la transición a `Devuelto` confirmada primero hace que cancelar falle; si cancela primero, una recepción posterior no cambia el estado terminal.
+- Estado, versión, suspensión de paradas, versiones de las rutas afectadas, auditoría y aviso/outbox se guardan en una transacción. El SQL vuelve a comprobar acceso, permiso, actor, versión y estado bajo bloqueo; la base impide cualquier cambio posterior desde `Cancelado` a otro estado.
+- Repetir una cancelación autenticada autorizada con el mismo acceso, versión base y motivo devuelve el hecho original sin duplicar auditoría ni outbox, incluso si la conciliación tardía incrementó la versión actual. Se comprueba autorización antes de devolverlo. Otro actor, motivo o referencia de versión produce conflicto; no se modifica la auditoría.
+- Repetir una cancelación pública con el código consumido válido reconoce el resultado aunque luego se registre un hecho físico tardío. Un código incorrecto no se considera idempotencia ni autoriza resultado exitoso.
 
 `CancelacionesEnvio` conserva actor, organización, usuario, estado/versión anteriores, motivo, versión resultante y fecha del servidor. Tiene FK al envío del operador y al acceso de la organización del actor, índice único por envío, RLS forzado y trigger que impide actualizar o borrar el hecho.
 
 La API mantiene sus políticas actuales: el comercio no obtiene UPDATE general de envíos ni lectura de rutas ajenas. La función acotada `nexoruta_app.cancel_shipment` tiene propietario NOLOGIN/NOBYPASSRLS, búsqueda fija, políticas limitadas al envío de la cuenta y permisos de columnas. Verifica otra vez actor, rol y permiso actuales. Serializa con reparto/reasignación mediante el mismo bloqueo del operador. El Worker reutiliza su contrato y funciones existentes, sin acceso general a las tablas operativas.
 
-Migración: `20261019223054_AddAuthenticatedShipmentCancellation`. No se aplicó a la base local. Su reversión se comprueba en base temporal y retira función, políticas y permisos de columnas agregados.
+La migración `20261024120000_EnforceCancellationTerminalState` centraliza la matriz SQL en `nexoruta_app.cancel_state_is_allowed`, la concede solo a las funciones privadas existentes, añade `tr_envios_cancelado_terminal` como guardia de persistencia y elimina `CK_Envios_Cancelacion`, que impedía conservar un hecho físico tardío junto con el estado terminal. No otorga DML general al rol API. Su rollback vuelve a la matriz previa de seis estados y bloquea la reversión si ya existen hechos físicos conciliados en envíos cancelados.
+
+Migraciones anteriores: `20261019225246_AddRecipientEmail`, `20261019225313_RequireRecipientEmail` y `20261019230046_AddPublicShipmentCancellation`. Los fixtures de integración aplican las migraciones a bases efímeras; no se aplicaron ni modificaron bases compartidas o de producción.
 
 ## Interfaces y verificación
 
@@ -67,6 +67,8 @@ El outbox `CodigoCancelacionEmail` reutiliza RabbitMQ y el SMTP del Worker. Su s
 
 Migraciones nuevas: `20261019225246_AddRecipientEmail`, `20261019225313_RequireRecipientEmail` y `20261019230046_AddPublicShipmentCancellation`. Con datos previos se debe detener en la primera y completar correos reales antes de la segunda: no hay valores ficticios ni adaptadores para el contrato anterior. La reversión de la última se bloquea si eliminaría autorizaciones asociadas a cancelaciones públicas. No se aplicaron estas migraciones a la base local.
 
-## Pendientes
+## Verificación de la regla terminal
 
+La matriz autenticada y pública, repetición tras conciliación tardía, error de código, rollback, RLS, actualización directa de estado y carreras con entrega/devolución se verifican en PostgreSQL efímero. La evidencia y los comandos del bloque del 24/10/2026 están en [auditoría del bloque de cancelación terminal](../../../docs/auditorias/cu07/07-bloque-cancelacion-terminal.md). Este bloque no implementa importación ni cierra el resto de la máquina de estados.
+## Pendientes
 Falta SMTP real configurado, aceptación de push remoto con API HTTPS y recorrido completo en S21. Las pruebas usan PostgreSQL y RabbitMQ reales aislados, más un remitente de correo controlado; no acreditan entrega a un buzón real. iOS no está compilado ni probado. Este corte no implementa una recogida posterior a entrega ni modifica sus reglas por inferencia.

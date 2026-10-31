@@ -13,6 +13,7 @@ public sealed class HojaRuta
     public DateOnly Fecha { get; private set; }
     public long ConfiguracionVersion { get; private set; }
     public long Version { get; private set; }
+    public bool ReservaRecursosActiva { get; private set; } = true;
     public EstadoHojaRuta Estado { get; private set; }
     public DateTimeOffset? InicioEnUtc { get; private set; }
     public DateTimeOffset? FinEnUtc { get; private set; }
@@ -51,6 +52,15 @@ public sealed class HojaRuta
         Estado = EstadoHojaRuta.Despachada; Version++;
     }
 
+    public void Cancelar(long versionEsperada)
+    {
+        if (Version != versionEsperada || Estado != EstadoHojaRuta.Planificada || paradas.Any(p => p.Activa))
+            throw new InvalidOperationException("Solo se puede cancelar una ruta planificada sin paradas activas y con su versión vigente.");
+        Estado = EstadoHojaRuta.Cancelada;
+        ReservaRecursosActiva = false;
+        Version++;
+    }
+
     public void RegistrarInicio(DateTimeOffset instante)
     {
         if (Estado != EstadoHojaRuta.Despachada || instante == default) throw new InvalidOperationException("La ruta no está lista para iniciar.");
@@ -67,7 +77,7 @@ public sealed class HojaRuta
     public void RegistrarFin(DateTimeOffset instante)
     {
         if (Estado != EstadoHojaRuta.EnCurso || instante == default) throw new InvalidOperationException("No hay una jornada en curso para finalizar.");
-        Estado = EstadoHojaRuta.Finalizada; FinEnUtc = instante.ToUniversalTime(); Version++;
+        Estado = EstadoHojaRuta.Finalizada; ReservaRecursosActiva = false; FinEnUtc = instante.ToUniversalTime(); Version++;
     }
 
     public void ConfirmarSecuencia(long secuencia)

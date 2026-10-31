@@ -17,7 +17,7 @@ public sealed class AvisoReparto
     public AvisoReparto(Guid operadorId, Guid accesoId, Guid rutaId, Guid envioId, long versionEnvio, string tipo, string motivo, DateTimeOffset ahora)
     {
         if (operadorId == Guid.Empty || accesoId == Guid.Empty || rutaId == Guid.Empty || envioId == Guid.Empty
-            || versionEnvio < 0 || tipo is not ("Cancelacion" or "Reasignacion") || string.IsNullOrWhiteSpace(motivo) || motivo.Length > 500 || ahora == default)
+            || versionEnvio < 0 || tipo is not ("Cancelacion" or "Reasignacion" or "DevolucionIniciada" or "ExtravioConfirmado") || string.IsNullOrWhiteSpace(motivo) || motivo.Length > 500 || ahora == default)
             throw new ArgumentException("El aviso requiere destinatario actual, envío, versión, tipo, motivo y fecha.");
         Id = Guid.CreateVersion7(); OperadorId = operadorId; AccesoId = accesoId; RutaId = rutaId; EnvioId = envioId;
         VersionEnvio = versionEnvio; Tipo = tipo; Motivo = motivo.Trim(); CreadoEnUtc = ahora.ToUniversalTime();

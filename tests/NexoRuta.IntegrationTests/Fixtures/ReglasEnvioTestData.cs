@@ -32,7 +32,7 @@ internal static class ReglasEnvioTestData
         var version = VersionReglasOperativas.CrearBorrador(operadorId, usuarioId, id: operadorId);
         db.VersionesReglasOperativas.Add(version); await db.SaveChangesAsync();
         version.ReemplazarConfiguracion(0, new(3, 1, PoliticaDevolucionAlAgotarIntentos.DecisionOperativa,
-            2880, 1440, [TipoPruebaEntrega.Fotografia, TipoPruebaEntrega.NombreReceptor],
+            2880, 1440, 60, [TipoPruebaEntrega.Fotografia, TipoPruebaEntrega.NombreReceptor],
             [new("AUSENTE", "Ausente", true)]));
         await db.SaveChangesAsync();
         version.Publicar(1, 1, usuarioId); await db.SaveChangesAsync();

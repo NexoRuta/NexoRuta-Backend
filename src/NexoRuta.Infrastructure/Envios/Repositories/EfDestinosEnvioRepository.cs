@@ -10,9 +10,11 @@ namespace NexoRuta.Infrastructure.Envios.Repositories;
 public sealed class EfDestinosEnvioRepository(NexoRutaDbContext db, TimeProvider reloj) : IDestinosEnvioRepository
 {
     public Task<DestinoEnvioDatos?> ObtenerAsync(Guid comercioId, Guid envioId, CancellationToken ct)
-        => (from e in db.Envios.AsNoTracking() join d in db.Direcciones.AsNoTracking() on e.DireccionId equals d.Id
+        => (from e in db.Envios.AsNoTracking()
+            join d in db.Direcciones.AsNoTracking() on new { e.OperadorId, DireccionId = e.DireccionId } equals new { d.OperadorId, DireccionId = d.Id }
+            join destinatario in db.Destinatarios.AsNoTracking() on new { e.OperadorId, DestinatarioId = e.DestinatarioId } equals new { destinatario.OperadorId, DestinatarioId = destinatario.Id }
             where e.Id == envioId && e.ComercioId == comercioId && e.OperadorId == d.OperadorId
-            select new DestinoEnvioDatos(e.Id, d.Descripcion, d.Version, e.Estado.ToString(), d.Latitud, d.Longitud, d.ConfirmadaEnUtc)).SingleOrDefaultAsync(ct);
+            select new DestinoEnvioDatos(e.Id, destinatario.Nombre, d.Descripcion, d.Version, e.Estado.ToString(), d.Latitud, d.Longitud, d.ConfirmadaEnUtc)).SingleOrDefaultAsync(ct);
 
     public async Task<bool> ConfirmarAsync(Guid comercioId, Guid usuarioId, Guid envioId, long version, double latitud, double longitud, CancellationToken ct)
     {
@@ -20,7 +22,9 @@ public sealed class EfDestinosEnvioRepository(NexoRutaDbContext db, TimeProvider
             where e.Id == envioId && e.ComercioId == comercioId && e.OperadorId == d.OperadorId
             select new { e.Estado, Direccion = d }).SingleOrDefaultAsync(ct);
         if (actual is null) return false;
-        if (actual.Direccion.Version != version || actual.Estado != EstadoEnvio.Admitido)
+        var puedeConfirmar = actual.Estado == EstadoEnvio.Admitido
+            || actual.Estado == EstadoEnvio.EnDeposito && actual.Direccion.ConfirmadaEnUtc is null;
+        if (actual.Direccion.Version != version || !puedeConfirmar)
             throw new ConflictoRepartoException("El destino o el envío cambiaron. Recargá antes de confirmar.");
         actual.Direccion.ConfirmarUbicacion(latitud, longitud, usuarioId, reloj.GetUtcNow(), version);
         try

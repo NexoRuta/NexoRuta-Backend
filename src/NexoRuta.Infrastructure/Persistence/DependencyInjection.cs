@@ -146,6 +146,7 @@ public static class DependencyInjection
         services.AddScoped<ListarUsuariosUseCase>();
         services.AddScoped<ListarEnviosUseCase>();
         services.AddScoped<CrearEnvioUseCase>();
+        services.AddScoped<NexoRuta.Application.Envios.Importacion.ImportarEnviosUseCase>();
         services.AddScoped<CrearUsuarioUseCase>();
         services.AddScoped<IniciarSesionUseCase>();
         services.AddScoped<CambiarEstadoUsuarioUseCase>();
@@ -161,6 +162,7 @@ public static class DependencyInjection
 
 
         services.AddScoped<DatosInicialesSeeder>();
+        services.AddScoped<DatosDemoSeeder>();
 
         // M05 - Seguimiento
         services.AddScoped<

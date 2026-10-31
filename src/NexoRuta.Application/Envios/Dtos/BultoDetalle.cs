@@ -5,4 +5,7 @@ public sealed record BultoDetalle(
     decimal PesoGramos,
     decimal LargoCentimetros,
     decimal AnchoCentimetros,
-    decimal AltoCentimetros);
+    decimal AltoCentimetros)
+{
+    public string Custodia { get; init; } = string.Empty;
+}

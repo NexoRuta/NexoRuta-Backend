@@ -13,7 +13,8 @@ public sealed record EnvioCreado(
     decimal PesoGramos,
     decimal LargoCentimetros,
     decimal AnchoCentimetros,
-    decimal AltoCentimetros)
+    decimal AltoCentimetros,
+    DateTimeOffset CreadoEnUtc)
 {
 
     public static EnvioCreado Desde(Application.Envios.Results.EnvioCreado envio) => new(
@@ -28,5 +29,6 @@ public sealed record EnvioCreado(
         PesoGramos: envio.Bulto.PesoGramos,
         LargoCentimetros: envio.Bulto.LargoCentimetros,
         AnchoCentimetros: envio.Bulto.AnchoCentimetros,
-        AltoCentimetros: envio.Bulto.AltoCentimetros);
+        AltoCentimetros: envio.Bulto.AltoCentimetros,
+        CreadoEnUtc: envio.CreadoEnUtc);
 }

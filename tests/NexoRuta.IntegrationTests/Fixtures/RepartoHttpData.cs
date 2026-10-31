@@ -9,7 +9,8 @@ internal static class RepartoHttpData
     internal static readonly DateOnly FechaOperacion = DateOnly.FromDateTime(
         TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("America/Montevideo")).DateTime);
     internal static DateTimeOffset LlegadaEstimada => new(FechaOperacion.ToDateTime(new TimeOnly(15, 0)), TimeSpan.Zero);
-    internal static async Task<Preparado> Preparar(IntegrationDatabase data, HttpClient client, bool politica = true, bool confirmar = true)
+    internal static async Task<Preparado> Preparar(IntegrationDatabase data, HttpClient client, bool politica = true, bool confirmar = true,
+        bool bloquearDiscrepanciasCarga = true, bool recibir = true)
     {
         await using var db = data.CreateDbContext();
         var operador = await db.AccesosUsuario.SingleAsync(x => x.OperadorId != null);
@@ -29,16 +30,19 @@ internal static class RepartoHttpData
         await client.SetBearerForAccessAsync(data, operador.Id);
         using var perfil = await client.PutAsJsonAsync($"/api/repartidores/{operador.Id}", new { Nombre = "Repartidor de prueba", Activo = true });
         Assert.Equal(HttpStatusCode.OK, perfil.StatusCode);
-        if (politica) { using var config = await client.PutAsJsonAsync("/api/reparto/configuracion", Politica()); Assert.Equal(HttpStatusCode.OK, config.StatusCode); }
+        if (politica) { using var config = await client.PutAsJsonAsync("/api/reparto/configuracion", Politica(bloquearDiscrepanciasCarga)); Assert.Equal(HttpStatusCode.OK, config.StatusCode); }
         using var vehiculo = await client.PutAsJsonAsync("/api/reparto/vehiculos", new { Matricula = "SAB1234", PesoMaximoGramos = 10000000m, VolumenMaximoCm3 = 100000000000m, Activo = true });
         Assert.Equal(HttpStatusCode.OK, vehiculo.StatusCode);
         var idVehiculo = (await vehiculo.Content.ReadFromJsonAsync<VehiculoContract>())!.Id;
-        using var recepcion = await client.PostAsJsonAsync($"/api/deposito/envios/{envio.Id}/recepcion", new { Version = 0 });
-        Assert.Equal(HttpStatusCode.NoContent, recepcion.StatusCode);
+        if (recibir)
+        {
+            using var recepcion = await client.PostAsJsonAsync($"/api/deposito/envios/{envio.Id}/recepcion", new { Version = 0 });
+            Assert.Equal(HttpStatusCode.NoContent, recepcion.StatusCode);
+        }
         return new(operador.Id, idVehiculo, envio.Id);
     }
-    internal static object Politica() => new { Version = 0, ZonaHoraria = "America/Montevideo", MaximoParadas = 30,
-        BloquearDiscrepanciasCarga = true };
+    internal static object Politica(bool bloquearDiscrepanciasCarga = true) => new { Version = 0, ZonaHoraria = "America/Montevideo", MaximoParadas = 30,
+        BloquearDiscrepanciasCarga = bloquearDiscrepanciasCarga };
     internal static object Solicitud(Preparado p) => new { RepartidorAccesoId = p.AccesoId, p.VehiculoId, Fecha = FechaOperacion,
         Paradas = new[] { new { p.EnvioId, LlegadaEstimadaUtc = LlegadaEstimada } } };
     internal sealed record Preparado(Guid AccesoId, Guid VehiculoId, Guid EnvioId);

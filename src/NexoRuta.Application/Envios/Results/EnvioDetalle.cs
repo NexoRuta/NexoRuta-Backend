@@ -8,4 +8,10 @@ public sealed record EnvioDetalle(
     string Direccion,
     string Estado,
     long Version,
-    IReadOnlyList<BultoDetalle> Bultos);
+    IReadOnlyList<BultoDetalle> Bultos,
+    DateTimeOffset CreadoEnUtc)
+{
+    public bool DestinoConfirmado { get; init; }
+    public string? ReferenciaExterna { get; init; }
+    public string DestinatarioEmail { get; init; } = string.Empty;
+}

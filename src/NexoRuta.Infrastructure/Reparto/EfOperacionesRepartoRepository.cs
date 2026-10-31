@@ -49,6 +49,8 @@ public sealed partial class EfOperacionesRepartoRepository(NexoRutaDbContext db,
         }
         if (operacion.Secuencia != hoja.UltimaSecuencia + 1)
             throw new ConflictoRepartoException("Sincronizá primero las operaciones anteriores de esta jornada.");
+        await db.SetShipmentHistoryContextAsync("OperacionJornada", operacion.Id, operacion.Id,
+            operacion.OcurridaEn, operacion.Tipo, ct);
         var resultado = "Aplicada"; string? detalle = null;
         try { detalle = await Ejecutar(hoja, operacion, datos, ct); }
         catch (ConflictoRepartoException ex)
