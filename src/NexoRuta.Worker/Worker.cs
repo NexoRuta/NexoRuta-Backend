@@ -45,6 +45,13 @@ public sealed class Worker(
                     continue;
                 }
 
+                using var activity = WorkerTelemetry.StartOutboxActivity(mensaje);
+                using var logScope = logger.BeginScope(new Dictionary<string, object?>
+                {
+                    ["correlation_id"] = WorkerTelemetry.CorrelationId(mensaje),
+                    ["outbox_message_id"] = mensaje.Id.ToString("D")
+                });
+
                 logger.LogInformation(
                     "Publicando mensaje {MensajeId}, tipo {Tipo}",
                     mensaje.Id,

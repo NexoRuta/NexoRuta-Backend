@@ -38,6 +38,7 @@ if (catalogImportCommand && (args.Length > 2 || (args.Length == 2 && !catalogImp
 }
 var commandMode = platformCommand || localBootstrapCommand || migrationCommand || catalogImportCommand;
 var builder = WebApplication.CreateBuilder(commandMode ? [] : args);
+builder.Host.UseNexoRutaLogging("NexoRuta.Api");
 if (localBootstrapCommand)
 {
     builder.Configuration["DatabaseInitialization:SeedData"] = "true";
@@ -240,6 +241,7 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 
 app.UseRouting();
+app.Use(ApiTelemetry.MeasureRequestAsync);
 app.UseAuthentication();
 app.UseRateLimiter();
 app.UseMiddleware<RlsTransactionMiddleware>();

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using NexoRuta.Infrastructure.Outbox;
 
 namespace NexoRuta.Worker;
 
@@ -7,6 +8,7 @@ namespace NexoRuta.Worker;
 public static class WorkerTelemetry
 {
     private static readonly Meter Meter = new("NexoRuta.Hosting");
+    private static readonly ActivitySource ActivitySource = new("NexoRuta.Worker");
     private static readonly TransportProgress[] Transports =
     [
         new("RabbitMq"),
@@ -18,6 +20,10 @@ public static class WorkerTelemetry
         "nexoruta.worker.published", "{message}", "Messages successfully handed to their transport.");
     private static readonly Counter<long> Failures = Meter.CreateCounter<long>(
         "nexoruta.worker.failures", "{error}", "Worker processing failures, excluding shutdown cancellation.");
+    private static readonly Counter<long> PushFailures = Meter.CreateCounter<long>(
+        "nexoruta.worker.push.failures", "{error}", "Failed attempts to deliver push notifications to delivery workers.");
+    private static readonly Counter<long> CommerceNotificationFailures = Meter.CreateCounter<long>(
+        "nexoruta.commerce.notifications.failed", "{error}", "Failed commerce notifications. No commerce notification flow is currently registered.");
     private static readonly ObservableGauge<double> SqlContactAge = Meter.CreateObservableGauge(
         "nexoruta.worker.sql_contact.age", ObserveSqlContactAge, "s",
         "Seconds since a successful SQL reservation query; -1 until the first query completes.");
@@ -32,7 +38,68 @@ public static class WorkerTelemetry
         => Publications.Add(1, new KeyValuePair<string, object?>("transport", GetTransport(transport).Name));
 
     public static void Failed(string transport)
-        => Failures.Add(1, new KeyValuePair<string, object?>("transport", GetTransport(transport).Name));
+    {
+        var name = GetTransport(transport).Name;
+        Failures.Add(1, new KeyValuePair<string, object?>("transport", name));
+    }
+
+    public static void PushDeliveryFailed() => PushFailures.Add(1);
+
+    public static void CommerceNotificationFailed() => CommerceNotificationFailures.Add(1);
+
+    public static Activity? StartOutboxActivity(OutboxClaim message)
+    {
+        var parent = ActivityContext.TryParse(message.TraceParent, traceState: null, out var context)
+            ? context
+            : default;
+        return ActivitySource.StartActivity("outbox.process", ActivityKind.Consumer, parent, tags:
+        [
+            new KeyValuePair<string, object?>("messaging.system", message.Destino),
+            new KeyValuePair<string, object?>("messaging.message.type", message.Tipo)
+        ]);
+    }
+
+    public static Activity? StartConsumerActivity(string? traceParent, string operation)
+    {
+        var parent = ActivityContext.TryParse(traceParent, traceState: null, out var context)
+            ? context
+            : default;
+        return ActivitySource.StartActivity(operation, ActivityKind.Consumer, parent);
+    }
+
+    public static string CorrelationId(OutboxClaim message)
+    {
+        if (Activity.Current is { } activity)
+            return FormatCorrelationId(activity.TraceId);
+        return ActivityContext.TryParse(message.TraceParent, traceState: null, out var parent)
+            ? FormatCorrelationId(parent.TraceId)
+            : message.Id.ToString("N");
+    }
+
+    public static string CorrelationId(string? traceParent, string fallback)
+        => (Activity.Current is { } activity ? FormatCorrelationId(activity.TraceId) : null)
+           ?? (ActivityContext.TryParse(traceParent, traceState: null, out var parent)
+               ? FormatCorrelationId(parent.TraceId)
+               : fallback);
+
+    private static string FormatCorrelationId(ActivityTraceId traceId)
+        => Guid.TryParseExact(traceId.ToHexString(), "N", out var id)
+            ? id.ToString("D")
+            : traceId.ToHexString();
+
+    public static string? ReadTraceParent(IDictionary<string, object?>? headers)
+    {
+        if (headers is null || !headers.TryGetValue("traceparent", out var raw))
+            return null;
+        var value = raw switch
+        {
+            byte[] bytes => System.Text.Encoding.UTF8.GetString(bytes),
+            ReadOnlyMemory<byte> bytes => System.Text.Encoding.UTF8.GetString(bytes.Span),
+            string text => text,
+            _ => null
+        };
+        return ActivityContext.TryParse(value, traceState: null, out _) ? value : null;
+    }
 
     private static IEnumerable<Measurement<double>> ObserveSqlContactAge()
     {

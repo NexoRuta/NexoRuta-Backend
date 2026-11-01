@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using NexoRuta.Application.Administracion.Context;
 using NexoRuta.Application.Administracion.Repositories;
+using NexoRuta.Application.Envios.Repositories;
 using NexoRuta.Application.Reparto.Dtos;
 using NexoRuta.Application.Reparto.Repositories;
 using NexoRuta.Application.Reparto.UseCases;
@@ -18,6 +19,8 @@ namespace NexoRuta.Infrastructure.Persistence;
 public sealed class DatosDemoSeeder(
     NexoRutaDbContext db,
     IPlataformaRepository plataforma,
+    IEnviosRepository envios,
+    IDestinosEnvioRepository destinos,
     IRepartidoresRepository repartidores,
     IConfiguracionRepartoRepository configuracionReparto,
     IRutasRepository rutas,
@@ -215,6 +218,8 @@ public sealed class DatosDemoSeeder(
         await db.SaveChangesAsync(ct);
 
         var version = VersionReglasOperativas.CrearBorrador(operador.Id, operador.UsuarioId, ahoraUtc: publicadoEn);
+        db.VersionesReglasOperativas.Add(version);
+        await db.SaveChangesAsync(ct);
         version.ReemplazarConfiguracion(0,
             new(
                 MaxIntentosEntrega: 3,
@@ -230,8 +235,8 @@ public sealed class DatosDemoSeeder(
                     new("DESTINATARIO_AUSENTE", "Destinatario ausente", true),
                     new("DIRECCION_INCORRECTA", "Dirección incompleta", true)
                 ]));
+        await db.SaveChangesAsync(ct);
         version.Publicar(1, 1, operador.UsuarioId, publicadoEn);
-        db.VersionesReglasOperativas.Add(version);
         await db.SaveChangesAsync(ct);
         raiz.Publicar(version, publicadoEn);
         await db.SaveChangesAsync(ct);
@@ -247,14 +252,14 @@ public sealed class DatosDemoSeeder(
         var direccion = new Direccion(operador.Id, direccionTexto);
         var latitud = -34.90 + ordinal % 9 * 0.002;
         var longitud = -56.18 + ordinal % 11 * 0.002;
-        direccion.ConfirmarUbicacion(latitud, longitud, comercio.UsuarioId, creadoEn, version: 0);
         var envio = new Envio(operador.Id, comercio.Id, comercio.UsuarioId, destinatario.Id, direccion.Id,
             versionReglasId, creadoEn);
         var bulto = new Bulto(operador.Id, envio.Id, $"NR-{creadoEn:yyMMdd}-{ordinal + 1:0000}",
             650 + ordinal % 8 * 420, 28 + ordinal % 4 * 5, 18 + ordinal % 3 * 4, 10 + ordinal % 4 * 3);
-        await db.SetShipmentAsync(operador.Id, envio.Id, destinatario.Id, direccion.Id, bulto.Id, ct);
-        db.AddRange(destinatario, direccion, envio, bulto);
-        await db.SaveChangesAsync(ct);
+        await envios.GuardarAsync(envio, destinatario, direccion, bulto, ct);
+        if (!await destinos.ConfirmarAsync(comercio.Id, comercio.UsuarioId, envio.Id, direccion.Version,
+                latitud, longitud, ct))
+            throw new InvalidOperationException("No se pudo confirmar el destino de un envío demo.");
         return new(envio, destinatario, bulto, latitud, longitud);
     }
 
