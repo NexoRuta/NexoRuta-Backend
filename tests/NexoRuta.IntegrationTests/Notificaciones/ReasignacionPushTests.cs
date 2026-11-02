@@ -67,7 +67,7 @@ public sealed partial class PushOutboxTests
         using var final = await p.Client.PostAsJsonAsync($"/api/rutas/{nueva.Id}/despacho", new { nueva.Version });
         Assert.Equal(HttpStatusCode.Conflict, final.StatusCode);
         Assert.Contains("fecha operativa", await final.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
-        var futurePlan = (await p.Client.GetFromJsonAsync<HojaRutaResponse>($"/api/mobile/rutas/{nueva.Id}"))!;
+        var futurePlan = (await p.Client.GetFromJsonAsync<HojaRutaResponse[]>($"/api/rutas?fecha={FechaOperacion.AddDays(1):yyyy-MM-dd}"))!.Single(h => h.Id == nueva.Id);
         Assert.Equal("Planificada", futurePlan.Estado);
     }
 
