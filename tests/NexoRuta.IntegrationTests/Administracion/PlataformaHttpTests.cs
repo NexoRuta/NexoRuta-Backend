@@ -518,7 +518,7 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
         var access=new AccesoUsuario(userId,operatorId,null,role);
         var permission=new Permiso("envios.consultar","View shipments");
         const string hash="preserved-legacy-password-hash";
-        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Usuarios\" (\"Id\",\"Email\",\"PasswordHash\") VALUES ({userId},{\"legacy-upgrade@example.test\"},{hash})");
+        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Usuarios\" (\"Id\",\"Email\",\"PasswordHash\") VALUES ({userId},{"legacy-upgrade@example.test"},{hash})");
         await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Operadores\" (\"Id\",\"Nombre\") VALUES ({operatorId},'Legacy operator')");
         await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Comercios\" (\"Id\",\"Nombre\") VALUES ({commerceId},'Legacy commerce')");
         await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Roles\" (\"Id\",\"Codigo\",\"Nombre\",\"OperadorId\",\"EsProtegidoSistema\") VALUES ({role.Id},'legacy','Legacy',{operatorId},true)");
