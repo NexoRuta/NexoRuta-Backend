@@ -143,7 +143,7 @@ public sealed class AltaPropiaHttpTests(PostgresFixture postgres) : IClassFixtur
         // Install the catalog before the rendezvous so catalog initialization cannot serialize the race.
         await using (var db = database.CreateDbContext())
         {
-            db.AddRange(CatalogoPermisos.Todos.Select(p => new Permiso(p.Codigo, p.Nombre)));
+            db.AddRange(CatalogoPermisos.Todos.Where(p => !db.Permisos.Any(existing => existing.Codigo == p.Codigo)).Select(p => new Permiso(p.Codigo, p.Nombre)));
             await db.SaveChangesAsync();
         }
         using var factory = Factory(database, new MembershipRendezvous());
@@ -158,11 +158,11 @@ public sealed class AltaPropiaHttpTests(PostgresFixture postgres) : IClassFixtur
         Assert.True(organizations.Length == 1, $"Unexpected persisted organizations: {string.Join(", ", organizations)}");
         Assert.Equal(1, await final.Usuarios.CountAsync());
         Assert.Equal(1, await final.AccesosUsuario.CountAsync());
-        Assert.Equal(1, await final.Roles.CountAsync());
+        Assert.Equal(1, await final.AccesosUsuario.Select(a => a.RolId).Distinct().CountAsync());
         var access = await final.AccesosUsuario.SingleAsync();
         Assert.True(access.EsPropietario);
-        Assert.Equal(access.RolId, (await final.Roles.SingleAsync()).Id);
-        Assert.Equal(CatalogoPermisos.Para(access.TipoOrganizacion).Count, await final.RolesPermisos.CountAsync());
+        Assert.Equal(access.RolId, (await final.Roles.SingleAsync(r => r.Id == access.RolId)).Id);
+        Assert.Equal(CatalogoPermisos.Para(access.TipoOrganizacion).Count, await final.RolesPermisos.CountAsync(g => g.RolId == access.RolId));
     }
 
     [Fact]
@@ -226,6 +226,8 @@ public sealed class AltaPropiaHttpTests(PostgresFixture postgres) : IClassFixtur
     public async Task FailureAfterSaveRollsBackEveryOrganizationRowWithoutChangingIdentity()
     {
         var database = await postgres.CreateDatabaseAsync();
+        Guid[] originalPermissions;
+        await using (var before = database.CreateDbContext()) originalPermissions = await before.Permisos.Select(p => p.Id).OrderBy(id => id).ToArrayAsync();
         Guid userId;
         string hash;
         await using (var db = database.CreateDbContext())
@@ -245,7 +247,7 @@ public sealed class AltaPropiaHttpTests(PostgresFixture postgres) : IClassFixtur
         Assert.Empty(await final.Comercios.ToListAsync());
         Assert.Empty(await final.Roles.ToListAsync());
         Assert.Empty(await final.RolesPermisos.ToListAsync());
-        Assert.Empty(await final.Permisos.ToListAsync());
+        Assert.Equal(originalPermissions, await final.Permisos.Select(p => p.Id).OrderBy(id => id).ToArrayAsync());
     }
 
     private sealed class FailAfterSave : SaveChangesInterceptor

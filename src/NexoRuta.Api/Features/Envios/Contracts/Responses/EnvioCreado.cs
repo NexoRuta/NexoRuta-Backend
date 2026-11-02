@@ -1,4 +1,4 @@
-﻿namespace NexoRuta.Api.Features.Envios.Contracts.Responses;
+namespace NexoRuta.Api.Features.Envios.Contracts.Responses;
 
 // Keep the published schema names and flat JSON independent of Application results.
 public sealed record EnvioCreado(
@@ -9,12 +9,8 @@ public sealed record EnvioCreado(
     string UsuarioEmail,
     string OperadorNombre,
     string ComercioNombre,
-    string CodigoBulto,
-    decimal PesoGramos,
-    decimal LargoCentimetros,
-    decimal AnchoCentimetros,
-    decimal AltoCentimetros,
-    DateTimeOffset CreadoEnUtc)
+    IReadOnlyList<BultoDetalle> Bultos,
+    DateTimeOffset CreadoEnUtc, TarifaEnvioResponse Tarifa)
 {
 
     public static EnvioCreado Desde(Application.Envios.Results.EnvioCreado envio) => new(
@@ -25,10 +21,7 @@ public sealed record EnvioCreado(
         UsuarioEmail: envio.Origen.UsuarioEmail,
         OperadorNombre: envio.Origen.OperadorNombre,
         ComercioNombre: envio.Origen.ComercioNombre,
-        CodigoBulto: envio.Bulto.Codigo,
-        PesoGramos: envio.Bulto.PesoGramos,
-        LargoCentimetros: envio.Bulto.LargoCentimetros,
-        AnchoCentimetros: envio.Bulto.AnchoCentimetros,
-        AltoCentimetros: envio.Bulto.AltoCentimetros,
-        CreadoEnUtc: envio.CreadoEnUtc);
+        Bultos: envio.Bultos.Select(b => new BultoDetalle(b.Codigo, b.PesoGramos,
+            b.LargoCentimetros, b.AnchoCentimetros, b.AltoCentimetros) { Custodia = b.Custodia }).ToArray(),
+        CreadoEnUtc: envio.CreadoEnUtc, Tarifa: TarifaEnvioResponse.Desde(envio.Tarifa));
 }

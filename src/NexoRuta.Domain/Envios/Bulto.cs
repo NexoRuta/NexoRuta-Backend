@@ -28,8 +28,8 @@ public sealed class Bulto
             throw new ArgumentException("El operador es obligatorio.", nameof(operadorId));
         if (envioId == Guid.Empty)
             throw new ArgumentException("El envío es obligatorio.", nameof(envioId));
-        if (string.IsNullOrWhiteSpace(codigo))
-            throw new ArgumentException("El código es obligatorio.", nameof(codigo));
+        if (string.IsNullOrWhiteSpace(codigo) || codigo.Trim().Length > 80)
+            throw new ArgumentException("El código es obligatorio y admite hasta 80 caracteres.", nameof(codigo));
         if (pesoGramos <= 0)
             throw new ArgumentOutOfRangeException(nameof(pesoGramos), "El peso debe ser positivo.");
         if (largoCentimetros <= 0)
@@ -38,6 +38,9 @@ public sealed class Bulto
             throw new ArgumentOutOfRangeException(nameof(anchoCentimetros), "El ancho debe ser positivo.");
         if (altoCentimetros <= 0)
             throw new ArgumentOutOfRangeException(nameof(altoCentimetros), "El alto debe ser positivo.");
+        if (new[] { pesoGramos, largoCentimetros, anchoCentimetros, altoCentimetros }
+            .Any(x => x is < 0.01m or > 999999999m || decimal.Round(x, 2) != x))
+            throw new ArgumentException("Las medidas admiten valores entre 0.01 y 999999999, con hasta dos decimales efectivos.");
 
         Id = Guid.CreateVersion7();
         OperadorId = operadorId;

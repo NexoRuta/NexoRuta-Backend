@@ -391,6 +391,8 @@ public sealed partial class OperacionesRepartoHttpTests
             new { Version = reprogramado.VersionEnvio });
         Assert.Equal(HttpStatusCode.NoContent, recibir.StatusCode);
 
+        await ConfirmarRetornoYLiberacionParaReutilizar(client, hoja);
+
         var plan = new
         {
             RepartidorAccesoId = hoja.RepartidorAccesoId,
@@ -479,6 +481,8 @@ public sealed partial class OperacionesRepartoHttpTests
             new { Version = reprogramado.VersionEnvio });
         Assert.Equal(HttpStatusCode.NoContent, recibir.StatusCode);
 
+        await ConfirmarRetornoYLiberacionParaReutilizar(client, hoja);
+
         var rutaNuevaResponse = await client.PostAsJsonAsync("/api/rutas", new
         {
             RepartidorAccesoId = hoja.RepartidorAccesoId,
@@ -546,4 +550,17 @@ public sealed partial class OperacionesRepartoHttpTests
         return await db.AccesosUsuario.Where(x => comercio ? x.ComercioId != null : x.OperadorId != null)
             .Select(x => x.Id).SingleAsync();
     }
+    private static async Task ConfirmarRetornoYLiberacionParaReutilizar(HttpClient client, HojaRutaResponse hoja)
+    {
+        var fleet = (await client.GetFromJsonAsync<VehiculoFlotaResponse[]>("/api/reparto/flota"))!;
+        var occupation = fleet.Single(v => v.Id == hoja.VehiculoId).Ocupaciones.Single(o => o.RutaId == hoja.Id);
+        using var returned = await client.PostAsJsonAsync($"/api/reparto/flota/{hoja.VehiculoId}/retorno",
+            new ComandoFlotaRequest(Guid.NewGuid(), occupation.Id, occupation.Version, "Retorno físico confirmado para el siguiente intento."));
+        Assert.Equal(HttpStatusCode.OK, returned.StatusCode);
+        var result = (await returned.Content.ReadFromJsonAsync<ResultadoFlotaResponse>())!;
+        using var release = await client.PostAsJsonAsync($"/api/reparto/flota/{hoja.VehiculoId}/liberar",
+            new ComandoFlotaRequest(Guid.NewGuid(), occupation.Id, result.Version, "Recepción física completada; recurso disponible."));
+        Assert.Equal(HttpStatusCode.OK, release.StatusCode);
+    }
+
 }

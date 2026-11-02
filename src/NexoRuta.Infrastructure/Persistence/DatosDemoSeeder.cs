@@ -10,6 +10,10 @@ using NexoRuta.Application.Reparto.Repositories;
 using NexoRuta.Application.Reparto.UseCases;
 using NexoRuta.Domain.Administracion;
 using NexoRuta.Domain.Envios;
+using NexoRuta.Domain.Tarifas;
+using NexoRuta.Domain.ZonasCobertura;
+using NexoRuta.Application.Envios.Commands;
+using NetTopologySuite;
 using NexoRuta.Domain.ReglasOperativas;
 using NexoRuta.Domain.Reparto;
 using NexoRuta.Infrastructure.Reparto;
@@ -20,7 +24,6 @@ public sealed class DatosDemoSeeder(
     NexoRutaDbContext db,
     IPlataformaRepository plataforma,
     IEnviosRepository envios,
-    IDestinosEnvioRepository destinos,
     IRepartidoresRepository repartidores,
     IConfiguracionRepartoRepository configuracionReparto,
     IRutasRepository rutas,
@@ -97,7 +100,10 @@ public sealed class DatosDemoSeeder(
                 new(Guid.Empty, $"S{(char)('A' + operadorIndex)}{(char)('A' + operadorIndex)} {1234 + operadorIndex}",
                     350_000, 12_000_000, Activo: true, Version: 0), ct)
                 ?? throw new InvalidOperationException("No se pudo crear el vehículo demo.");
+            await rutas.ConfirmarFlotaAsync(operador.Contexto, vehiculo.Id, "verificar-inicial",
+                new(Guid.CreateVersion7(), null, vehiculo.Version, "Verificación explícita del vehículo sintético demo."), ct);
             await PublicarReglasAsync(operador, fechaReglas, ct);
+            await PublicarServicioDemoAsync(operador, ct);
             var versionReglasId = await db.ReglasOperativasOperadores.AsNoTracking()
                 .Where(x => x.OperadorId == operador.Id).Select(x => x.VersionVigenteId)
                 .SingleAsync(ct) ?? throw new InvalidOperationException("No se publicaron reglas operativas demo.");
@@ -130,10 +136,11 @@ public sealed class DatosDemoSeeder(
                     envio.Envio.Id, horaInicio.AddHours(1).AddMinutes(index * 45))).ToArray();
                 var hoja = await rutas.PlanificarAsync(operador.Id,
                     new(repartidor.AccesoId, vehiculo.Id, fechaRuta, paradas), ct);
-                var despachada = await rutas.DespacharAsync(operador.Id, hoja.Id, hoja.Version, ct)
+                var relojDemo = new RelojDemo(horaInicio);
+                var rutasDia = new EfRutasRepository(db, relojDemo);
+                var despachada = await rutasDia.DespacharAsync(operador.Contexto, hoja.Id, hoja.Version, ct)
                     ?? throw new InvalidOperationException("No se pudo despachar una ruta demo.");
 
-                var relojDemo = new RelojDemo(horaInicio);
                 var operaciones = new EfOperacionesRepartoRepository(db, relojDemo, configuration);
                 var actorRepartidor = new UsuarioActualDemo(operador.Contexto);
                 var jornada = new EjecutarRepartoUseCase(actorRepartidor, repartidores, operaciones);
@@ -188,6 +195,11 @@ public sealed class DatosDemoSeeder(
                 }
 
                 await AplicarAsync("FinJornada", null, null, horaInicio.AddHours(8), new { });
+                var ocupacion = await db.OcupacionesRuta.SingleAsync(o => o.RutaId == hoja.Id, ct);
+                await rutasDia.ConfirmarFlotaAsync(operador.Contexto, vehiculo.Id, "retorno",
+                    new(Guid.CreateVersion7(), ocupacion.Id, ocupacion.Version, "Retorno sintético demo."), ct);
+                await rutasDia.ConfirmarFlotaAsync(operador.Contexto, vehiculo.Id, "liberar",
+                    new(Guid.CreateVersion7(), ocupacion.Id, ocupacion.Version, "Carga sintética resuelta; disponibilidad demo."), ct);
                 cantidadRutas++;
             }
         }
@@ -256,11 +268,34 @@ public sealed class DatosDemoSeeder(
             versionReglasId, creadoEn);
         var bulto = new Bulto(operador.Id, envio.Id, $"NR-{creadoEn:yyMMdd}-{ordinal + 1:0000}",
             650 + ordinal % 8 * 420, 28 + ordinal % 4 * 5, 18 + ordinal % 3 * 4, 10 + ordinal % 4 * 3);
-        await envios.GuardarAsync(envio, destinatario, direccion, bulto, ct);
-        if (!await destinos.ConfirmarAsync(comercio.Id, comercio.UsuarioId, envio.Id, direccion.Version,
-                latitud, longitud, ct))
-            throw new InvalidOperationException("No se pudo confirmar el destino de un envío demo.");
+        await envios.GuardarAsync(envio, destinatario, direccion, [bulto],
+            new ServicioEnvioDeclarado(operador.Id, latitud, longitud, "Estandar"), ct);
         return new(envio, destinatario, bulto, latitud, longitud);
+    }
+
+    // Only the explicitly requested demo seed creates this synthetic service, for its new operators.
+    private async Task PublicarServicioDemoAsync(OrganizacionDemo operador, CancellationToken ct)
+    {
+        var geometria = NtsGeometryServices.Instance.CreateGeometryFactory(srid: 4326);
+        var poligono = geometria.CreateMultiPolygon([geometria.CreatePolygon([
+            new(-56.4, -35), new(-56, -35), new(-56, -34.7), new(-56.4, -34.7), new(-56.4, -35)])]);
+        var zona = ZonaCobertura.Crear(operador.Id, "Cobertura demo Montevideo", poligono, id: operador.Id,
+            franjasIniciales: [new(DiaSemanaIso.Lunes, new TimeOnly(9, 0), new TimeOnly(18, 0))]);
+        zona.Activar(zona.Version);
+        db.ZonasCobertura.Add(zona);
+        await db.SaveChangesAsync(ct);
+        var tarifario = TarifarioOperador.Crear(operador.Id);
+        db.TarifariosOperador.Add(tarifario);
+        await db.SaveChangesAsync(ct);
+        var version = VersionTarifario.CrearBorrador(operador.Id, operador.UsuarioId);
+        db.VersionesTarifario.Add(version);
+        await db.SaveChangesAsync(ct);
+        version.ReemplazarConfiguracion(0, [new(operador.Id, ModalidadTarifaria.Estandar, 100m, 10m, 200m, [])]);
+        await db.SaveChangesAsync(ct);
+        version.Publicar(version.VersionConcurrencia, 1, operador.UsuarioId, new HashSet<Guid> { zona.Id });
+        await db.SaveChangesAsync(ct);
+        tarifario.Publicar(version);
+        await db.SaveChangesAsync(ct);
     }
 
     private static DateTimeOffset AFechaUtc(DateOnly fecha, TimeOnly hora)
@@ -303,3 +338,4 @@ public sealed record EstadoDatosDemo(bool Sembrada, DateTimeOffset? SembradoEnUt
         ejecucion.Operadores, ejecucion.Comercios, ejecucion.CuentasOperador, ejecucion.CuentasComercio,
         ejecucion.Envios, ejecucion.Rutas, ejecucion.Operaciones);
 }
+

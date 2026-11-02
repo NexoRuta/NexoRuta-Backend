@@ -97,6 +97,13 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                     BEFORE UPDATE OR DELETE ON public."ConfirmacionesExtravioEnvio"
                     FOR EACH ROW EXECUTE FUNCTION public.prevent_lost_shipment_confirmation_mutation();
 
+                -- Transaction-local catalog backfill for the managed migrator; runtime keeps FORCE RLS.
+                -- These policies are removed before this migration can commit.
+                CREATE POLICY migration_dispatcher_catalog ON public."Permisos" TO CURRENT_USER USING (true) WITH CHECK (true);
+                CREATE POLICY migration_dispatcher_catalog ON public."Roles" TO CURRENT_USER USING (true) WITH CHECK (true);
+                CREATE POLICY migration_dispatcher_catalog ON public."RolesPermisos" TO CURRENT_USER USING (true) WITH CHECK (true);
+                CREATE POLICY migration_dispatcher_catalog ON public."Operadores" TO CURRENT_USER USING (true) WITH CHECK (true);
+
                 -- Reserve the stable dispatcher code without assigning any user to it.
                 INSERT INTO public."Permisos" ("Id", "Codigo", "Nombre")
                 VALUES (gen_random_uuid(), 'envios.gestionar', 'envios.gestionar'),
@@ -126,6 +133,11 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                 WHERE r."OperadorId" IS NOT NULL AND r."Codigo" = 'despachador_operador'
                     AND r."EsProtegidoSistema"
                 ON CONFLICT ("RolId", "PermisoId") DO NOTHING;
+
+                DROP POLICY migration_dispatcher_catalog ON public."Permisos";
+                DROP POLICY migration_dispatcher_catalog ON public."Roles";
+                DROP POLICY migration_dispatcher_catalog ON public."RolesPermisos";
+                DROP POLICY migration_dispatcher_catalog ON public."Operadores";
                 """);
         }
 

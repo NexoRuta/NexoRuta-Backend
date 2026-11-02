@@ -33,6 +33,7 @@ public sealed class RlsRestrictedHttpFlowTests(PostgresFixture postgres) : IClas
                 new AccesoInicial(commerceEmail, "Chosen operator", "Test commerce", "rls-http-operator@example.test"))
                 .SeedAsync();
             await ReglasEnvioTestData.SembrarInicialesAsync(owner);
+            await ServiciosEnvioTestData.SembrarAsync(owner);
             operatorId = await owner.Operadores.Select(x => x.Id).SingleAsync();
             var access = await owner.AccesosUsuario.SingleAsync(x => x.ComercioId != null);
             commerceAccessId = access.Id;
@@ -53,14 +54,10 @@ public sealed class RlsRestrictedHttpFlowTests(PostgresFixture postgres) : IClas
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", await LoginAsync(client, commerceEmail));
         using var created = await client.PostAsJsonAsync("/api/envios", new
         {
-            OperadorId = operatorId,
+            OperadorId = operatorId, Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(operatorId),
             DestinatarioNombre = "Ada Lovelace", DestinatarioEmail = "destinatario@example.test",
             Direccion = "18 de Julio 123",
-            CodigoBulto = "RLS-1",
-            PesoGramos = 500m,
-            LargoCentimetros = 20m,
-            AnchoCentimetros = 10m,
-            AltoCentimetros = 5m
+            Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "RLS-1", PesoGramos = 500m, LargoCentimetros = 20m, AnchoCentimetros = 10m, AltoCentimetros = 5m } }
         });
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         var createdBody = await created.Content.ReadFromJsonAsync<JsonElement>();
@@ -68,14 +65,10 @@ public sealed class RlsRestrictedHttpFlowTests(PostgresFixture postgres) : IClas
 
         using var importedCreated = await client.PostAsJsonAsync("/api/envios", new
         {
-            OperadorId = operatorId,
+            OperadorId = operatorId, Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(operatorId),
             DestinatarioNombre = "Grace Hopper", DestinatarioEmail = "grace@example.test",
             Direccion = "18 de Julio 456",
-            CodigoBulto = "RLS-2",
-            PesoGramos = 700m,
-            LargoCentimetros = 25m,
-            AnchoCentimetros = 12m,
-            AltoCentimetros = 6m
+            Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "RLS-2", PesoGramos = 700m, LargoCentimetros = 25m, AnchoCentimetros = 12m, AltoCentimetros = 6m } }
         });
         Assert.Equal(HttpStatusCode.Created, importedCreated.StatusCode);
         var importedShipmentId = (await importedCreated.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
@@ -228,6 +221,7 @@ public sealed class RlsRestrictedHttpFlowTests(PostgresFixture postgres) : IClas
                 new AccesoInicial(commerceBEmail, "History operator B", "History commerce B", "history-operator-b@example.test"))
                 .SeedAsync();
             await ReglasEnvioTestData.SembrarInicialesAsync(owner);
+            await ServiciosEnvioTestData.SembrarAsync(owner);
 
             var commerceUserIdA = await owner.Usuarios.Where(x => x.Email == commerceAEmail).Select(x => x.Id).SingleAsync();
             var commerceUserIdB = await owner.Usuarios.Where(x => x.Email == commerceBEmail).Select(x => x.Id).SingleAsync();
@@ -273,15 +267,11 @@ public sealed class RlsRestrictedHttpFlowTests(PostgresFixture postgres) : IClas
     {
         using var response = await client.PostAsJsonAsync("/api/envios", new
         {
-            OperadorId = operatorId,
+            OperadorId = operatorId, Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(operatorId),
             DestinatarioNombre = "History recipient",
             DestinatarioEmail = "history-recipient@example.test",
             Direccion = "18 de Julio 123",
-            CodigoBulto = code,
-            PesoGramos = 500m,
-            LargoCentimetros = 20m,
-            AnchoCentimetros = 10m,
-            AltoCentimetros = 5m
+            Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = code, PesoGramos = 500m, LargoCentimetros = 20m, AnchoCentimetros = 10m, AltoCentimetros = 5m } }
         });
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
@@ -306,6 +296,7 @@ public sealed class RlsRestrictedHttpFlowTests(PostgresFixture postgres) : IClas
                 new AccesoInicial(commerceEmail, "Chosen operator", "Test commerce", operatorEmail))
                 .SeedAsync();
             await ReglasEnvioTestData.SembrarInicialesAsync(owner);
+            await ServiciosEnvioTestData.SembrarAsync(owner);
             operatorId = await owner.Operadores.Select(x => x.Id).SingleAsync();
         }
 
@@ -316,14 +307,10 @@ public sealed class RlsRestrictedHttpFlowTests(PostgresFixture postgres) : IClas
 
         using var response = await client.PostAsJsonAsync("/api/envios", new
         {
-            OperadorId = operatorId,
+            OperadorId = operatorId, Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(operatorId),
             DestinatarioNombre = "Ada Lovelace", DestinatarioEmail = "destinatario@example.test",
             Direccion = "18 de Julio 123",
-            CodigoBulto = "RLS-DENY-1",
-            PesoGramos = 500m,
-            LargoCentimetros = 20m,
-            AnchoCentimetros = 10m,
-            AltoCentimetros = 5m
+            Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "RLS-DENY-1", PesoGramos = 500m, LargoCentimetros = 20m, AnchoCentimetros = 10m, AltoCentimetros = 5m } }
         });
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);

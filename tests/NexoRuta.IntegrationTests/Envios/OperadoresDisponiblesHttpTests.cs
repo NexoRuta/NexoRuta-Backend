@@ -28,6 +28,7 @@ public sealed class OperadoresDisponiblesHttpTests(PostgresFixture postgres) : I
                 new AccesoInicial("owner@example.test", "Alpha operator", "Test commerce", "operator@example.test"))
                 .SeedAsync();
             await ReglasEnvioTestData.SembrarInicialesAsync(db);
+            await ServiciosEnvioTestData.SembrarAsync(db);
             var commerceAccess = await db.AccesosUsuario.Where(x => x.ComercioId != null).SingleAsync();
             commerceAccessId = commerceAccess.Id;
             originalOperatorId = await db.Operadores.Select(x => x.Id).SingleAsync();
@@ -131,8 +132,7 @@ public sealed class OperadoresDisponiblesHttpTests(PostgresFixture postgres) : I
         {
             Content = JsonContent.Create(new
             {
-                OperadorId = suspendedId, DestinatarioNombre = "Ana", DestinatarioEmail = "destinatario@example.test", Direccion = "Rivera 123", CodigoBulto = "B-001",
-                PesoGramos = 100m, LargoCentimetros = 10m, AnchoCentimetros = 10m, AltoCentimetros = 10m
+                OperadorId = suspendedId, Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(suspendedId), DestinatarioNombre = "Ana", DestinatarioEmail = "destinatario@example.test", Direccion = "Rivera 123", Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "B-001", PesoGramos = 100m, LargoCentimetros = 10m, AnchoCentimetros = 10m, AltoCentimetros = 10m } }
             })
         };
         createRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", commerceToken);
@@ -200,11 +200,12 @@ public sealed class OperadoresDisponiblesHttpTests(PostgresFixture postgres) : I
 
     private static Task<HttpResponseMessage> ImportAsync(HttpClient client, Guid operatorId, string reference)
     {
-        const string csvHeader = "referenciaExterna,nombreDestinatario,emailDestinatario,direccion,codigoBulto,pesoGramos,largoCentimetros,anchoCentimetros,altoCentimetros";
+        const string csvHeader = "referenciaExterna,nombreDestinatario,emailDestinatario,direccion,codigoBulto,pesoGramos,largoCentimetros,anchoCentimetros,altoCentimetros,zonaId,latitud,longitud,modalidad";
         var form = new MultipartFormDataContent();
         form.Add(new ByteArrayContent(Encoding.UTF8.GetBytes(
-            $"{csvHeader}\r\n{reference},Ada Lovelace,ada@example.test,18 de Julio 123,B-001,1250,30,20,10")), "archivo", "envios.csv");
+            $"{csvHeader}\r\n{reference},Ada Lovelace,ada@example.test,18 de Julio 123,B-001,1250,30,20,10,,-34.901,-56.201,Estandar")), "archivo", "envios.csv");
         form.Add(new StringContent(operatorId.ToString("D")), "operadorId");
+        form.Add(new StringContent("2"), "versionFormato");
         return client.PostAsync("/api/envios/importaciones", form);
     }
 

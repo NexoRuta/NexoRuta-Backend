@@ -31,6 +31,24 @@ public sealed class ImportarEnviosUseCase(
         var context = await usuarioActual.ObtenerAsync(cancellationToken);
         var commerce = context.RequerirComercio();
         var rows = records.Select(record => Validar(record, commerce.Id, operadorId)).ToArray();
+        // A CSV row declares one parcel. Rows sharing a reference and recipient form
+        // one shipment; exact repeated rows remain idempotent duplicates.
+        foreach (var group in rows.Where(r => r.Candidate is not null).GroupBy(r => r.Reference, StringComparer.Ordinal))
+        {
+            var declarations = group.Select(r => r.Candidate!.Datos).ToArray();
+            var first = declarations[0];
+            if (declarations.Any(d => d.DestinatarioNombre != first.DestinatarioNombre
+                || d.DestinatarioEmail != first.DestinatarioEmail || d.Direccion != first.Direccion || d.Servicio != first.Servicio)) continue;
+            var parcels = declarations.SelectMany(d => d.Bultos).Distinct().OrderBy(b => b.Codigo, StringComparer.Ordinal).ToArray();
+            if (parcels.Select(b => b.Codigo).Distinct(StringComparer.Ordinal).Count() != parcels.Length) continue;
+            var combined = first with { Bultos = parcels };
+            var hash = HuellaSolicitudEnvio.Calcular(commerce.Id, operadorId, combined);
+            foreach (var row in group)
+            {
+                var index = Array.IndexOf(rows, row);
+                rows[index] = row with { Candidate = row.Candidate! with { Datos = combined, Huella = hash } };
+            }
+        }
         var output = new Dictionary<int, FilaImportacionEnvio>();
         foreach (var row in rows.Where(x => x.Errors.Count != 0))
             output[row.Record] = new(row.Record, row.Reference, EstadoFilaImportacionEnvio.Invalido, null, null, row.Errors);
@@ -75,8 +93,10 @@ public sealed class ImportarEnviosUseCase(
                     else
                     {
                         groupResults[group] = new(EstadoFilaImportacionEnvio.Conflicto, null,
-                            [new("ExternalReferenceConflict", "referenciaExterna",
-                                "La referencia ya existe con datos originales u operador diferentes.")]);
+                            [new(identity.VersionHuella == HuellaSolicitudEnvio.VersionActual ? "ExternalReferenceConflict" : "OriginalDeclarationVersionMismatch", "referenciaExterna",
+                                identity.VersionHuella == HuellaSolicitudEnvio.VersionActual
+                                    ? "La referencia ya existe con datos originales u operador diferentes."
+                                    : "La referencia pertenece a una declaración anterior. Se conservan su identidad y tratamiento; no se reinterpreta con el formato nuevo.")]);
                     }
                 }
                 else
@@ -103,6 +123,11 @@ public sealed class ImportarEnviosUseCase(
                     .Select(group => group.Rows[0].Candidate!).ToArray(), cancellationToken);
                 for (var index = 0; index < newGroups.Length; index++)
                     groupResults[newGroups[index]] = new(EstadoFilaImportacionEnvio.Creado, created[index].Id);
+            }
+            catch (ArgumentException error)
+            {
+                return Rejected(TipoRechazoImportacionEnvios.Validacion, rows,
+                    AddNewRowsNotProcessed(output, processableGroups, groupResults, "ServiceUnavailable", "servicio", error.Message));
             }
             catch (OperadorNoEncontradoException error)
             {
@@ -193,9 +218,9 @@ public sealed class ImportarEnviosUseCase(
     private static ValidatedRow Validar(CsvEnviosRecord record, Guid commerceId, Guid operatorId)
     {
         var errors = new List<ErrorFilaImportacion>();
-        if (record.Fields.Count != 9)
+        if (record.Fields.Count != 13)
         {
-            errors.Add(new("ColumnCount", null, $"Se esperaban 9 columnas y se recibieron {record.Fields.Count}."));
+            errors.Add(new("ColumnCount", null, $"Se esperaban 13 columnas y se recibieron {record.Fields.Count}."));
             var refOnly = record.Fields.Count == 0 ? null : NormalizarReferencia(record.Fields[0], errors);
             return new(record.Record, refOnly, null, errors);
         }
@@ -213,8 +238,19 @@ public sealed class ImportarEnviosUseCase(
             || weight is null || length is null || width is null || height is null)
             return new(record.Record, reference, null, errors);
 
-        var command = new CrearEnvioCommand(operatorId, name, email, address, parcelCode,
-            weight.Value, length.Value, width.Value, height.Value);
+        var zone = Guid.Empty;
+        if ((!string.IsNullOrWhiteSpace(record.Fields[9]) && (!Guid.TryParse(record.Fields[9], out zone) || zone == Guid.Empty))
+            || !double.TryParse(record.Fields[10], NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var lat)
+            || !double.IsFinite(lat) || lat is < -90 or > 90
+            || !double.TryParse(record.Fields[11], NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var lon)
+            || !double.IsFinite(lon) || lon is < -180 or > 180
+            || record.Fields[12] is not ("Estandar" or "Urgente"))
+        {
+            errors.Add(new("InvalidService", "servicio", "Indicá zona, coordenadas y modalidad válidas."));
+            return new(record.Record, reference, null, errors);
+        }
+        var command = new CrearEnvioCommand(operatorId, name, email, address, [new BultoDeclarado(parcelCode,
+            weight.Value, length.Value, width.Value, height.Value)], new(zone, lat, lon, record.Fields[12]));
         var candidate = new SolicitudEnvioImportado(record.Record, reference, command,
             HuellaSolicitudEnvio.VersionActual, HuellaSolicitudEnvio.Calcular(commerceId, operatorId, command));
         return new(record.Record, reference, candidate, errors);
@@ -282,6 +318,11 @@ public sealed class ImportarEnviosUseCase(
         if (number is < 0.01m or > 999_999_999m)
         {
             errors.Add(new("OutOfRange", field, "El valor debe estar entre 0.01 y 999999999."));
+            return null;
+        }
+        if (decimal.Round(number, 2) != number)
+        {
+            errors.Add(new("InvalidPrecision", field, "Ingresá como máximo dos decimales efectivos."));
             return null;
         }
         return number;

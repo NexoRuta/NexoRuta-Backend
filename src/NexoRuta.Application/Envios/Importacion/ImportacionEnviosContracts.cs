@@ -14,7 +14,8 @@ public sealed record EnvioImportadoParaPersistir(
     Envio Envio,
     Destinatario Destinatario,
     Direccion Direccion,
-    Bulto Bulto,
+    IReadOnlyList<Bulto> Bultos,
+    ServicioEnvioDeclarado Servicio,
     string ReferenciaExterna,
     short VersionHuella,
     byte[] Huella);

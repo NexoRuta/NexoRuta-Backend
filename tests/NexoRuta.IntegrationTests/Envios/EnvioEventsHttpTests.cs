@@ -26,6 +26,7 @@ public sealed class EnvioEventsHttpTests(PostgresFixture postgres) : IClassFixtu
                 new AccesoInicial(commerceEmail, "History operator", "History commerce", "history-operator@example.test"))
                 .SeedAsync();
             await ReglasEnvioTestData.SembrarInicialesAsync(seed);
+            await ServiciosEnvioTestData.SembrarAsync(seed);
             operatorId = await seed.Operadores.Select(x => x.Id).SingleAsync();
         }
 
@@ -91,15 +92,11 @@ public sealed class EnvioEventsHttpTests(PostgresFixture postgres) : IClassFixtu
 
     private static object Alta(Guid operatorId, string code) => new
     {
-        OperadorId = operatorId,
+        OperadorId = operatorId, Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(operatorId),
         DestinatarioNombre = "Ada Lovelace",
         DestinatarioEmail = "recipient@example.test",
         Direccion = "18 de Julio 123",
-        CodigoBulto = code,
-        PesoGramos = 500m,
-        LargoCentimetros = 20m,
-        AnchoCentimetros = 10m,
-        AltoCentimetros = 5m
+        Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = code, PesoGramos = 500m, LargoCentimetros = 20m, AnchoCentimetros = 10m, AltoCentimetros = 5m } }
     };
 
     private static async Task<string> LoginAsync(HttpClient client, string email)

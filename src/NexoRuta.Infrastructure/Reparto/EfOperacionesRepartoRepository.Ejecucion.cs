@@ -12,11 +12,20 @@ public sealed partial class EfOperacionesRepartoRepository
     private async Task<string?> Ejecutar(HojaRuta hoja, OperacionRepartoDatos op, DatosOperacionReparto datos, CancellationToken ct)
     {
         var politica = await db.ConfiguracionesReparto.SingleAsync(x => x.OperadorId == hoja.OperadorId && x.Version == hoja.ConfiguracionVersion, ct);
+        if (op.Tipo is "InicioJornada" or "CargarBulto" or "ConfirmarCarga")
+        {
+            var ocupacion = await db.OcupacionesRuta.SingleOrDefaultAsync(o => o.OperadorId == hoja.OperadorId && o.RutaId == hoja.Id
+                && o.VehiculoId == hoja.VehiculoId && o.RepartidorAccesoId == hoja.RepartidorAccesoId
+                && o.LiberadaEnUtc == null && o.AnuladaEnUtc == null, ct);
+            Exigir(ocupacion is not null && ocupacion.AdquiridaEnUtc is not null && ocupacion.RetornoEnUtc is null,
+                "La ruta no conserva una ocupación autorizada para iniciar, cargar o salir; verificá su conciliación en Backoffice.");
+        }
         if (op.Tipo == "InicioJornada")
         {
             Exigir(hoja.Estado == EstadoHojaRuta.Despachada, "La hoja ya no está lista para iniciar.");
             var hoy = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(reloj.GetUtcNow(), TimeZoneInfo.FindSystemTimeZoneById(politica.ZonaHoraria)).DateTime);
-            Exigir(hoja.Fecha == hoy, "La jornada nueva debe iniciarse con la hoja correspondiente al día del operador.");
+            // An authorized occupation survives midnight and delayed offline synchronization.
+            Exigir(hoja.Fecha <= hoy, "La jornada nueva debe iniciarse con la hoja correspondiente al día del operador.");
             hoja.RegistrarInicio(reloj.GetUtcNow()); return null;
         }
         Exigir(hoja.Estado == EstadoHojaRuta.EnCurso
@@ -37,6 +46,15 @@ public sealed partial class EfOperacionesRepartoRepository
             var incompletos = hoja.Paradas.Where(p => p.Activa && bultos.Where(b => b.EnvioId == p.EnvioId)
                 .Any(b => b.Custodia != EstadoCustodiaBulto.Repartidor || b.AccesoCustodioId != hoja.RepartidorAccesoId || b.RutaCustodiaId != hoja.Id)).ToArray();
             Exigir(!politica.BloquearDiscrepanciasCarga || incompletos.Length == 0, "Hay diferencias de carga pendientes de resolver en depósito.");
+            var vehiculo = await db.Vehiculos.SingleAsync(v => v.OperadorId == hoja.OperadorId && v.Id == hoja.VehiculoId, ct);
+            Exigir(vehiculo.Activo, "El vehículo está deshabilitado; no se puede confirmar la salida.");
+            // Suspender una parada no descarga sus bultos: validar toda la carga física de esta hoja antes de mutar estados.
+            var cargados = bultos.Where(b => b.Custodia is EstadoCustodiaBulto.Repartidor or EstadoCustodiaBulto.PendienteDeposito
+                && b.AccesoCustodioId == hoja.RepartidorAccesoId && b.RutaCustodiaId == hoja.Id);
+            if (CapacidadCarga.Exceso(vehiculo, cargados) is { } exceso) throw new ConflictoRepartoException(exceso);
+            Exigir(hoja.Paradas.Where(p => p.Activa && !incompletos.Contains(p))
+                .All(p => envios.Single(e => e.Id == p.EnvioId).Estado == EstadoEnvio.AsignadoRuta),
+                "Un envío cambió durante la preparación de carga.");
             foreach (var parada in incompletos)
             {
                 hoja.SuspenderParada(parada.EnvioId, "Carga incompleta: requiere revisión en depósito; no se cambió el estado comercial.");
@@ -44,7 +62,6 @@ public sealed partial class EfOperacionesRepartoRepository
             foreach (var parada in hoja.Paradas.Where(p => p.Activa))
             {
                 var envio = envios.Single(x => x.Id == parada.EnvioId);
-                Exigir(envio.Estado == EstadoEnvio.AsignadoRuta, "Un envío cambió durante la preparación de carga.");
                 envio.CambiarEstado(EstadoEnvio.EnTransito, envio.Version);
             }
             hoja.ConfirmarSalida(op.OcurridaEn);

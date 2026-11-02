@@ -10,7 +10,7 @@ internal static class RepartoHttpData
         TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("America/Montevideo")).DateTime);
     internal static DateTimeOffset LlegadaEstimada => new(FechaOperacion.ToDateTime(new TimeOnly(15, 0)), TimeSpan.Zero);
     internal static async Task<Preparado> Preparar(IntegrationDatabase data, HttpClient client, bool politica = true, bool confirmar = true,
-        bool bloquearDiscrepanciasCarga = true, bool recibir = true)
+        bool bloquearDiscrepanciasCarga = true, bool recibir = true, bool verificarFlota = true)
     {
         await using var db = data.CreateDbContext();
         var operador = await db.AccesosUsuario.SingleAsync(x => x.OperadorId != null);
@@ -21,6 +21,7 @@ internal static class RepartoHttpData
         db.Destinatarios.Add(destinatario); db.Direcciones.Add(direccion); db.Envios.Add(envio);
         db.Bultos.Add(new Bulto(operador.OperadorId.Value, envio.Id, "RUTA-TEST", 1000, 10, 10, 10));
         await db.SaveChangesAsync();
+        await ServiciosEnvioTestData.AdjuntarCargoAsync(db, envio, await db.Bultos.Where(b => b.EnvioId == envio.Id).ToArrayAsync());
         await client.SetBearerForAccessAsync(data, comercio.Id);
         if (confirmar)
         {
@@ -34,6 +35,12 @@ internal static class RepartoHttpData
         using var vehiculo = await client.PutAsJsonAsync("/api/reparto/vehiculos", new { Matricula = "SAB1234", PesoMaximoGramos = 10000000m, VolumenMaximoCm3 = 100000000000m, Activo = true });
         Assert.Equal(HttpStatusCode.OK, vehiculo.StatusCode);
         var idVehiculo = (await vehiculo.Content.ReadFromJsonAsync<VehiculoContract>())!.Id;
+        if (verificarFlota)
+        {
+        using var verificacionInicial = await client.PostAsJsonAsync($"/api/reparto/flota/{idVehiculo}/verificar-inicial", new
+        { ComandoId = Guid.NewGuid(), Version = 0, Motivo = "Inspección física del vehículo de prueba vacío." });
+        Assert.Equal(HttpStatusCode.OK, verificacionInicial.StatusCode);
+        }
         if (recibir)
         {
             using var recepcion = await client.PostAsJsonAsync($"/api/deposito/envios/{envio.Id}/recepcion", new { Version = 0 });

@@ -19,9 +19,10 @@ public sealed class RutasController(GestionarRutasUseCase casos, ConfigurarRepar
         {
             var politica = await configuracion.ObtenerAsync(ct);
             if (politica is null) return Problem("Configurá las reglas de reparto antes de planificar.", statusCode: 409);
+            var baseOperativa = await configuracion.BaseAsync(ct);
             return Ok(new RecursosPlanificacionResponse(ConfiguracionRepartoContract.Desde(politica),
                 (await repartidores.ListarAsync(ct)).Where(r => r.Activo).Select(r => new RepartidorPlanificacionResponse(r.AccesoId, r.Nombre)).ToArray(),
-                (await configuracion.VehiculosAsync(ct)).Where(v => v.Activo).Select(VehiculoContract.Desde).ToArray()));
+                (await configuracion.VehiculosAsync(ct)).Where(v => v.Activo).Select(VehiculoContract.Desde).ToArray(), baseOperativa is null ? null : BaseOperativaResponse.Desde(baseOperativa)));
         }
         catch (RepartoNoPermitidoException) { return Forbid(); }
     }
@@ -45,7 +46,7 @@ public sealed class RutasController(GestionarRutasUseCase casos, ConfigurarRepar
     public async Task<IActionResult> Planificar(PlanificarRutaRequest request, CancellationToken ct)
     {
         try { return Ok(HojaRutaResponse.Desde(await casos.PlanificarAsync(new(request.RepartidorAccesoId,
-            request.VehiculoId, request.Fecha, request.Paradas.Select(x => new ParadaPlanificadaDatos(x.EnvioId, x.LlegadaEstimadaUtc)).ToArray()), ct))); }
+            request.VehiculoId, request.Fecha, request.Paradas.Select(x => new ParadaPlanificadaDatos(x.EnvioId, x.LlegadaEstimadaUtc, x.ServicioMinutos)).ToArray(), request.SalidaPlanificadaEnUtc), ct))); }
         catch (RepartoNoPermitidoException) { return Forbid(); }
         catch (ConflictoRepartoException ex) { return Problem(ex.Message, statusCode: 409); }
         catch (ArgumentException ex) { return Problem(ex.Message, statusCode: 400); }
@@ -66,7 +67,7 @@ public sealed class RutasController(GestionarRutasUseCase casos, ConfigurarRepar
         try
         {
             var hoja = await casos.ReasignarAsync(id, new(request.RutaDestinoId, request.VersionEnvio,
-                request.VersionRutaDestino, request.LlegadaEstimadaUtc, request.Motivo), ct);
+                request.VersionRutaDestino, request.LlegadaEstimadaUtc, request.Motivo, request.ServicioMinutos), ct);
             return hoja is null ? NotFound() : Ok(HojaRutaResponse.Desde(hoja));
         }
         catch (RepartoNoPermitidoException) { return Forbid(); }

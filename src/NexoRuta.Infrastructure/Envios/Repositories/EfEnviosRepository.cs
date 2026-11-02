@@ -65,26 +65,31 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
         catch (PostgresException error) when (error.SqlState == "NXR01")
         { throw new OrganizacionSuspendidaException("No se puede admitir el envío mientras el operador seleccionado no esté disponible."); }
     }
-    public async Task GuardarAsync(
+    public async Task<NexoRuta.Domain.Tarifas.ResultadoCalculoTarifa> GuardarAsync(
         Envio envio,
         Destinatario destinatario,
         Direccion direccion,
-        Bulto bulto,
+        IReadOnlyList<Bulto> bultos,
+        NexoRuta.Application.Envios.Commands.ServicioEnvioDeclarado servicio,
         CancellationToken cancellationToken = default)
     {
         await using var transaction = await db.BeginOrJoinAsync(cancellationToken);
         await VerificarOrganizacionesParaAltaAsync(envio.ComercioId, envio.OperadorId, cancellationToken);
-        await CrearEnBaseAsync(envio, destinatario, direccion, bulto, null, cancellationToken);
+        var cargo = await TarifasAdmision.CotizarAsync(db, envio.OperadorId, servicio, bultos, cancellationToken);
+        await CrearEnBaseAsync(envio, destinatario, direccion, bultos, null, cancellationToken);
+        await TarifasAdmision.GuardarAsync(db, envio, servicio, cargo, cancellationToken);
+        await ConfirmarDestinoInicialAsync(envio, servicio, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        return cargo;
     }
 
-    public async Task GuardarImportadosAsync(
+    public async Task<IReadOnlyList<NexoRuta.Domain.Tarifas.ResultadoCalculoTarifa>> GuardarImportadosAsync(
         IReadOnlyList<EnvioImportadoParaPersistir> envios,
         CancellationToken cancellationToken = default)
     {
         if (envios.Count == 0)
-            return;
+            return [];
         var commerceId = envios[0].Envio.ComercioId;
         var operatorId = envios[0].Envio.OperadorId;
         if (envios.Any(x => x.Envio.ComercioId != commerceId || x.Envio.OperadorId != operatorId))
@@ -92,13 +97,29 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
 
         await using var transaction = await db.BeginOrJoinAsync(cancellationToken);
         await VerificarOrganizacionesParaAltaAsync(commerceId, operatorId, cancellationToken);
+        var cargos = new List<NexoRuta.Domain.Tarifas.ResultadoCalculoTarifa>();
+        // Resolve every destination before writing any row, retaining the publication/zone locks.
         foreach (var item in envios)
+            cargos.Add(await TarifasAdmision.CotizarAsync(db, item.Envio.OperadorId, item.Servicio, item.Bultos, cancellationToken));
+        for (var index = 0; index < envios.Count; index++)
         {
-            await CrearEnBaseAsync(item.Envio, item.Destinatario, item.Direccion, item.Bulto, item, cancellationToken);
+            var item = envios[index];
+            var cargo = cargos[index];
+            await CrearEnBaseAsync(item.Envio, item.Destinatario, item.Direccion, item.Bultos, item, cancellationToken);
+            await TarifasAdmision.GuardarAsync(db, item.Envio, item.Servicio, cargo, cancellationToken);
+            await ConfirmarDestinoInicialAsync(item.Envio, item.Servicio, cancellationToken);
             // The RLS INSERT policy scopes each outbox pair to the currently selected shipment.
             await db.SaveChangesAsync(cancellationToken);
         }
         await transaction.CommitAsync(cancellationToken);
+        return cargos;
+    }
+
+    private async Task ConfirmarDestinoInicialAsync(Envio envio,
+        NexoRuta.Application.Envios.Commands.ServicioEnvioDeclarado servicio, CancellationToken ct)
+    {
+        var confirmado = await db.Database.SqlQuery<bool>($"SELECT nexoruta_app.confirm_shipment_destination({envio.Id},0::bigint,{servicio.Latitud},{servicio.Longitud},NULL::text) AS \"Value\"").SingleAsync(ct);
+        if (!confirmado) throw new InvalidOperationException("El destino inicial no pudo confirmarse de forma atómica.");
     }
 
     private async Task VerificarOrganizacionesParaAltaAsync(Guid commerceId, Guid operatorId, CancellationToken cancellationToken)
@@ -118,14 +139,15 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
         Envio envio,
         Destinatario destinatario,
         Direccion direccion,
-        Bulto bulto,
+        IReadOnlyList<Bulto> bultos,
         EnvioImportadoParaPersistir? identidad,
         CancellationToken cancellationToken)
     {
         if (destinatario.OperadorId != envio.OperadorId || direccion.OperadorId != envio.OperadorId ||
-            bulto.OperadorId != envio.OperadorId || bulto.EnvioId != envio.Id)
+            bultos.Count == 0 || bultos.Any(b => b.OperadorId != envio.OperadorId || b.EnvioId != envio.Id))
             throw new ArgumentException("Shipment aggregate tenant keys must refer to the same shipment and operator.");
 
+        var bulto = bultos[0];
         await db.SetShipmentHistoryContextAsync(
             identidad is null ? "AltaIndividual" : "Importacion",
             envio.Id,
@@ -136,10 +158,10 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
         {
             createdId = await db.Database.SqlQueryRaw<Guid>(
                 "SELECT " + RlsSqlFunctionContract.CreateShipment +
-                "({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11}, {12}) AS \"Value\"",
-                envio.Id, destinatario.Id, direccion.Id, bulto.Id,
-                destinatario.Nombre, destinatario.Email, direccion.Descripcion, bulto.Codigo,
-                bulto.PesoGramos, bulto.LargoCentimetros, bulto.AnchoCentimetros, bulto.AltoCentimetros, envio.VersionReglasId)
+                "({0}, {1}, {2}, {3}, {4}, {5}, {6}::jsonb, {7}) AS \"Value\"",
+                envio.Id, destinatario.Id, direccion.Id,
+                destinatario.Nombre, destinatario.Email, direccion.Descripcion,
+                JsonSerializer.Serialize(bultos), envio.VersionReglasId)
                 .SingleAsync(cancellationToken);
         }
         catch (PostgresException error) when (error.SqlState == "NXR01")
@@ -224,6 +246,8 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
             return [];
 
         var ids = shipments.Select(x => x.Id).ToArray();
+        var cargos = await db.Database.SqlQuery<CargoListado>($"SELECT DISTINCT ON (\"EnvioId\") \"EnvioId\",\"Resultado\"::text AS \"Resultado\" FROM public.\"TarifasEnvio\" WHERE \"EnvioId\" = ANY({ids}) ORDER BY \"EnvioId\",\"CreadoEnUtc\" DESC,\"Id\" DESC").ToArrayAsync(cancellationToken);
+        var tarifas = cargos.ToDictionary(c => c.EnvioId, c => JsonSerializer.Deserialize<NexoRuta.Domain.Tarifas.ResultadoCalculoTarifa>(c.Resultado, TarifasAdmision.Json));
         var referencesByShipment = await ListarReferenciasExternasAsync(ids, comercioId, cancellationToken);
         var packages = await db.Bultos
             .Where(x => ids.Contains(x.EnvioId))
@@ -254,10 +278,17 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
             Bultos: packagesByShipment[x.Id].ToArray(),
             CreadoEnUtc: x.CreadoEnUtc)
         {
+            Tarifa = tarifas.GetValueOrDefault(x.Id),
             DestinoConfirmado = x.DestinoConfirmado,
             ReferenciaExterna = referencesByShipment.GetValueOrDefault(x.Id),
             DestinatarioEmail = x.DestinatarioEmail
         }).ToArray();
+    }
+
+    private sealed class CargoListado
+    {
+        public Guid EnvioId { get; set; }
+        public string Resultado { get; set; } = "";
     }
 
     private async Task<Dictionary<Guid, string>> ListarReferenciasExternasAsync(

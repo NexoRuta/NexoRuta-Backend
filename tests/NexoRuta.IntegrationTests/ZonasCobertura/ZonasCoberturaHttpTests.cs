@@ -200,7 +200,8 @@ public sealed class ZonasCoberturaHttpTests(PostgresFixture postgres) : IClassFi
         Assert.Equal(2, listed.GetProperty("total").GetInt32());
         using var allStates = await client.GetAsync("/api/configuracion/zonas?estado=Inactiva");
         var inactive = await allStates.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal(1, inactive.GetProperty("total").GetInt32());
+        Assert.Equal(2, inactive.GetProperty("total").GetInt32());
+        Assert.Contains(inactive.GetProperty("items").EnumerateArray(), z => z.GetProperty("nombre").GetString() == "Inactive zone");
 
         using var slots = await client.GetAsync($"/api/configuracion/zonas/{firstId}/franjas");
         var slotList = await slots.Content.ReadFromJsonAsync<JsonElement>();

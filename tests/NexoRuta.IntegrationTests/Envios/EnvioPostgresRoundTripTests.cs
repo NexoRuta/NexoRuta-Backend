@@ -77,7 +77,7 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         var address = new Direccion(operatorId, "Test address");
         var shipment = new Envio(operatorId, commerceId, userId, recipient.Id, address.Id, operatorId);
         var parcel = new Bulto(operatorId, shipment.Id, "RACE-1", 100m, 10m, 10m, 10m);
-        var save = new EfEnviosRepository(shipmentDb).GuardarAsync(shipment, recipient, address, parcel);
+        var save = new EfEnviosRepository(shipmentDb).GuardarAsync(shipment, recipient, address, [parcel], ServiciosEnvioTestData.Comando(operatorId));
         await lockObserver.LockStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.False(save.IsCompleted);
 
@@ -234,7 +234,7 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         Assert.Equal(32m, bulto.LargoCentimetros);
         Assert.Equal(21m, bulto.AnchoCentimetros);
         Assert.Equal(11m, bulto.AltoCentimetros);
-        Assert.False(persistido.DestinoConfirmado);
+        Assert.True(persistido.DestinoConfirmado);
 
         var envioDb = await consulta.Envios.SingleAsync(e => e.Id == dos.Id);
         var direccionDb = await consulta.Direcciones.SingleAsync(d => d.Id == envioDb.DireccionId);
@@ -272,6 +272,8 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         var otroRol = new Rol("owner", "Owner", null, otraEmpresa.Id);
         var otroAcceso = new AccesoUsuario(otroUsuario.Id, null, otraEmpresa.Id, otroRol);
         db.AddRange(segundoOperador, otraEmpresa, otroUsuario, otroRol, otroAcceso);
+        foreach (var permission in await db.Permisos.Where(x => x.Codigo == "envios.crear" || x.Codigo == "envios.consultar").ToArrayAsync())
+            db.Add(new RolPermiso(otroRol.Id, permission.Id));
         await db.SaveChangesAsync();
 
         var propioUno = await Crear(db, comercio.AccesoId, operador.OperadorId!.Value, "PROPIO-UNO");
@@ -635,6 +637,7 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         await AuthenticationTestData.Seeder(db, inicial).SeedAsync();
         var comercio = await Cuenta(db, inicial.UsuarioEmail, TipoAccesoUsuario.Comercio);
         var operador = await Cuenta(db, inicial.OperadorUsuarioEmail, TipoAccesoUsuario.Operador);
+        await ServiciosEnvioTestData.PublicarReglasYServicioAsync(db, operador.OperadorId!.Value, operador.UsuarioId);
         var destinatario = new Destinatario(operador.OperadorId!.Value, "Ana", "destinatario@example.test");
         var direccion = new Direccion(operador.OperadorId.Value, "Rivera 123");
         var envio = new Envio(operador.OperadorId.Value, comercio.ComercioId!.Value,
@@ -646,7 +649,7 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         await using var transaction = await db.Database.BeginTransactionAsync();
         await db.ApplyAsync(RlsActorContext.From(context));
         var error = await Assert.ThrowsAsync<ArgumentException>(() =>
-            new EfEnviosRepository(db).GuardarAsync(envio, destinatario, direccion, bulto));
+            new EfEnviosRepository(db).GuardarAsync(envio, destinatario, direccion, [bulto], ServiciosEnvioTestData.Comando(envio.OperadorId)));
         Assert.Contains("tenant keys", error.Message, StringComparison.OrdinalIgnoreCase);
 
         await using var consulta = new NexoRutaDbContext(options);
@@ -715,7 +718,7 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         var context = await new EfAccesosUsuarioRepository(db).ObtenerAsync(accesoId)
             ?? throw new InvalidOperationException("The selected access is missing.");
         if (context.ComercioId is not null && await db.Operadores.AnyAsync(o => o.Id == operadorId))
-            await ReglasEnvioTestData.PublicarInicialAsync(db, operadorId, context.UsuarioId);
+            await ServiciosEnvioTestData.PublicarReglasYServicioAsync(db, operadorId, context.UsuarioId);
         await using var transaction = await db.BeginOrJoinAsync();
         await db.ApplyAsync(RlsActorContext.From(context));
         var created = await new CrearEnvioUseCase(new EfEnviosRepository(db), new UsuarioSeleccionado(db, accesoId), new EfOperadoresRepository(db))
@@ -724,11 +727,7 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
                 DestinatarioNombre: "Destinatario de prueba",
                 DestinatarioEmail: "destinatario@example.test",
                 Direccion: "Av. Rivera 123",
-                CodigoBulto: codigo,
-                PesoGramos: 1750m,
-                LargoCentimetros: 32m,
-                AnchoCentimetros: 21m,
-                AltoCentimetros: 11m));
+                Bultos: [new BultoDeclarado(codigo, 1750m, 32m, 21m, 11m)], Servicio: ServiciosEnvioTestData.Comando(operadorId)));
         await transaction.CommitAsync();
         return created;
     }

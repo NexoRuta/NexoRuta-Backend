@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using NexoRuta.Domain.Envios;
@@ -16,6 +17,9 @@ public sealed class HojaRutaConfiguration : IEntityTypeConfiguration<HojaRuta>
         entity.HasIndex(x => x.JornadaId).IsUnique();
         entity.Property(x => x.Estado).HasConversion<string>().HasMaxLength(30);
         entity.Property(x => x.Version).IsConcurrencyToken();
+        entity.Property(x => x.PlanTemporal).HasConversion(
+            x => JsonSerializer.Serialize(x, (JsonSerializerOptions?)null),
+            x => JsonSerializer.Deserialize<PlanTemporalRuta>(x, (JsonSerializerOptions?)null)).HasColumnType("jsonb");
         entity.Property(x => x.ReservaRecursosActiva).HasDefaultValue(true);
         entity.Property(x => x.VehiculoMatricula).HasMaxLength(20);
         entity.Property(x => x.VehiculoPesoMaximoGramos).HasPrecision(18, 2);

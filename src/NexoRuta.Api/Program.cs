@@ -1,3 +1,5 @@
+using NexoRuta.Api.Core.Operations;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using NexoRuta.Infrastructure.Hosting;
 using Npgsql;
 using Microsoft.EntityFrameworkCore;
@@ -39,6 +41,8 @@ if (catalogImportCommand && (args.Length > 2 || (args.Length == 2 && !catalogImp
 var commandMode = platformCommand || localBootstrapCommand || migrationCommand || catalogImportCommand;
 var builder = WebApplication.CreateBuilder(commandMode ? [] : args);
 builder.Host.UseNexoRutaLogging("NexoRuta.Api");
+var fleetStageOnly = builder.Configuration.GetValue<bool>(FleetStageMaintenance.ConfigurationKey);
+if (fleetStageOnly) FleetStageMaintenance.ValidateConfiguration(builder.Configuration, commandMode);
 if (localBootstrapCommand)
 {
     builder.Configuration["DatabaseInitialization:SeedData"] = "true";
@@ -51,9 +55,13 @@ builder.Services.AddOpenApi(options => options.AddSchemaTransformer((schema, con
     var type = context.JsonTypeInfo.Type;
     if (type == typeof(decimal) || Nullable.GetUnderlyingType(type) == typeof(decimal))
         schema.Format = "decimal";
+    if (context.JsonPropertyInfo?.AttributeProvider?.IsDefined(typeof(NexoRuta.Api.Validation.DosDecimalesAttribute), true) == true)
+        schema.MultipleOf = 0.01m;
     return Task.CompletedTask;
 }));
 builder.Services.AddNexoRutaPersistence(builder.Configuration);
+if (fleetStageOnly)
+    builder.Services.AddDbContext<NexoRutaDbContext>(options => options.ReplaceService<IModelCustomizer, FleetStageModelCustomizer>());
 var dataProtection = builder.Services.AddDataProtection().SetApplicationName(PasswordRecoveryDataProtection.ApplicationName);
 var dataProtectionKeys = builder.Configuration[PasswordRecoveryDataProtection.KeysDirectoryConfigurationKey];
 var sharedDataProtection = builder.Services.AddSharedDataProtection(
@@ -218,7 +226,8 @@ builder.Services.AddRateLimiter(options =>
         await Task.CompletedTask;
     };
     options.AddPolicy("geocodificacion", context => RequestPartition("geocodificacion",
-        context.User.FindFirst("sub")?.Value ?? context.Connection.RemoteIpAddress?.ToString() ?? "sin-ip", 10));
+        context.User.FindFirst("sub")?.Value ?? context.Connection.RemoteIpAddress?.ToString() ?? "sin-ip",
+        builder.Configuration.GetValue<int?>("Geocoding:Consumo:SolicitudesPorMinutoUsuario") ?? 10));
     options.AddPolicy("seguimiento-publico", context => RequestPartition("seguimiento-publico",
         context.Connection.RemoteIpAddress?.ToString() ?? "sin-ip", 20));
     foreach (var policy in new[] { "auth-login", "auth-register", "auth-refresh", "auth-password-recovery" })
@@ -228,6 +237,11 @@ builder.Services.AddRateLimiter(options =>
 
 
 var app = builder.Build();
+if (fleetStageOnly)
+{
+    await using var stageScope = app.Services.CreateAsyncScope();
+    await FleetStageMaintenance.VerifySchemaAsync(stageScope.ServiceProvider.GetRequiredService<NexoRutaDbContext>());
+}
 app.UseForwardedHeaders();
 {
     await using var scope = app.Services.CreateAsyncScope();
@@ -242,6 +256,17 @@ if (app.Environment.IsDevelopment())
 
 app.UseRouting();
 app.Use(ApiTelemetry.MeasureRequestAsync);
+if (fleetStageOnly)
+    app.Use(async (context, next) =>
+    {
+        if (!FleetStageMaintenance.Allows(context.Request))
+        {
+            context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+            await context.Response.WriteAsJsonAsync(new { error = "Fleet Stage maintenance: only authorized reconciliation operations are available." });
+            return;
+        }
+        await next(context);
+    });
 app.UseAuthentication();
 app.UseRateLimiter();
 app.UseMiddleware<RlsTransactionMiddleware>();
@@ -253,3 +278,4 @@ app.MapGet("/health/live", () => Results.Ok(new { status = "live" }));
 app.Run();
 
 public partial class Program { }
+

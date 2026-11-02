@@ -43,11 +43,31 @@ public static class DependencyInjection
 
         services.AddDbContext<NexoRutaDbContext>(options => options.UseNexoRutaPostgres(connectionString));
         services.AddMemoryCache();
+        services.AddSingleton(NexoRuta.Infrastructure.Reparto.GeoapifyRoutingOptions.Leer(configuration));
+        services.AddHttpClient(NexoRuta.Infrastructure.Reparto.GeoapifyRouting.ClienteHttp,h=>h.Timeout=Timeout.InfiniteTimeSpan)
+            .ConfigurePrimaryHttpMessageHandler(()=>new SocketsHttpHandler{AllowAutoRedirect=false,MaxConnectionsPerServer=2})
+            .RemoveAllLoggers();
+        services.AddScoped<NexoRuta.Infrastructure.Reparto.IConsumoRouting,NexoRuta.Infrastructure.Reparto.ConsumoRouting>();
+        services.AddScoped<NexoRuta.Application.Reparto.Estimaciones.IProveedorTramosViales,NexoRuta.Infrastructure.Reparto.GeoapifyRouting>();
         services.AddHttpClient(NexoRuta.Infrastructure.Envios.Geocodificacion.GeocodificadorGeoapify.ClienteHttp,
-            http => http.Timeout = TimeSpan.FromSeconds(8)).RemoveAllLoggers();
+            http => http.Timeout = Timeout.InfiniteTimeSpan)
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false, MaxConnectionsPerServer = 2 })
+            .RemoveAllLoggers();
+        services.AddSingleton(NexoRuta.Infrastructure.Envios.Geocodificacion.OpcionesGeocodificacion.Leer(configuration));
+        services.AddScoped<NexoRuta.Infrastructure.Envios.Geocodificacion.IConsumoGeocodificacion, NexoRuta.Infrastructure.Envios.Geocodificacion.ConsumoGeocodificacion>();
         services.AddScoped<NexoRuta.Application.Envios.Interfaces.IGeocodificador, NexoRuta.Infrastructure.Envios.Geocodificacion.GeocodificadorGeoapify>();
         services.AddScoped<NexoRuta.Application.Envios.Repositories.IDestinosEnvioRepository, NexoRuta.Infrastructure.Envios.Repositories.EfDestinosEnvioRepository>();
         services.AddScoped<NexoRuta.Application.Envios.UseCases.GestionarDestinoEnvioUseCase>();
+        services.AddHttpClient(NexoRuta.Infrastructure.Envios.Geocodificacion.GeocodificadorMapboxTemporal.ClienteHttp,
+            http => http.Timeout = Timeout.InfiniteTimeSpan)
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false, MaxConnectionsPerServer = 2 })
+            .RemoveAllLoggers();
+        services.AddScoped<NexoRuta.Infrastructure.Envios.Geocodificacion.GeocodificadorMapboxTemporal>();
+        services.AddKeyedScoped<NexoRuta.Application.Envios.UseCases.GestionarDestinoEnvioUseCase>(
+            NexoRuta.Infrastructure.Envios.Geocodificacion.GeocodificadorMapboxTemporal.Servicio, (provider, _) => new(
+                provider.GetRequiredService<NexoRuta.Application.Administracion.Interfaces.IUsuarioActual>(),
+                provider.GetRequiredService<NexoRuta.Application.Envios.Repositories.IDestinosEnvioRepository>(),
+                provider.GetRequiredService<NexoRuta.Infrastructure.Envios.Geocodificacion.GeocodificadorMapboxTemporal>()));
         services.AddDataProtection();
         services.AddIdentityCore<Usuario>(options =>
             {
@@ -96,6 +116,7 @@ public static class DependencyInjection
         services.AddScoped<IOperadoresRepository, EfOperadoresRepository>();
         services.AddScoped<IComerciosRepository, EfComerciosRepository>();
         services.AddScoped<IEnviosRepository, EfEnviosRepository>();
+        services.AddScoped<IServiciosEnvioRepository, EfServiciosEnvioRepository>();
         services.AddScoped<NexoRuta.Application.Seguimiento.Interfaces.ICancelacionPublica, NexoRuta.Infrastructure.Seguimiento.Processing.CancelacionPublica>();
         services.AddScoped<NexoRuta.Application.Envios.Repositories.ICancelacionesEnvioRepository, NexoRuta.Infrastructure.Envios.Repositories.EfCancelacionesEnvioRepository>();
         services.AddScoped<NexoRuta.Application.Envios.UseCases.CancelarEnvioUseCase>();

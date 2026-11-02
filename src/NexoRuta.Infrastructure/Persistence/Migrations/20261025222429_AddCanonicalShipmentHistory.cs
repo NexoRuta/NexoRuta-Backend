@@ -133,7 +133,14 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                         SELECT oid INTO v_history_role FROM pg_roles WHERE rolname = 'nexoruta_history_fn';
                     ELSIF EXISTS (SELECT 1 FROM pg_roles WHERE oid = v_history_role
                         AND (rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls))
-                        OR EXISTS (SELECT 1 FROM pg_auth_members WHERE roleid = v_history_role) THEN
+                        OR EXISTS (
+                            SELECT 1 FROM pg_auth_members m
+                            WHERE m.roleid = v_history_role
+                              -- A managed migrator with CREATEROLE already administers this role.
+                              -- No runtime or other principal may inherit the history owner.
+                              AND m.member IS DISTINCT FROM (
+                                  SELECT oid FROM pg_roles WHERE rolname = session_user
+                                      AND (rolsuper OR rolcreaterole))) THEN
                         RAISE EXCEPTION 'Role nexoruta_history_fn already exists with unsafe attributes or memberships.' USING ERRCODE = '42501';
                     END IF;
                 END $roles$;

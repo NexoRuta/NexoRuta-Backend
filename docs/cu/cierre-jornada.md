@@ -20,3 +20,17 @@ Si el bulto aparece y vuelve físicamente al depósito, el endpoint de recepció
 **Alineación DEC-07 (28/10/2026):** se reemplaza la frase anterior que atribuía a la recepción un cambio automático a `Reprogramado`. Al cerrar una jornada antes de la salida, el envío permanece `AsignadoRuta`, la parada se suspende y la custodia no cambia; una reasignación posterior solo se permite con estado/versión vigentes, ruta elegible y todos los bultos realmente en depósito. La rendición, la recepción y el cierre registran hechos/custodia, no inventan una flecha comercial. El comportamiento está limitado al bulto único y no define agregación CU-08.
 
 Pruebas HTTP incluyen rol PostgreSQL restringido, secuencia fuera de orden, repetición idéntica, inmutabilidad SQL, conservación de custodia, carga sin salida, recepción posterior y rechazo de entrega tras cerrar. Las pruebas móviles verifican persistencia de incidencias propias y rechazo de referencias a bultos ajenos. El recorrido físico con faltantes en el S21 continúa pendiente de aceptación operativa.
+
+## CU-06 B2: cierre administrativo separado de disponibilidad (01/11/2026)
+
+D18 sigue vigente: `FinJornada` puede cerrar con incidencias y conserva custodia e historial. Libera la **reserva diaria** existente, pero **no** la nueva ocupación física exclusiva de vehículo y repartidor adquirida al despachar. Una operación offline pendiente tampoco libera recursos en el servidor.
+
+En Backoffice, un operador con `envios.gestionar` y `envios.consultar` confirma por separado:
+1. Retorno físico de la ocupación exacta (no recibe bultos, no reabre jornada).
+2. Disponibilidad y liberación, únicamente con jornada finalizada, retorno confirmado y custodia pendiente resuelta por recepción real o conciliación vigente de extravío. Una parada suspendida o rendición declarada no equivale a descarga. La incidencia histórica permanece y no bloquea tras resolver custodia.
+
+La desactivación administrativa no libera ocupación ni impide cierre, recepción, retorno o liberación. Medianoche y GPS tampoco acreditan retorno. Despachos sin inicio/salida/carga se anulan explícitamente conservando historial y estados comerciales; no se fabrica un retorno. Esa hoja se cancela y el trabajo se reasigna a una nueva identidad, no se recicla una autorización que podría tener comandos offline pendientes.
+
+El despacho futuro deja de estar permitido en B2: solo se adquiere ocupación en la fecha operativa de la hoja (zona horaria de su política). Planificar futuro sigue permitido. Una ocupación ya autorizada no expira a medianoche: iniciar/sincronizar tarde no se rechaza por el mero cambio de fecha; se exige conservar la ocupación sin retorno/liberación. Se mantiene el rechazo de inicio anterior a la fecha operativa.
+
+Transición, contratos y pruebas: `docs/auditorias/cu06/06-implementacion-b2.md` del superproyecto. Las rutas cerradas anteriores a B2 no reciben retornos ficticios ni ocupaciones eternas; disponibilidad inicial requiere inspección administrativa auditable y, si corresponde, recepción física explícita de carga histórica.

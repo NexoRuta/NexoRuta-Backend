@@ -18,7 +18,7 @@ public sealed class CreacionAutomaticaSeguimientoTests(
         // ARRANGE: PostgreSQL aislado mediante Testcontainers.
         var database = await postgres.CreateDatabaseAsync();
 
-        using var factory = new IntegrationApiFactory(database, "Development");
+        using var factory = new IntegrationApiFactory(database, "Development", seedShippingServices: true);
         using var client = factory.CreateHttpClient();
 
         Guid operadorId;
@@ -45,11 +45,8 @@ public sealed class CreacionAutomaticaSeguimientoTests(
                 operadorId,
                 destinatarioNombre = "Destinatario Outbox", destinatarioEmail = "destinatario@example.test",
                 direccion = "Dirección de prueba",
-                codigoBulto = "B-OUTBOX-001",
-                pesoGramos = 1250m,
-                largoCentimetros = 30m,
-                anchoCentimetros = 20m,
-                altoCentimetros = 10m
+                servicio = ServiciosEnvioTestData.Declarar(operadorId),
+                bultos = new[] { new { codigo = "B-OUTBOX-001", pesoGramos = 1250m, largoCentimetros = 30m, anchoCentimetros = 20m, altoCentimetros = 10m } }
             })
         };
 
@@ -130,7 +127,7 @@ public sealed class CreacionAutomaticaSeguimientoTests(
         // ARRANGE: PostgreSQL exclusivo de esta prueba.
         var database = await postgres.CreateDatabaseAsync();
 
-        using var factory = new IntegrationApiFactory(database, "Development");
+        using var factory = new IntegrationApiFactory(database, "Development", seedShippingServices: true);
         using var client = factory.CreateHttpClient();
 
         Guid operadorId;
@@ -182,11 +179,8 @@ public sealed class CreacionAutomaticaSeguimientoTests(
                 operadorId,
                 destinatarioNombre = "Destinatario rollback", destinatarioEmail = "destinatario@example.test",
                 direccion = "Dirección de prueba",
-                codigoBulto = "B-ROLLBACK-001",
-                pesoGramos = 1250m,
-                largoCentimetros = 30m,
-                anchoCentimetros = 20m,
-                altoCentimetros = 10m
+                servicio = ServiciosEnvioTestData.Declarar(operadorId),
+                bultos = new[] { new { codigo = "B-ROLLBACK-001", pesoGramos = 1250m, largoCentimetros = 30m, anchoCentimetros = 20m, altoCentimetros = 10m } }
             })
         };
 

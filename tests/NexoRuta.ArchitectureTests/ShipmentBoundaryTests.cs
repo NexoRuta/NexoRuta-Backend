@@ -22,17 +22,23 @@ public sealed class ShipmentBoundaryTests
     [Fact]
     public void ShipmentEndpoints_DeclareApiOwnedResponses()
     {
-        var responseTypes = typeof(EnviosController).GetMethods()
-            .SelectMany(method => method.GetCustomAttributes(inherit: false))
-            .OfType<ProducesResponseTypeAttribute>()
-            .Select(attribute => attribute.Type)
-            .Where(type => type != typeof(void)).ToArray();
-        Assert.Equal(2, responseTypes.Length);
-        foreach (var type in responseTypes)
+        var endpoints = typeof(EnviosController).GetMethods()
+            .Where(method => method.GetCustomAttributes(inherit: false)
+                .OfType<Microsoft.AspNetCore.Mvc.Routing.HttpMethodAttribute>().Any()).ToArray();
+        Assert.NotEmpty(endpoints);
+        foreach (var endpoint in endpoints)
         {
-            var response = type.IsGenericType ? type.GenericTypeArguments[0] : type;
-            Assert.Equal(typeof(EnviosController).Assembly, response.Assembly);
-            Assert.Equal("NexoRuta.Api.Features.Envios.Contracts.Responses", response.Namespace);
+            var responseTypes = endpoint.GetCustomAttributes(inherit: false)
+                .OfType<ProducesResponseTypeAttribute>()
+                .Select(attribute => attribute.Type)
+                .Where(type => type != typeof(void)).ToArray();
+            Assert.NotEmpty(responseTypes);
+            foreach (var type in responseTypes)
+            {
+                var response = type.IsGenericType ? type.GenericTypeArguments[0] : type;
+                Assert.Equal(typeof(EnviosController).Assembly, response.Assembly);
+                Assert.Equal("NexoRuta.Api.Features.Envios.Contracts.Responses", response.Namespace);
+            }
         }
     }
 }

@@ -15,8 +15,15 @@ public interface IRutasRepository
     Task<ConfirmacionExtravioEnvioDatos?> ConfirmarExtravioAsync(ContextoUsuario actor, Guid envioId,
         ConfirmarExtravioEnvioDatos datos, CancellationToken ct);
     Task<HojaRutaDatos> PlanificarAsync(Guid operadorId, PlanificarRutaDatos datos, CancellationToken ct);
-    Task<HojaRutaDatos?> DespacharAsync(Guid operadorId, Guid rutaId, long version, CancellationToken ct);
+    Task<HojaRutaDatos?> DespacharAsync(ContextoUsuario actor, Guid rutaId, long version, CancellationToken ct);
+    Task<IReadOnlyList<VehiculoFlotaDatos>> FlotaAsync(Guid operadorId, CancellationToken ct);
+    Task<ResultadoFlotaDatos?> ConfirmarFlotaAsync(ContextoUsuario actor, Guid vehiculoId,
+        string accion, ComandoFlotaDatos datos, CancellationToken ct);
     Task<HojaRutaDatos?> CancelarAsync(Guid operadorId, Guid rutaId, long version, CancellationToken ct);
     Task<bool> RecibirAsync(Guid operadorId, Guid envioId, long version, CancellationToken ct);
 
+    Task<IReadOnlyList<PerfilVialDatos>> PerfilesVialesAsync(Guid op,CancellationToken ct);
+    Task<PerfilVialDatos?> ConfigurarPerfilAsync(ContextoUsuario actor,Guid vehiculo,ConfigurarPerfilVialDatos datos,CancellationToken ct);
+    Task<EstimacionRutaDatos?> EstimarAsync(ContextoUsuario actor,Guid ruta,CalcularEstimacionDatos datos,CancellationToken ct);
+    Task<IReadOnlyList<EstimacionRutaDatos>?> EstimacionesAsync(Guid op,Guid ruta,long? antes,CancellationToken ct);
 }

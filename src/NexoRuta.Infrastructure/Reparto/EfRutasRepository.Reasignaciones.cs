@@ -198,7 +198,8 @@ public sealed partial class EfRutasRepository
         var politica = await db.ConfiguracionesReparto.SingleAsync(p => p.OperadorId == operadorId && p.Version == destino.ConfiguracionVersion, ct);
         var zona = TimeZoneInfo.FindSystemTimeZoneById(politica.ZonaHoraria);
         var hoy = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(reloj.GetUtcNow(), zona).DateTime);
-        if (destino.Fecha < hoy || DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(datos.LlegadaEstimadaUtc, zona).DateTime) != destino.Fecha
+        if (destino.Fecha < hoy || DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(datos.LlegadaEstimadaUtc, zona).DateTime) < destino.Fecha
+            || destino.PlanTemporal != null && destino.PlanTemporal.SalidaPlanificadaEnUtc != null && datos.LlegadaEstimadaUtc < destino.PlanTemporal.SalidaPlanificadaEnUtc
             || destino.Paradas.Count > 0 && datos.LlegadaEstimadaUtc < destino.Paradas.MaxBy(p => p.Orden)!.LlegadaEstimadaUtc)
             throw new ConflictoRepartoException("La llegada debe corresponder a la fecha futura y al orden de la ruta destino.");
         if (destino.Paradas.Count(p => p.Activa) >= politica.MaximoParadas
@@ -207,9 +208,9 @@ public sealed partial class EfRutasRepository
             throw new ConflictoRepartoException("La ruta destino supera sus paradas o tiene repartidor/vehículo deshabilitados.");
         var ids = destino.Paradas.Where(p => p.Activa).Select(p => p.EnvioId).Append(envioId).ToArray();
         var bultos = await db.Bultos.Where(b => b.OperadorId == operadorId && ids.Contains(b.EnvioId)).ToArrayAsync(ct);
-        if (!bultos.Any(b => b.EnvioId == envioId) || bultos.Sum(b => b.PesoGramos) > destino.VehiculoPesoMaximoGramos
-            || bultos.Sum(b => b.LargoCentimetros * b.AnchoCentimetros * b.AltoCentimetros) > destino.VehiculoVolumenMaximoCm3)
-            throw new ConflictoRepartoException("La reasignación supera el peso o volumen de la ruta destino.");
+        if (!bultos.Any(b => b.EnvioId == envioId)) throw new ConflictoRepartoException("El envío debe tener bultos.");
+        var vehiculo = await db.Vehiculos.SingleAsync(v => v.OperadorId == operadorId && v.Id == destino.VehiculoId, ct);
+        if (CapacidadCarga.Exceso(vehiculo, bultos) is { } exceso) throw new ConflictoRepartoException(exceso);
         var propias = bultos.Where(b => b.EnvioId == envioId).ToArray();
         if (propias.Any(b => b.Custodia != EstadoCustodiaBulto.Deposito))
             throw new ConflictoRepartoException("La reasignación requiere todos los bultos físicamente recibidos en depósito; no transfiere custodia entre repartidores.");
@@ -223,7 +224,7 @@ public sealed partial class EfRutasRepository
             anterior.SuspenderParada(envioId, datos.Motivo);
         // Libera el índice de parada activa antes de insertar la nueva, dentro de la misma transacción.
         await db.SaveChangesAsync(ct);
-        destino.AgregarParada(envioId, datos.LlegadaEstimadaUtc);
+        destino.AgregarParada(envioId, datos.LlegadaEstimadaUtc, datos.ServicioMinutos);
         if (envio.Estado == EstadoEnvio.Reprogramado)
             envio.CambiarEstado(EstadoEnvio.AsignadoRuta, envio.Version);
         else

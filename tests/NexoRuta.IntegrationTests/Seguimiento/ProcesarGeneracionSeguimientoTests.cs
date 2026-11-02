@@ -25,7 +25,7 @@ public sealed class ProcesarGeneracionSeguimientoTests(
         // ARRANGE: base PostgreSQL exclusiva de esta prueba.
         var database = await postgres.CreateDatabaseAsync();
 
-        using var factory = new IntegrationApiFactory(database, "Development");
+        using var factory = new IntegrationApiFactory(database, "Development", seedShippingServices: true);
         using var client = factory.CreateHttpClient();
 
         Guid operadorId;
@@ -52,11 +52,8 @@ public sealed class ProcesarGeneracionSeguimientoTests(
                 operadorId,
                 destinatarioNombre = "Destinatario M05", destinatarioEmail = "destinatario@example.test",
                 direccion = "Dirección prueba transaccional",
-                codigoBulto = "M05-TRANSACCION-001",
-                pesoGramos = 1500m,
-                largoCentimetros = 30m,
-                anchoCentimetros = 20m,
-                altoCentimetros = 15m
+                servicio = ServiciosEnvioTestData.Declarar(operadorId),
+                bultos = new[] { new { codigo = "M05-TRANSACCION-001", pesoGramos = 1500m, largoCentimetros = 30m, anchoCentimetros = 20m, altoCentimetros = 15m } }
             })
         };
 
@@ -252,7 +249,7 @@ public sealed class ProcesarGeneracionSeguimientoTests(
         // ARRANGE: PostgreSQL exclusivo de esta prueba.
         var database = await postgres.CreateDatabaseAsync();
 
-        using var factory = new IntegrationApiFactory(database, "Development");
+        using var factory = new IntegrationApiFactory(database, "Development", seedShippingServices: true);
         using var client = factory.CreateHttpClient();
 
         Guid operadorId;
@@ -279,11 +276,8 @@ public sealed class ProcesarGeneracionSeguimientoTests(
                 operadorId,
                 destinatarioNombre = "Destinatario rollback M05", destinatarioEmail = "destinatario@example.test",
                 direccion = "Dirección prueba rollback",
-                codigoBulto = "M05-ROLLBACK-001",
-                pesoGramos = 1200m,
-                largoCentimetros = 25m,
-                anchoCentimetros = 20m,
-                altoCentimetros = 10m
+                servicio = ServiciosEnvioTestData.Declarar(operadorId),
+                bultos = new[] { new { codigo = "M05-ROLLBACK-001", pesoGramos = 1200m, largoCentimetros = 25m, anchoCentimetros = 20m, altoCentimetros = 10m } }
             })
         };
 
@@ -397,7 +391,7 @@ public sealed class ProcesarGeneracionSeguimientoTests(
     {
         var database = await postgres.CreateDatabaseAsync();
 
-        using var factory = new IntegrationApiFactory(database, "Development");
+        using var factory = new IntegrationApiFactory(database, "Development", seedShippingServices: true);
         using var client = factory.CreateHttpClient();
 
         Guid operadorId;
@@ -424,11 +418,8 @@ public sealed class ProcesarGeneracionSeguimientoTests(
                 operadorId,
                 destinatarioNombre = "Prueba concurrencia M05", destinatarioEmail = "destinatario@example.test",
                 direccion = "San José, Uruguay",
-                codigoBulto = "M05-CONCURRENCIA-001",
-                pesoGramos = 1500m,
-                largoCentimetros = 30m,
-                anchoCentimetros = 20m,
-                altoCentimetros = 15m
+                servicio = ServiciosEnvioTestData.Declarar(operadorId),
+                bultos = new[] { new { codigo = "M05-CONCURRENCIA-001", pesoGramos = 1500m, largoCentimetros = 30m, anchoCentimetros = 20m, altoCentimetros = 15m } }
             })
         };
 
@@ -530,7 +521,7 @@ public sealed class ProcesarGeneracionSeguimientoTests(
     {
         var database = await postgres.CreateDatabaseAsync();
 
-        using var factory = new IntegrationApiFactory(database, "Development");
+        using var factory = new IntegrationApiFactory(database, "Development", seedShippingServices: true);
         using var client = factory.CreateHttpClient();
 
         Guid operadorId;
@@ -556,11 +547,8 @@ public sealed class ProcesarGeneracionSeguimientoTests(
                 operadorId,
                 destinatarioNombre = "Prueba bloqueo M05", destinatarioEmail = "destinatario@example.test",
                 direccion = "San José, Uruguay",
-                codigoBulto = "M05-LOCK-001",
-                pesoGramos = 1000m,
-                largoCentimetros = 20m,
-                anchoCentimetros = 15m,
-                altoCentimetros = 10m
+                servicio = ServiciosEnvioTestData.Declarar(operadorId),
+                bultos = new[] { new { codigo = "M05-LOCK-001", pesoGramos = 1000m, largoCentimetros = 20m, anchoCentimetros = 15m, altoCentimetros = 10m } }
             })
         };
 

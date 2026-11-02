@@ -28,7 +28,7 @@ public sealed class RolesHttpTests(PostgresFixture postgres) : IClassFixture<Pos
         using var listing = await client.GetAsync("/api/roles");
         Assert.Equal(HttpStatusCode.OK, listing.StatusCode);
         var roles = await listing.Content.ReadFromJsonAsync<JsonElement[]>();
-        Assert.Equal(2, roles!.Length);
+        Assert.Equal(await db.Roles.CountAsync(r => r.OperadorId == actor.OperadorId), roles!.Length);
         Assert.DoesNotContain(roles, x => x.GetProperty("id").GetGuid() == other.RolId);
         using var assignable = await client.GetAsync("/api/roles/asignables");
         Assert.Equal(HttpStatusCode.OK, assignable.StatusCode);
@@ -209,7 +209,7 @@ public sealed class RolesHttpTests(PostgresFixture postgres) : IClassFixture<Pos
             Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
         }
 
-        var otherRole = await db.Roles.SingleAsync(x => x.OperadorId == actorAccess.OperadorId && x.Id != ownRole.Id && x.Id != previousRole.Id);
+        var otherRole = await db.Roles.SingleAsync(x => x.OperadorId == actorAccess.OperadorId && !x.EsProtegidoSistema && x.Id != ownRole.Id && x.Id != previousRole.Id);
         foreach (var roleId in new Guid?[] { ownRole.Id, otherRole.Id, null })
         {
             using var assignment = await client.PutAsJsonAsync($"/api/roles/accesos/{actorAccess.Id}", new { RolId = roleId });

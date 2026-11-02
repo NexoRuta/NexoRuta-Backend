@@ -71,6 +71,12 @@ jobs:
   integration:
     needs: source_policy
     runs-on: ubuntu-latest
+    environment: nexoruta-ci
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright-browsers
     timeout-minutes: 35
     strategy:
       fail-fast: false
@@ -79,15 +85,41 @@ jobs:
         shard: [0, 1, 2]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: backend
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: NexoRuta/NexoRuta-Frontend
+          ref: 5528cd94774123494e5a28e2d8dcf44bd0ffe28d
+          path: frontend
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
-          global-json-file: global.json
+          global-json-file: backend/global.json
           cache: true
-          cache-dependency-path: '**/packages.lock.json'
+          cache-dependency-path: |
+            backend/**/packages.lock.json
+            frontend/**/packages.lock.json
       - name: Restore and build backend
         run: |
           dotnet restore NexoRuta.sln --locked-mode
           dotnet build NexoRuta.sln --no-restore --configuration Release
+      - name: Build the exact companion portals for Kestrel browser tests
+        run: |
+          dotnet restore ../frontend/NexoRuta.sln --locked-mode
+          dotnet build ../frontend/NexoRuta.sln -c Release --no-restore -p:OfficialDepartmentSource="$PWD/src/ZonasCobertura/Data/departamentos-uruguay.geojson"
+      - name: Install pinned Chromium for browser integration
+        run: npx --yes --package=playwright@1.62.1 playwright install --with-deps chromium
+      - name: Verify the critical operational decision flow first
+        if: matrix.shard == 0
+        env:
+          DOTNET_PROCESSOR_COUNT: "4"
+        run: >-
+          dotnet test tests/NexoRuta.IntegrationTests/NexoRuta.IntegrationTests.csproj
+          -c Release --no-build --no-restore
+          --filter FullyQualifiedName~BackofficeBrowserIniciaDecisionOperativaConConflictoYReintentoSeguro
+          --logger "trx;LogFileName=critical-route-decision.trx"
+          --results-directory artifacts/integration/critical
       - name: Run the verified integration shard
         env:
           DOTNET_PROCESSOR_COUNT: "4"
@@ -100,7 +132,7 @@ jobs:
         if: always()
         with:
           name: backend-integration-shard-${{ matrix.shard }}-${{ github.run_id }}
-          path: artifacts/integration/**/*.trx
+          path: backend/artifacts/integration/**/*.trx
           if-no-files-found: error
           retention-days: 14
 

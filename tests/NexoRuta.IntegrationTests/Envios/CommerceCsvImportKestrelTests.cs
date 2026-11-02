@@ -22,8 +22,13 @@ namespace NexoRuta.IntegrationTests.Envios;
 
 public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xunit.Abstractions.ITestOutputHelper output) : IClassFixture<PostgresFixture>
 {
+#if DEBUG
+    private const string BuildConfiguration = "Debug";
+#else
+    private const string BuildConfiguration = "Release";
+#endif
     private const long MaximumFileBytes = 5 * 1024 * 1024;
-    private const string Header = "referenciaExterna,nombreDestinatario,emailDestinatario,direccion,codigoBulto,pesoGramos,largoCentimetros,anchoCentimetros,altoCentimetros";
+    private const string Header = "referenciaExterna,nombreDestinatario,emailDestinatario,direccion,codigoBulto,pesoGramos,largoCentimetros,anchoCentimetros,altoCentimetros,zonaId,latitud,longitud,modalidad";
 
     [Fact]
     public async Task KestrelAndCommerceBrowserUseIsolatedPostgresForImportAndReimport()
@@ -42,7 +47,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             seedSettings["AccesoInicial:UsuarioEmail"] = commerceEmail;
             seedSettings["AccesoInicial:OperadorUsuarioEmail"] = operatorEmail;
             seedSettings["DataProtection:KeysDirectory"] = Path.Combine(tempRoot, "api-keys");
-            using (var seedFactory = new IntegrationApiFactory(database, settings: seedSettings))
+            using (var seedFactory = new IntegrationApiFactory(database, settings: seedSettings, seedShippingServices: true))
             using (seedFactory.CreateHttpClient()) { }
 
             Guid operatorId;
@@ -62,8 +67,8 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             var apiUrl = $"http://127.0.0.1:{apiPort}";
             var commerceUrl = $"http://127.0.0.1:{commercePort}";
             var root = FindWorkspaceRoot();
-            var apiDll = Path.Combine(root, "backend", "src", "NexoRuta.Api", "bin", "Debug", "net10.0", "NexoRuta.Api.dll");
-            var commerceDll = Path.Combine(root, "frontend", "src", "NexoRuta.Commerce", "bin", "Debug", "net10.0", "NexoRuta.Commerce.dll");
+            var apiDll = Path.Combine(root, "backend", "src", "NexoRuta.Api", "bin", BuildConfiguration, "net10.0", "NexoRuta.Api.dll");
+            var commerceDll = Path.Combine(root, "frontend", "src", "NexoRuta.Commerce", "bin", BuildConfiguration, "net10.0", "NexoRuta.Commerce.dll");
             Assert.True(File.Exists(apiDll), "Build the API before the Kestrel verification.");
             Assert.True(File.Exists(commerceDll), "Build Commerce before the browser verification.");
 
@@ -114,22 +119,18 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             var beforeIndividual = await CountsAsync(database);
             using (var individual = await http.PostAsJsonAsync("/api/envios", new
             {
-                OperadorId = operatorId,
+                OperadorId = operatorId, Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(operatorId),
                 DestinatarioNombre = "Individual Kestrel recipient",
                 DestinatarioEmail = "individual-kestrel@example.test",
                 Direccion = "18 de Julio 123",
-                CodigoBulto = "INDIVIDUAL-KST",
-                PesoGramos = 500m,
-                LargoCentimetros = 20m,
-                AnchoCentimetros = 15m,
-                AltoCentimetros = 10m
+                Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "INDIVIDUAL-KST", PesoGramos = 500m, LargoCentimetros = 20m, AnchoCentimetros = 15m, AltoCentimetros = 10m } }
             }))
                 Assert.Equal(HttpStatusCode.Created, individual.StatusCode);
             Assert.Equal((beforeIndividual.Shipments + 1, beforeIndividual.Outbox + 2), await CountsAsync(database));
 
             using (var created = await PostCsvAsync(http, operatorId, Csv(Row("KESTREL-NEW"))))
             {
-                Assert.Equal(HttpStatusCode.OK, created.StatusCode);
+                Assert.True(created.StatusCode == HttpStatusCode.OK, await created.Content.ReadAsStringAsync());
                 Assert.Equal("Creado", FirstState(await created.Content.ReadAsStringAsync()));
             }
             var outboxAfterFirst = await CountOutboxAsync(database);
@@ -307,7 +308,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             seedSettings["AccesoInicial:UsuarioEmail"] = commerceEmail;
             seedSettings["AccesoInicial:OperadorUsuarioEmail"] = operatorEmail;
             seedSettings["DataProtection:KeysDirectory"] = Path.Combine(tempRoot, "api-keys");
-            using (var bootstrap = new IntegrationApiFactory(database, settings: seedSettings))
+            using (var bootstrap = new IntegrationApiFactory(database, settings: seedSettings, seedShippingServices: true))
             using (bootstrap.CreateHttpClient()) { }
 
             Guid operatorId;
@@ -327,8 +328,8 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             var apiUrl = $"http://127.0.0.1:{apiPort}";
             var backofficeUrl = $"http://127.0.0.1:{backofficePort}";
             var root = FindWorkspaceRoot();
-            var apiDll = Path.Combine(root, "backend", "src", "NexoRuta.Api", "bin", "Debug", "net10.0", "NexoRuta.Api.dll");
-            var backofficeDll = Path.Combine(root, "frontend", "src", "NexoRuta.Backoffice", "bin", "Debug", "net10.0", "NexoRuta.Backoffice.dll");
+            var apiDll = Path.Combine(root, "backend", "src", "NexoRuta.Api", "bin", BuildConfiguration, "net10.0", "NexoRuta.Api.dll");
+            var backofficeDll = Path.Combine(root, "frontend", "src", "NexoRuta.Backoffice", "bin", BuildConfiguration, "net10.0", "NexoRuta.Backoffice.dll");
             Assert.True(File.Exists(apiDll), "Build the API before the isolated browser check.");
             Assert.True(File.Exists(backofficeDll), "Build Backoffice before the browser check.");
 
@@ -368,21 +369,17 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             api.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", commerceToken);
             using var shipmentResponse = await api.PostAsJsonAsync("/api/envios", new
             {
-                OperadorId = operatorId,
+                OperadorId = operatorId, Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(operatorId),
                 DestinatarioNombre = "DEC04 browser recipient",
                 DestinatarioEmail = "dec04-recipient@example.test",
                 Direccion = "18 de Julio 123",
-                CodigoBulto = "DEC04-BROWSER",
-                PesoGramos = 500m,
-                LargoCentimetros = 20m,
-                AnchoCentimetros = 15m,
-                AltoCentimetros = 10m
+                Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "DEC04-BROWSER", PesoGramos = 500m, LargoCentimetros = 20m, AnchoCentimetros = 15m, AltoCentimetros = 10m } }
             });
             Assert.Equal(HttpStatusCode.Created, shipmentResponse.StatusCode);
             using var shipmentJson = JsonDocument.Parse(await shipmentResponse.Content.ReadAsStringAsync());
             var shipmentId = shipmentJson.RootElement.GetProperty("id").GetGuid();
             using var destination = await api.PutAsJsonAsync($"/api/envios/{shipmentId}/destino",
-                new { Version = 0, Latitud = -34.9, Longitud = -56.2 });
+                new { Version = 1, Latitud = -34.9, Longitud = -56.2 });
             Assert.Equal(HttpStatusCode.NoContent, destination.StatusCode);
 
             var operatorToken = await LoginAsync(api, operatorEmail, AuthenticationTestData.Password);
@@ -403,6 +400,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             Assert.Equal(HttpStatusCode.OK, vehicleResponse.StatusCode);
             using var vehicleJson = JsonDocument.Parse(await vehicleResponse.Content.ReadAsStringAsync());
             var vehicleId = vehicleJson.RootElement.GetProperty("id").GetGuid();
+            await VerifyVehicleAsync(api, vehicleId);
             using var received = await api.PostAsJsonAsync($"/api/deposito/envios/{shipmentId}/recepcion", new { Version = 0 });
             Assert.True(received.StatusCode == HttpStatusCode.NoContent,
                 $"Deposit receipt failed: {(int)received.StatusCode} {await received.Content.ReadAsStringAsync()}");
@@ -469,7 +467,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             await browser.CaptureScreenshotAsync(Path.Combine(tempRoot, "mobile.png"));
             await browser.VerifyKeyboardFocusAsync();
             await browser.ClickButtonContainingAsync("Reprogramar para una ruta nueva");
-            await browser.WaitForAsync("document.querySelector('.alert-success')?.innerText.includes('Envío reprogramado') === true");
+            await browser.WaitForAsync("document.querySelector('.nr-routes-alert.is-success')?.innerText.includes('Envío reprogramado') === true");
             Assert.False(await browser.EvaluateBooleanAsync("Array.from(document.querySelectorAll('button')).some(button=>button.innerText.includes('Reprogramar para una ruta nueva'))"));
 
             await using var verify = database.CreateDbContext();
@@ -523,7 +521,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             seedSettings["AccesoInicial:UsuarioEmail"] = commerceEmail;
             seedSettings["AccesoInicial:OperadorUsuarioEmail"] = operatorEmail;
             seedSettings["DataProtection:KeysDirectory"] = Path.Combine(tempRoot, "api-keys");
-            using (var bootstrap = new IntegrationApiFactory(database, settings: seedSettings))
+            using (var bootstrap = new IntegrationApiFactory(database, settings: seedSettings, seedShippingServices: true))
             using (bootstrap.CreateHttpClient()) { }
 
             Guid operatorId;
@@ -554,8 +552,8 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             var apiUrl = $"http://127.0.0.1:{apiPort}";
             var backofficeUrl = $"http://127.0.0.1:{backofficePort}";
             var root = FindWorkspaceRoot();
-            var apiDll = Path.Combine(root, "backend", "src", "NexoRuta.Api", "bin", "Debug", "net10.0", "NexoRuta.Api.dll");
-            var backofficeDll = Path.Combine(root, "frontend", "src", "NexoRuta.Backoffice", "bin", "Debug", "net10.0", "NexoRuta.Backoffice.dll");
+            var apiDll = Path.Combine(root, "backend", "src", "NexoRuta.Api", "bin", BuildConfiguration, "net10.0", "NexoRuta.Api.dll");
+            var backofficeDll = Path.Combine(root, "frontend", "src", "NexoRuta.Backoffice", "bin", BuildConfiguration, "net10.0", "NexoRuta.Backoffice.dll");
             Assert.True(File.Exists(apiDll), "Build the API before the isolated browser check.");
             Assert.True(File.Exists(backofficeDll), "Build Backoffice before the browser check.");
 
@@ -594,54 +592,50 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             api.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", commerceToken);
             using var created = await api.PostAsJsonAsync("/api/envios", new
             {
-                OperadorId = operatorId,
+                OperadorId = operatorId, Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(operatorId),
                 DestinatarioNombre = "DEC07 browser reassignment recipient",
                 DestinatarioEmail = "dec07-recipient@example.test",
                 Direccion = "18 de Julio 123",
-                CodigoBulto = "DEC07-BROWSER-REASSIGN",
-                PesoGramos = 500m,
-                LargoCentimetros = 20m,
-                AnchoCentimetros = 15m,
-                AltoCentimetros = 10m
+                Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "DEC07-BROWSER-REASSIGN", PesoGramos = 500m, LargoCentimetros = 20m, AnchoCentimetros = 15m, AltoCentimetros = 10m } }
             });
             Assert.Equal(HttpStatusCode.Created, created.StatusCode);
             using var createdJson = JsonDocument.Parse(await created.Content.ReadAsStringAsync());
             var shipmentId = createdJson.RootElement.GetProperty("id").GetGuid();
             using var receiptCreated = await api.PostAsJsonAsync("/api/envios", new
             {
-                OperadorId = operatorId,
+                OperadorId = operatorId, Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(operatorId),
                 DestinatarioNombre = "DEC07 browser first receipt",
                 DestinatarioEmail = "dec07-receipt@example.test",
                 Direccion = "18 de Julio 456",
-                CodigoBulto = "DEC07-BROWSER-RECEIPT",
-                PesoGramos = 750m,
-                LargoCentimetros = 21m,
-                AnchoCentimetros = 16m,
-                AltoCentimetros = 11m
+                Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "DEC07-BROWSER-RECEIPT", PesoGramos = 750m, LargoCentimetros = 21m, AnchoCentimetros = 16m, AltoCentimetros = 11m } }
             });
             Assert.Equal(HttpStatusCode.Created, receiptCreated.StatusCode);
             using var receiptCreatedJson = JsonDocument.Parse(await receiptCreated.Content.ReadAsStringAsync());
             var receiptShipmentId = receiptCreatedJson.RootElement.GetProperty("id").GetGuid();
+            // Preserve the unconfirmed-address scenario independently of the now-confirmed admission flow.
+            await using (var setup = database.CreateDbContext())
+            {
+                var addressId = await setup.Envios.Where(e => e.Id == receiptShipmentId).Select(e => e.DireccionId).SingleAsync();
+                var address = await setup.Direcciones.SingleAsync(d => d.Id == addressId);
+                address.CambiarDescripcion("Dirección pendiente de confirmar de la fixture", address.Version);
+                await setup.SaveChangesAsync();
+            }
             using var planningCandidate = await api.PostAsJsonAsync("/api/envios", new
             {
-                OperadorId = operatorId,
+                OperadorId = operatorId, Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(operatorId),
                 DestinatarioNombre = "ZZZ DEC07 optional planning candidate",
                 DestinatarioEmail = "dec07-candidate@example.test",
                 Direccion = "18 de Julio 789",
-                CodigoBulto = "DEC07-BROWSER-CANDIDATE",
-                PesoGramos = 250m,
-                LargoCentimetros = 12m,
-                AnchoCentimetros = 10m,
-                AltoCentimetros = 8m
+                Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "DEC07-BROWSER-CANDIDATE", PesoGramos = 250m, LargoCentimetros = 12m, AnchoCentimetros = 10m, AltoCentimetros = 8m } }
             });
             Assert.Equal(HttpStatusCode.Created, planningCandidate.StatusCode);
             using var planningCandidateJson = JsonDocument.Parse(await planningCandidate.Content.ReadAsStringAsync());
             var planningCandidateId = planningCandidateJson.RootElement.GetProperty("id").GetGuid();
             using var destination = await api.PutAsJsonAsync($"/api/envios/{shipmentId}/destino",
-                new { Version = 0, Latitud = -34.9, Longitud = -56.2 });
+                new { Version = 1, Latitud = -34.9, Longitud = -56.2 });
             Assert.Equal(HttpStatusCode.NoContent, destination.StatusCode);
             using var candidateDestination = await api.PutAsJsonAsync($"/api/envios/{planningCandidateId}/destino",
-                new { Version = 0, Latitud = -34.91, Longitud = -56.21 });
+                new { Version = 1, Latitud = -34.91, Longitud = -56.21 });
             Assert.Equal(HttpStatusCode.NoContent, candidateDestination.StatusCode);
 
             var operatorToken = await LoginAsync(api, operatorEmail, AuthenticationTestData.Password);
@@ -677,10 +671,12 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             using var receivedCandidate = await api.PostAsJsonAsync($"/api/deposito/envios/{planningCandidateId}/recepcion", new { Version = 0 });
             Assert.Equal(HttpStatusCode.NoContent, receivedCandidate.StatusCode);
             var fecha = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow,
-                TimeZoneInfo.FindSystemTimeZoneById("America/Montevideo")).DateTime);
+                TimeZoneInfo.FindSystemTimeZoneById("America/Montevideo")).DateTime).AddDays(-1);
             var fechaSeleccionada = fecha.AddDays(1);
             var fechaDeReservaOriginal = fecha;
             var sourceVehicleId = sourceVehicleJson.RootElement.GetProperty("id").GetGuid();
+            await VerifyVehicleAsync(api, sourceVehicleId);
+            await VerifyVehicleAsync(api, targetVehicleJson.RootElement.GetProperty("id").GetGuid());
             using var reservaVaciaOriginal = await api.PostAsJsonAsync("/api/rutas", new
             {
                 RepartidorAccesoId = operatorAccessId,
@@ -723,7 +719,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             Assert.Equal(originalShellSignature, await browser.GetSharedShellSignatureAsync());
             var populatePlannerScript = $"(()=>{{const courier=document.querySelector('#RepartidorAccesoId');const vehicle=document.querySelector('#VehiculoId');const row=[...document.querySelectorAll('[data-plan-row]')].find(r=>r.dataset.search?.includes('DEC07-BROWSER-REASSIGN'));const check=row?.querySelector('[data-plan-check]');const order=row?.querySelector('[data-stop-order]');const time=row?.querySelector('[data-stop-time]');if(!courier||!vehicle||!check||!order||!time)return false;courier.value={JsonSerializer.Serialize(operatorAccessId.ToString("D"))};courier.dispatchEvent(new Event('change',{{bubbles:true}}));vehicle.value={JsonSerializer.Serialize(sourceVehicleJson.RootElement.GetProperty("id").GetGuid().ToString("D"))};vehicle.dispatchEvent(new Event('change',{{bubbles:true}}));check.checked=true;check.dispatchEvent(new Event('change',{{bubbles:true}}));order.value='123';order.dispatchEvent(new Event('input',{{bubbles:true}}));time.value='17:30';time.dispatchEvent(new Event('input',{{bubbles:true}}));return true;}})()";
             Assert.True(await browser.EvaluateBooleanAsync(populatePlannerScript), "An eligible real shipment, operator and vehicle should populate the planner.");
-            await browser.WaitForAsync("document.querySelector('[data-summary-count]')?.innerText === '1' && document.querySelector('[data-summary-time]')?.innerText === '17:30' && document.querySelectorAll('[data-plan-row]').length === 2 && document.querySelectorAll('[data-plan-row].is-selected').length === 1");
+            await browser.WaitForAsync($"document.querySelector('[data-summary-count]')?.innerText === '1' && document.querySelector('[data-summary-time]')?.innerText === '{fecha:yyyy-MM-dd} 17:30' && document.querySelectorAll('[data-plan-row]').length === 2 && document.querySelectorAll('[data-plan-row].is-selected').length === 1");
             Assert.True(await browser.EvaluateBooleanAsync("!document.querySelector('.nr-summary-first-stop') && !document.querySelector('.nr-summary-conditions h3')"),
                 "The planning summary should not repeat recipient/address or add a redundant nested conditions heading.");
             var vehicleCapacity = await browser.EvaluateStringAsync("document.querySelector('#VehiculoId option:checked')?.getAttribute('data-weight-capacity') || 'missing'");
@@ -732,7 +728,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             var capacitySummary = await browser.EvaluateStringAsync("JSON.stringify({weight:document.querySelector('#VehiculoId option:checked')?.dataset.weightCapacity,label:document.querySelector('[data-capacity-label]')?.innerText})");
             Assert.True(await browser.EvaluateBooleanAsync("document.querySelector('[data-capacity-label]')?.innerText.includes('kg de capacidad') && document.querySelector('[data-capacity-label]')?.innerText.includes('m³') && !document.querySelector('[data-capacity-label]')?.innerText.includes('cm³')"),
                 $"Vehicle capacity should use the readable units shown in the approved reference: {capacitySummary}");
-            Assert.Equal("Fecha de salida", await browser.EvaluateStringAsync("document.querySelector('label[for=Fecha]')?.innerText.trim() || ''"));
+            Assert.Equal("Fecha operativa", await browser.EvaluateStringAsync("document.querySelector('label[for=Fecha]')?.innerText.trim() || ''"));
             var culturaResumen = CultureInfo.GetCultureInfo("es-UY");
             var fechaResumenEsperada = fecha.ToDateTime(TimeOnly.MinValue).ToString("dddd d 'de' MMMM", culturaResumen);
             fechaResumenEsperada = char.ToUpper(fechaResumenEsperada[0], culturaResumen) + fechaResumenEsperada[1..];
@@ -796,7 +792,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
                 "A reservation conflict must preserve the selected date, resources, shipment, order and arrival time.");
             await browser.CaptureScreenshotAsync(ScreenshotPath("planificacion-conflicto-reserva-fecha-original.png"));
             var previousSummaryDate = await browser.EvaluateStringAsync("document.querySelector('[data-summary-date]')?.innerText.trim() || ''");
-            Assert.True(await browser.EvaluateBooleanAsync($"(()=>{{const d=document.querySelector('#Fecha');if(!d)return false;d.value='{fechaSeleccionada:yyyy-MM-dd}';d.dispatchEvent(new Event('input',{{bubbles:true}}));d.dispatchEvent(new Event('change',{{bubbles:true}}));return d.value==='{fechaSeleccionada:yyyy-MM-dd}';}})()"),
+            Assert.True(await browser.EvaluateBooleanAsync($"(()=>{{const d=document.querySelector('#Fecha');if(!d)return false;d.value='{fechaSeleccionada:yyyy-MM-dd}';d.dispatchEvent(new Event('input',{{bubbles:true}}));d.dispatchEvent(new Event('change',{{bubbles:true}}));const stopDate=document.querySelector('[data-plan-row].is-selected [data-stop-date]');if(stopDate){{stopDate.value=d.value;stopDate.dispatchEvent(new Event('input',{{bubbles:true}}));}}return d.value==='{fechaSeleccionada:yyyy-MM-dd}';}})()"),
                 "The edited departure date should be a real input value before retrying the same plan.");
             var selectedSummaryDate = await browser.EvaluateStringAsync("document.querySelector('[data-summary-date]')?.innerText.trim() || ''");
             Assert.NotEqual(previousSummaryDate, selectedSummaryDate);
@@ -804,12 +800,12 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             Assert.Contains(fechaSeleccionada.ToString("MMMM", CultureInfo.GetCultureInfo("es-UY")), selectedSummaryDate, StringComparison.OrdinalIgnoreCase);
             await browser.CaptureScreenshotAsync(ScreenshotPath("planificacion-fecha-editada-y-resumen-actualizado.png"), fullPage: true);
             var fechaCambioMes = new DateOnly(fecha.Year, fecha.Month, DateTime.DaysInMonth(fecha.Year, fecha.Month)).AddDays(1);
-            Assert.True(await browser.EvaluateBooleanAsync($"(()=>{{const d=document.querySelector('#Fecha');d.value='{fechaCambioMes:yyyy-MM-dd}';d.dispatchEvent(new Event('input',{{bubbles:true}}));d.dispatchEvent(new Event('change',{{bubbles:true}}));return d.value==='{fechaCambioMes:yyyy-MM-dd}';}})()"),
+            Assert.True(await browser.EvaluateBooleanAsync($"(()=>{{const d=document.querySelector('#Fecha');d.value='{fechaCambioMes:yyyy-MM-dd}';d.dispatchEvent(new Event('input',{{bubbles:true}}));d.dispatchEvent(new Event('change',{{bubbles:true}}));const stopDate=document.querySelector('[data-plan-row].is-selected [data-stop-date]');if(stopDate){{stopDate.value=d.value;stopDate.dispatchEvent(new Event('input',{{bubbles:true}}));}}return d.value==='{fechaCambioMes:yyyy-MM-dd}';}})()"),
                 "The date control should accept a selection across a month boundary.");
             var summaryAfterMonthChange = await browser.EvaluateStringAsync("document.querySelector('[data-summary-date]')?.innerText.trim() || ''");
             Assert.Contains(fechaCambioMes.Day.ToString(CultureInfo.InvariantCulture), summaryAfterMonthChange, StringComparison.Ordinal);
             Assert.Contains(fechaCambioMes.ToString("MMMM", CultureInfo.GetCultureInfo("es-UY")), summaryAfterMonthChange, StringComparison.OrdinalIgnoreCase);
-            Assert.True(await browser.EvaluateBooleanAsync($"(()=>{{const d=document.querySelector('#Fecha');d.value='{fechaSeleccionada:yyyy-MM-dd}';d.dispatchEvent(new Event('input',{{bubbles:true}}));d.dispatchEvent(new Event('change',{{bubbles:true}}));return d.value==='{fechaSeleccionada:yyyy-MM-dd}';}})()"),
+            Assert.True(await browser.EvaluateBooleanAsync($"(()=>{{const d=document.querySelector('#Fecha');d.value='{fechaSeleccionada:yyyy-MM-dd}';d.dispatchEvent(new Event('input',{{bubbles:true}}));d.dispatchEvent(new Event('change',{{bubbles:true}}));const stopDate=document.querySelector('[data-plan-row].is-selected [data-stop-date]');if(stopDate){{stopDate.value=d.value;stopDate.dispatchEvent(new Event('input',{{bubbles:true}}));}}return d.value==='{fechaSeleccionada:yyyy-MM-dd}';}})()"),
                 "Restore the requested 30/10 selection after the month-boundary summary check.");
             Assert.Equal(selectedSummaryDate, await browser.EvaluateStringAsync("document.querySelector('[data-summary-date]')?.innerText.trim() || ''"));
             await browser.ClickButtonContainingKeyboardAsync("Guardar planificación");
@@ -1062,7 +1058,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             seedSettings["AccesoInicial:UsuarioEmail"] = commerceEmail;
             seedSettings["AccesoInicial:OperadorUsuarioEmail"] = operatorEmail;
             seedSettings["DataProtection:KeysDirectory"] = Path.Combine(tempRoot, "api-keys");
-            using (var bootstrap = new IntegrationApiFactory(database, settings: seedSettings))
+            using (var bootstrap = new IntegrationApiFactory(database, settings: seedSettings, seedShippingServices: true))
             using (bootstrap.CreateHttpClient()) { }
 
             Guid operatorId;
@@ -1089,8 +1085,8 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             var apiUrl = $"http://127.0.0.1:{apiPort}";
             var backofficeUrl = $"http://127.0.0.1:{backofficePort}";
             var root = FindWorkspaceRoot();
-            var apiDll = Path.Combine(root, "backend", "src", "NexoRuta.Api", "bin", "Debug", "net10.0", "NexoRuta.Api.dll");
-            var backofficeDll = Path.Combine(root, "frontend", "src", "NexoRuta.Backoffice", "bin", "Debug", "net10.0", "NexoRuta.Backoffice.dll");
+            var apiDll = Path.Combine(root, "backend", "src", "NexoRuta.Api", "bin", BuildConfiguration, "net10.0", "NexoRuta.Api.dll");
+            var backofficeDll = Path.Combine(root, "frontend", "src", "NexoRuta.Backoffice", "bin", BuildConfiguration, "net10.0", "NexoRuta.Backoffice.dll");
             Assert.True(File.Exists(apiDll), "Build the API before the isolated browser check.");
             Assert.True(File.Exists(backofficeDll), "Build Backoffice before the isolated browser check.");
 
@@ -1129,16 +1125,15 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             api.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", commerceToken);
             using var shipmentResponse = await api.PostAsJsonAsync("/api/envios", new
             {
-                OperadorId = operatorId, DestinatarioNombre = "DEC05 browser recipient",
+                OperadorId = operatorId, Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(operatorId), DestinatarioNombre = "DEC05 browser recipient",
                 DestinatarioEmail = "dec05-recipient@example.test", Direccion = "18 de Julio 123",
-                CodigoBulto = "DEC05-BROWSER", PesoGramos = 500m, LargoCentimetros = 20m,
-                AnchoCentimetros = 15m, AltoCentimetros = 10m
+                Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "DEC05-BROWSER", PesoGramos = 500m, LargoCentimetros = 20m, AnchoCentimetros = 15m, AltoCentimetros = 10m } }
             });
             Assert.Equal(HttpStatusCode.Created, shipmentResponse.StatusCode);
             using var shipmentJson = JsonDocument.Parse(await shipmentResponse.Content.ReadAsStringAsync());
             var shipmentId = shipmentJson.RootElement.GetProperty("id").GetGuid();
             using var destination = await api.PutAsJsonAsync($"/api/envios/{shipmentId}/destino",
-                new { Version = 0, Latitud = -34.9, Longitud = -56.2 });
+                new { Version = 1, Latitud = -34.9, Longitud = -56.2 });
             Assert.Equal(HttpStatusCode.NoContent, destination.StatusCode);
 
             var operatorToken = await LoginAsync(api, operatorEmail, AuthenticationTestData.Password);
@@ -1159,6 +1154,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             Assert.Equal(HttpStatusCode.OK, vehicleResponse.StatusCode);
             using var vehicleJson = JsonDocument.Parse(await vehicleResponse.Content.ReadAsStringAsync());
             var vehicleId = vehicleJson.RootElement.GetProperty("id").GetGuid();
+            await VerifyVehicleAsync(api, vehicleId);
             using var received = await api.PostAsJsonAsync($"/api/deposito/envios/{shipmentId}/recepcion", new { Version = 0 });
             Assert.Equal(HttpStatusCode.NoContent, received.StatusCode);
 
@@ -1238,14 +1234,14 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             await browser.WaitForAsync("document.body.innerText.includes('No se puede reprogramar ni realizar otra tentativa')");
             Assert.True(await browser.EvaluateBooleanAsync("document.querySelector('textarea[name=MotivoDevolucion][maxlength=\\\"500\\\"]') !== null"));
             Assert.True(await browser.EvaluateBooleanAsync("document.querySelector('input[name=ConfirmarDevolucion][required]') !== null"));
-            var initialCommand = await browser.EvaluateStringAsync("document.querySelector('input[name=ComandoId]')?.value || ''");
+            var initialCommand = await browser.EvaluateStringAsync("document.querySelector('form[action*=IniciarDevolucion] input[name=ComandoId]')?.value || ''");
             Assert.False(string.IsNullOrWhiteSpace(initialCommand));
             await browser.FillReturnAndSetStaleVersionAsync("Control del despachador");
-            await browser.ClickButtonContainingAsync("Iniciar devolución");
-            await browser.WaitForAsync("document.querySelector('.alert-danger')?.innerText.includes('cambió') === true");
+            await browser.ClickButtonContainingAsync("Confirmar decisión");
+            await browser.WaitForAsync("document.querySelector('.alert-danger') !== null");
             Assert.Equal("Control del despachador", await browser.EvaluateStringAsync("document.querySelector('textarea[name=MotivoDevolucion]')?.value || ''"));
-            Assert.Equal(initialCommand, await browser.EvaluateStringAsync("document.querySelector('input[name=ComandoId]')?.value || ''"));
-            Assert.NotEqual("0", await browser.EvaluateStringAsync("document.querySelector('input[name=VersionEnvio]')?.value || ''"));
+            Assert.Equal(initialCommand, await browser.EvaluateStringAsync("document.querySelector('form[action*=IniciarDevolucion] input[name=ComandoId]')?.value || ''"));
+            Assert.NotEqual("0", await browser.EvaluateStringAsync("document.querySelector('form[action*=IniciarDevolucion] input[name=VersionEnvio]')?.value || ''"));
 
             await browser.SetViewportAsync(1280, 900, mobile: false);
             await browser.CaptureScreenshotAsync(Path.Combine(tempRoot, "desktop.png"));
@@ -1254,8 +1250,8 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
                 "Backoffice routes horizontally overflow at 320 CSS pixels.");
             await browser.CaptureScreenshotAsync(Path.Combine(tempRoot, "mobile.png"));
             await browser.VerifyKeyboardFocusAsync();
-            await browser.ClickButtonContainingAsync("Iniciar devolución");
-            await browser.WaitForAsync("document.querySelector('.alert-success')?.innerText.includes('Devolución iniciada') === true");
+            await browser.ClickButtonContainingAsync("Confirmar decisión");
+            await browser.WaitForAsync("document.querySelector('.nr-routes-alert.is-success')?.innerText.includes('Devolución iniciada') === true");
 
             await using var verify = database.CreateDbContext();
             var shipment = await verify.Envios.SingleAsync(x => x.Id == shipmentId);
@@ -1301,8 +1297,8 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             await browser.FillLossAsync("Control de extravío");
             Assert.True(await browser.EvaluateBooleanAsync("(()=>{document.querySelector('.alert-danger')?.remove();return true;})()"));
             await browser.ClickButtonContainingKeyboardAsync("Confirmar extravío");
-            await browser.WaitForAsync("document.querySelector('.alert-success') !== null || document.querySelector('.alert-danger') !== null");
-            var lossAlert = await browser.EvaluateStringAsync("document.querySelector('.alert-success, .alert-danger')?.innerText || 'No result alert'");
+            await browser.WaitForAsync("document.querySelector('.nr-routes-alert.is-success') !== null || document.querySelector('.alert-danger') !== null");
+            var lossAlert = await browser.EvaluateStringAsync("document.querySelector('.nr-routes-alert.is-success, .alert-danger')?.innerText || 'No result alert'");
             Assert.Contains("Extravío confirmado", lossAlert);
             await browser.CaptureScreenshotAsync(Path.Combine(tempRoot, "loss-mobile.png"));
 
@@ -1376,6 +1372,13 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
         return body.RootElement.GetProperty("accessToken").GetString()!;
     }
 
+    private static async Task VerifyVehicleAsync(HttpClient client, Guid vehicle)
+    {
+        using var result = await client.PostAsJsonAsync($"/api/reparto/flota/{vehicle}/verificar-inicial",
+            new { ComandoId=Guid.NewGuid(),Version=0,Motivo="Inspección sintética del vehículo vacío de la fixture." });
+        Assert.True(result.StatusCode==HttpStatusCode.OK,await result.Content.ReadAsStringAsync());
+    }
+
     private static async Task<HttpResponseMessage> PostCsvAsync(HttpClient client, Guid operatorId, string csv)
         => await PostCsvBytesAsync(client, operatorId, Encoding.UTF8.GetBytes(csv));
 
@@ -1386,6 +1389,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
         file.Headers.ContentType = new MediaTypeHeaderValue("text/csv") { CharSet = "utf-8" };
         form.Add(file, "archivo", "envios.csv");
         form.Add(new StringContent(operatorId.ToString("D"), Encoding.UTF8), "operadorId");
+        form.Add(new StringContent("2"), "versionFormato");
         return await client.PostAsync("/api/envios/importaciones", form);
     }
 
@@ -1408,7 +1412,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
 
     private static string Csv(params string[] rows) => Header + "\r\n" + string.Join("\r\n", rows);
     private static string Row(string reference, string name = "Ada Lovelace", string weight = "500")
-        => $"{reference},{name},ada@example.test,\"18 de Julio 123\",BOX-1,{weight},20,15,10";
+        => $"{reference},{name},ada@example.test,\"18 de Julio 123\",BOX-1,{weight},20,15,10,,-34.901,-56.201,Estandar";
 
     private static string FindWorkspaceRoot()
     {
@@ -1427,13 +1431,17 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
 
     private static string FindChromium()
     {
-        var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ms-playwright");
-        if (!Directory.Exists(root)) return string.Empty;
-        return Directory.GetDirectories(root, "chromium-*")
-            .Select(path => Path.Combine(path, "chrome-win64", "chrome.exe"))
-            .Where(File.Exists)
-            .OrderByDescending(path => path, StringComparer.Ordinal)
-            .FirstOrDefault() ?? string.Empty;
+        var roots = new[]
+        {
+            Environment.GetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ms-playwright"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "ms-playwright")
+        };
+        return roots.Where(root => !string.IsNullOrWhiteSpace(root) && Directory.Exists(root))
+            .SelectMany(root => Directory.GetDirectories(root!, "chromium-*"))
+            .SelectMany(path => new[] { Path.Combine(path,"chrome-win64","chrome.exe"),
+                Path.Combine(path,"chrome-linux64","chrome"),Path.Combine(path,"chrome-linux","chrome") })
+            .Where(File.Exists).OrderByDescending(path=>path,StringComparer.Ordinal).FirstOrDefault() ?? string.Empty;
     }
 
     private static KestrelProcess StartDotnet(string dll, string workingDirectory, string url,
@@ -1581,28 +1589,45 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
         {
             await EvaluateAsync($"(()=>{{const s=document.querySelector('#envio-operador');s.value={JsonSerializer.Serialize(operatorId.ToString("D"))};s.dispatchEvent(new Event('change',{{bubbles:true}}));return true;}})()");
             await WaitForAsync("document.querySelector('form.nr-creation-form button[type=submit]') && !document.querySelector('form.nr-creation-form button[type=submit]').disabled");
-            await EvaluateAsync("(()=>{const f=document.querySelector('form.nr-creation-form');const labels=Array.from(f.querySelectorAll('label'));const find=t=>labels.find(l=>l.textContent.trim().startsWith(t))?.querySelector('input');const fields=[[find('Nombre'),'Commerce browser individual'],[find('Correo'),'commerce-individual@example.test'],[find('Dirección'),'18 de Julio 123'],[find('Código'),'BROWSER-INDIVIDUAL'],[find('Peso'),'500'],[find('Largo'),'20'],[find('Ancho'),'15'],[find('Alto'),'10']];if(fields.some(([i])=>!i))throw new Error('Individual form fields were not found by their labels.');for(const [i,v] of fields){i.value=v;i.dispatchEvent(new Event('input',{bubbles:true}));i.dispatchEvent(new Event('change',{bubbles:true}));}f.querySelector('button[type=submit]').click();return true;})()");
-            await WaitForAsync("document.querySelector('.alert-success')?.innerText.toLowerCase().includes('guardado') === true");
+            await EvaluateAsync("""
+                (()=>{
+                    const f=document.querySelector('form.nr-creation-form');
+                    const labels=Array.from(f.querySelectorAll('label'));
+                    const find=t=>labels.find(l=>l.textContent.trim().startsWith(t))?.querySelector('input');
+                    const fields=[[find('Nombre'),'Commerce browser individual'],[find('Correo'),'commerce-individual@example.test'],
+                        [find('Dirección'),'18 de Julio 123'],[find('Código'),'BROWSER-INDIVIDUAL'],
+                        [find('Peso'),'500'],[find('Largo'),'20'],[find('Ancho'),'15'],[find('Alto'),'10'],
+                        [find('Latitud'),'-34.901'],[find('Longitud'),'-56.201']];
+                    if(fields.some(([i])=>!i))throw new Error('Individual form fields were not found by their labels.');
+                    for(const [i,v] of fields){i.value=v;i.dispatchEvent(new Event('input',{bubbles:true}));i.dispatchEvent(new Event('change',{bubbles:true}));}
+                    return true;
+                })()
+                """);
+            await WaitForAsync("document.querySelector('#alta-servicio')?.value && !document.querySelector('#alta-servicio').disabled");
+            await EvaluateAsync("document.querySelector('form.nr-creation-form button[type=submit]').click();true");
+            await WaitForAsync("document.querySelector('.nr-price-review') !== null");
+            await EvaluateAsync("document.querySelector('form.nr-creation-form button[type=submit]').click();true");
+            await WaitForAsync("document.querySelector('.nr-admission-success') !== null");
         }
 
         public async Task FillReturnAndSetStaleVersionAsync(string reason)
         {
             var literal = JsonSerializer.Serialize(reason);
-            var result = await EvaluateAsync($"(()=>{{const f=document.querySelector('form[action*=\\\"IniciarDevolucion\\\"]');if(!f)return false;const m=f.querySelector('textarea[name=MotivoDevolucion]');const c=f.querySelector('input[name=ConfirmarDevolucion]');const v=f.querySelector('input[name=VersionEnvio]');if(!m||!c||!v)return false;m.value={literal};m.dispatchEvent(new Event('input',{{bubbles:true}}));c.checked=true;v.value='0';return true;}})()");
+            var result = await EvaluateAsync($"(()=>{{const f=document.querySelector('form[action*=\\\"IniciarDevolucion\\\"]');if(!f)return false;const panel=f.closest('details');if(panel)panel.open=true;const m=f.querySelector('textarea[name=MotivoDevolucion]');const c=f.querySelector('input[name=ConfirmarDevolucion]');const v=f.querySelector('input[name=VersionEnvio]');if(!m||!c||!v)return false;m.value={literal};m.dispatchEvent(new Event('input',{{bubbles:true}}));c.checked=true;v.value='0';return true;}})()");
             Assert.Equal(JsonValueKind.True, result.ValueKind);
         }
 
         public async Task FillLossAndSetStaleVersionAsync(string reason)
         {
             var literal = JsonSerializer.Serialize(reason);
-            var result = await EvaluateAsync($"(()=>{{const f=document.querySelector('form[action*=\\\"ConfirmarExtravio\\\"]');if(!f)return false;const m=f.querySelector('textarea[name=MotivoExtravio]');const c=f.querySelector('input[name=ConfirmarExtravio]');const v=f.querySelector('input[name=VersionEnvio]');if(!m||!c||!v)return false;m.value={literal};m.dispatchEvent(new Event('input',{{bubbles:true}}));c.checked=true;v.value='0';return true;}})()");
+            var result = await EvaluateAsync($"(()=>{{const f=document.querySelector('form[action*=\\\"ConfirmarExtravio\\\"]');if(!f)return false;const panel=f.closest('details');if(panel)panel.open=true;const m=f.querySelector('textarea[name=MotivoExtravio]');const c=f.querySelector('input[name=ConfirmarExtravio]');const v=f.querySelector('input[name=VersionEnvio]');if(!m||!c||!v)return false;m.value={literal};m.dispatchEvent(new Event('input',{{bubbles:true}}));c.checked=true;v.value='0';return true;}})()");
             Assert.Equal(JsonValueKind.True, result.ValueKind);
         }
 
         public async Task FillLossAsync(string reason)
         {
             var literal = JsonSerializer.Serialize(reason);
-            var result = await EvaluateAsync($"(()=>{{const f=document.querySelector('form[action*=\\\"ConfirmarExtravio\\\"]');if(!f)return false;const m=f.querySelector('textarea[name=MotivoExtravio]');const c=f.querySelector('input[name=ConfirmarExtravio]');if(!m||!c)return false;m.value={literal};m.dispatchEvent(new Event('input',{{bubbles:true}}));c.checked=true;return true;}})()");
+            var result = await EvaluateAsync($"(()=>{{const f=document.querySelector('form[action*=\\\"ConfirmarExtravio\\\"]');if(!f)return false;const panel=f.closest('details');if(panel)panel.open=true;const m=f.querySelector('textarea[name=MotivoExtravio]');const c=f.querySelector('input[name=ConfirmarExtravio]');if(!m||!c)return false;m.value={literal};m.dispatchEvent(new Event('input',{{bubbles:true}}));c.checked=true;return true;}})()");
             Assert.Equal(JsonValueKind.True, result.ValueKind);
         }
 
@@ -1707,13 +1732,14 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
         public async Task ClickButtonContainingAsync(string text)
         {
             var literal = JsonSerializer.Serialize(text);
-            await EvaluateAsync($"(()=>{{const b=Array.from(document.querySelectorAll('button')).find(button=>button.innerText.includes({literal}));if(!b)return false;b.click();return true;}})()");
+            var clicked = await EvaluateAsync($"(()=>{{const b=Array.from(document.querySelectorAll('button')).find(button=>button.textContent?.includes({literal}));if(!b)return false;const panel=b.closest('details');if(panel)panel.open=true;b.click();return true;}})()");
+            Assert.Equal(JsonValueKind.True, clicked.ValueKind);
         }
 
         public async Task ClickButtonContainingKeyboardAsync(string text)
         {
             var literal = JsonSerializer.Serialize(text);
-            var focused = await EvaluateAsync($"(()=>{{const b=Array.from(document.querySelectorAll('button')).find(button=>button.innerText.includes({literal}));if(!b)return false;b.focus();return document.activeElement===b;}})()");
+            var focused = await EvaluateAsync($"(()=>{{const b=Array.from(document.querySelectorAll('button')).find(button=>button.textContent?.includes({literal}));if(!b)return false;const panel=b.closest('details');if(panel)panel.open=true;b.focus();return document.activeElement===b;}})()");
             Assert.Equal(JsonValueKind.True, focused.ValueKind);
             await CallAsync("Input.dispatchKeyEvent", new { type = "keyDown", key = "Enter", code = "Enter", text = "\r", unmodifiedText = "\r", windowsVirtualKeyCode = 13 });
             await CallAsync("Input.dispatchKeyEvent", new { type = "keyUp", key = "Enter", code = "Enter", windowsVirtualKeyCode = 13 });
@@ -1776,7 +1802,9 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
                 catch (Exception) when (!process.HasExited) { }
                 await Task.Delay(200);
             }
-            throw new TimeoutException("Browser condition was not reached.");
+            var visible = "";
+            try { visible = await EvaluateStringAsync("document.body.innerText.slice(0,2400)"); } catch { }
+            throw new TimeoutException($"Browser condition was not reached: {expression}. Visible text: {visible}");
         }
 
         private async Task<JsonElement> EvaluateAsync(string expression)

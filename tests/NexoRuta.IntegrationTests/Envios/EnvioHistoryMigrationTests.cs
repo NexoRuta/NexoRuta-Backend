@@ -42,6 +42,9 @@ public sealed class EnvioHistoryMigrationTests(PostgresFixture postgres, ITestOu
                 ALTER TABLE public."VersionesReglasOperativas"
                     ADD CONSTRAINT "CK_VersionesReglasOperativas_ProofValidationDeadline"
                     CHECK ("PlazoValidacionPruebaMinutos" IS NULL OR "PlazoValidacionPruebaMinutos" BETWEEN 1 AND 525600);
+                -- Current API compatibility column exists only while seeding/canceling this legacy fixture.
+                -- It is removed before the real date migration runs.
+                ALTER TABLE public."Envios" ADD COLUMN "CreadoEnUtc" timestamp with time zone NOT NULL DEFAULT now();
                 ALTER TABLE public."Envios"
                     ADD COLUMN "EntregaFisicaRecibidaEnUtc" timestamp with time zone NULL,
                     ADD COLUMN "PlazoPruebaVenceEnUtc" timestamp with time zone NULL;
@@ -75,7 +78,12 @@ public sealed class EnvioHistoryMigrationTests(PostgresFixture postgres, ITestOu
                 var address = new Direccion(operatorId, $"History address {i}");
                 var shipment = new Envio(operatorId, commerceId, userId, recipient.Id, address.Id, ruleVersion.Id);
                 var parcel = new Bulto(operatorId, shipment.Id, $"HIST-{i:D3}", 500m, 20m, 10m, 5m);
-                db.AddRange(recipient, address, shipment, parcel);
+                db.AddRange(recipient, address);
+                await db.SaveChangesAsync();
+                // Seed the actual legacy columns; the current EF model also maps later shipment timestamps.
+                await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO public.\"Envios\" (\"Id\",\"OperadorId\",\"ComercioId\",\"CreadoPorUsuarioId\",\"DestinatarioId\",\"DireccionId\",\"VersionReglasId\",\"Estado\") VALUES ({shipment.Id},{operatorId},{commerceId},{userId},{recipient.Id},{address.Id},{ruleVersion.Id},'Admitido')");
+                db.Bultos.Add(parcel);
+                await db.SaveChangesAsync();
                 shipments.Add(shipment);
             }
             await db.SaveChangesAsync();
@@ -103,7 +111,10 @@ public sealed class EnvioHistoryMigrationTests(PostgresFixture postgres, ITestOu
 
         var stopwatch = Stopwatch.StartNew();
         await using (var db = database.CreateDbContext())
+        {
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE public.\"Envios\" DROP COLUMN \"CreadoEnUtc\"");
             await db.GetService<IMigrator>().MigrateAsync();
+        }
         stopwatch.Stop();
         output.WriteLine($"Cutover migration: {shipmentCount} shipments, one audited cancellation; {stopwatch.Elapsed.TotalMilliseconds:F0} ms on ephemeral PostgreSQL 18/PostGIS Testcontainers.");
 

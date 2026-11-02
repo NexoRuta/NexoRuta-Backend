@@ -6,7 +6,7 @@ using NexoRuta.Application.Reparto.Repositories;
 
 namespace NexoRuta.Application.Reparto.UseCases;
 
-public sealed class GestionarRutasUseCase(IUsuarioActual usuario, IRutasRepository rutas, IRepartidoresRepository repartidores,
+public sealed partial class GestionarRutasUseCase(IUsuarioActual usuario, IRutasRepository rutas, IRepartidoresRepository repartidores,
     IPermisosUsuarioRepository permisos)
 {
     public async Task<IReadOnlyList<HojaRutaDatos>> ListarAsync(DateOnly fecha, bool propia, CancellationToken ct)
@@ -24,7 +24,18 @@ public sealed class GestionarRutasUseCase(IUsuarioActual usuario, IRutasReposito
     public async Task<HojaRutaDatos?> DespacharAsync(Guid id, long version, CancellationToken ct)
     {
         var actor = await usuario.ObtenerAsync(ct);
-        return await rutas.DespacharAsync(actor.OperadorId ?? throw new RepartoNoPermitidoException(), id, version, ct);
+        if (actor.OperadorId is null || actor.ComercioId is not null) throw new RepartoNoPermitidoException();
+        return await rutas.DespacharAsync(actor, id, version, ct);
+    }
+    public async Task<IReadOnlyList<VehiculoFlotaDatos>> FlotaAsync(CancellationToken ct)
+    {
+        var actor = await ActorConGestionOperativaAsync(ct);
+        return await rutas.FlotaAsync(actor.OperadorId!.Value, ct);
+    }
+    public async Task<ResultadoFlotaDatos?> ConfirmarFlotaAsync(Guid vehiculoId, string accion, ComandoFlotaDatos datos, CancellationToken ct)
+    {
+        var actor = await ActorConGestionOperativaAsync(ct);
+        return await rutas.ConfirmarFlotaAsync(actor, vehiculoId, accion, datos, ct);
     }
     public async Task<HojaRutaDatos?> CancelarAsync(Guid id, long version, CancellationToken ct)
     {

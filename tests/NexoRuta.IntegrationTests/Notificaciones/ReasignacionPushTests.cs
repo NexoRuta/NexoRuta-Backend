@@ -65,7 +65,10 @@ public sealed partial class PushOutboxTests
         Assert.Equal(p.Fids, Assert.Single(transporte.Enviados).Fids);
 
         using var final = await p.Client.PostAsJsonAsync($"/api/rutas/{nueva.Id}/despacho", new { nueva.Version });
-        Assert.Equal(HttpStatusCode.OK, final.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, final.StatusCode);
+        Assert.Contains("fecha operativa", await final.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+        var futurePlan = (await p.Client.GetFromJsonAsync<HojaRutaResponse[]>($"/api/rutas?fecha={FechaOperacion.AddDays(1):yyyy-MM-dd}"))!.Single(h => h.Id == nueva.Id);
+        Assert.Equal("Planificada", futurePlan.Estado);
     }
 
     [Fact]
@@ -173,15 +176,15 @@ public sealed partial class PushOutboxTests
         await p.Client.SetBearerForAccessAsync(p.Data, comercio.Id);
         using var created = await p.Client.PostAsJsonAsync("/api/envios", new
         {
-            OperadorId = p.Aviso.OperadorId, DestinatarioNombre = "Otro destino",
+            OperadorId = p.Aviso.OperadorId, Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(p.Aviso.OperadorId), DestinatarioNombre = "Otro destino",
             DestinatarioEmail = "destinatario@example.test", Direccion = "Otra dirección de prueba",
-            CodigoBulto = Guid.NewGuid().ToString("N"), PesoGramos = 100m,
-            LargoCentimetros = 1m, AnchoCentimetros = 1m, AltoCentimetros = 1m
+            Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = Guid.NewGuid().ToString("N"), PesoGramos = 100m, LargoCentimetros = 1m, AnchoCentimetros = 1m, AltoCentimetros = 1m } }
         });
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         var shipmentId = (await created.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>()).GetProperty("id").GetGuid();
+        var currentDestination = await p.Client.GetFromJsonAsync<System.Text.Json.JsonElement>($"/api/envios/{shipmentId}/destino");
         using var destinationAddress = await p.Client.PutAsJsonAsync($"/api/envios/{shipmentId}/destino",
-            new { Version = 0, Latitud = -34.9, Longitud = -56.2 });
+            new { Version = currentDestination.GetProperty("version").GetInt64(), Latitud = -34.9, Longitud = -56.2 });
         Assert.Equal(HttpStatusCode.NoContent, destinationAddress.StatusCode);
         await p.Client.SetBearerForAccessAsync(p.Data, actual.Id);
         using var received = await p.Client.PostAsJsonAsync($"/api/deposito/envios/{shipmentId}/recepcion", new { Version = 0 });

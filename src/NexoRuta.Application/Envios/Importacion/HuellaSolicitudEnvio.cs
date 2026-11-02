@@ -8,8 +8,8 @@ namespace NexoRuta.Application.Envios.Importacion;
 
 public static class HuellaSolicitudEnvio
 {
-    public const short VersionActual = 1;
-    private static readonly byte[] Domain = Encoding.UTF8.GetBytes("NexoRuta/EnvioImport/V1\0");
+    public const short VersionActual = 2;
+    private static readonly byte[] Domain = Encoding.UTF8.GetBytes("NexoRuta/EnvioImport/V2\0");
 
     public static byte[] Calcular(Guid comercioId, Guid operadorId, CrearEnvioCommand solicitud)
     {
@@ -20,11 +20,18 @@ public static class HuellaSolicitudEnvio
         Escribir(solicitud.DestinatarioNombre);
         Escribir(solicitud.DestinatarioEmail);
         Escribir(solicitud.Direccion);
-        Escribir(solicitud.CodigoBulto);
-        Escribir(solicitud.PesoGramos.ToString("G29", CultureInfo.InvariantCulture));
-        Escribir(solicitud.LargoCentimetros.ToString("G29", CultureInfo.InvariantCulture));
-        Escribir(solicitud.AnchoCentimetros.ToString("G29", CultureInfo.InvariantCulture));
-        Escribir(solicitud.AltoCentimetros.ToString("G29", CultureInfo.InvariantCulture));
+        foreach (var bulto in solicitud.Bultos.OrderBy(b => b.Codigo, StringComparer.Ordinal))
+        {
+            Escribir(bulto.Codigo);
+            Escribir(bulto.PesoGramos.ToString("G29", CultureInfo.InvariantCulture));
+            Escribir(bulto.LargoCentimetros.ToString("G29", CultureInfo.InvariantCulture));
+            Escribir(bulto.AnchoCentimetros.ToString("G29", CultureInfo.InvariantCulture));
+            Escribir(bulto.AltoCentimetros.ToString("G29", CultureInfo.InvariantCulture));
+        }
+        Escribir(solicitud.Servicio.ZonaId.ToString("D"));
+        Escribir(solicitud.Servicio.Latitud.ToString("R", CultureInfo.InvariantCulture));
+        Escribir(solicitud.Servicio.Longitud.ToString("R", CultureInfo.InvariantCulture));
+        Escribir(solicitud.Servicio.Modalidad);
         return SHA256.HashData(canonical.GetBuffer().AsSpan(0, checked((int)canonical.Length)));
 
         void Escribir(string value)

@@ -15,6 +15,7 @@ using NexoRuta.Domain.ReglasOperativas;
 using NexoRuta.IntegrationTests.Fixtures;
 using NexoRuta.Infrastructure.Administracion;
 using NexoRuta.Infrastructure.Outbox;
+using NexoRuta.IntegrationTests.Seguridad;
 using Npgsql;
 using Xunit.Abstractions;
 
@@ -22,7 +23,93 @@ namespace NexoRuta.IntegrationTests.Envios;
 
 public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOutputHelper output) : IClassFixture<PostgresFixture>
 {
-    private const string Header = "referenciaExterna,nombreDestinatario,emailDestinatario,direccion,codigoBulto,pesoGramos,largoCentimetros,anchoCentimetros,altoCentimetros";
+    private const string Header = "referenciaExterna,nombreDestinatario,emailDestinatario,direccion,codigoBulto,pesoGramos,largoCentimetros,anchoCentimetros,altoCentimetros,zonaId,latitud,longitud,modalidad";
+
+    [Fact]
+    public async Task MultiParcelCsvPersistsEveryParcelAndReorderedRetryDoesNotDuplicate()
+    {
+        var database = await postgres.CreateDatabaseAsync();
+        using var seed = database.CreateShippingApiFactory(); using (seed.CreateHttpClient()) { }
+        var runtime = await RlsRestrictedHttpFlowTests.RestrictApiAsync(database);
+        using var factory = new IntegrationApiFactory(runtime, settings: RlsRestrictedHttpFlowTests.ApiSettings());
+        using var client = factory.CreateHttpClient();
+        await using var db = database.CreateDbContext();
+        var (operatorId, accessId) = await GetCommerceAccessAsync(db);
+        await client.SetBearerForAccessAsync(database, accessId);
+        var first = Row("MULTI");
+        var second = Row("MULTI", weight: "1250.55").Replace("BOX-MULTI", "BOX-SECOND");
+        using var response = await ImportAsync(client, Csv(first, second), operatorId);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var shipment = Assert.Single(await db.Envios.ToArrayAsync());
+        var parcels = await db.Bultos.Where(b => b.EnvioId == shipment.Id).OrderBy(b => b.Codigo).ToArrayAsync();
+        Assert.Equal(2, parcels.Length);
+        Assert.Equal(new[] { 500m, 1250.55m }, parcels.Select(b => b.PesoGramos));
+        Assert.Equal(2, await db.OutboxMessages.CountAsync());
+        using var retry = await ImportAsync(client, Csv(second, first, first), operatorId);
+        Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
+        Assert.Single(await db.Envios.ToArrayAsync());
+        Assert.Equal(2, await db.Bultos.CountAsync());
+        Assert.Equal(2, await db.OutboxMessages.CountAsync());
+        using var list = await client.GetAsync("/api/envios");
+        Assert.Equal(HttpStatusCode.OK, list.StatusCode);
+        var listed = await Body(list);
+        Assert.Equal(2, listed[0].GetProperty("bultos").GetArrayLength());
+    }
+
+    [Fact]
+    public async Task MultiParcelIndividualHttpPersistsAllAndRejectsInvalidSecondParcelAtomically()
+    {
+        var database = await postgres.CreateDatabaseAsync();
+        using var seed = database.CreateShippingApiFactory(); using (seed.CreateHttpClient()) { }
+        var runtime = await RlsRestrictedHttpFlowTests.RestrictApiAsync(database);
+        using var factory = new IntegrationApiFactory(runtime, settings: RlsRestrictedHttpFlowTests.ApiSettings());
+        using var client = factory.CreateHttpClient();
+        await using var db = database.CreateDbContext();
+        var (operatorId, accessId) = await GetCommerceAccessAsync(db);
+        await client.SetBearerForAccessAsync(database, accessId);
+        object Request(decimal weight) => new { OperadorId = operatorId, Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(operatorId), DestinatarioNombre = "Ada",
+            DestinatarioEmail = "ada@example.test", Direccion = "Dirección sintética",
+            Bultos = new[] {
+                new { Codigo = "HTTP-ONE", PesoGramos = 500m, LargoCentimetros = 20m, AnchoCentimetros = 10m, AltoCentimetros = 5m },
+                new { Codigo = "HTTP-TWO", PesoGramos = weight, LargoCentimetros = 30m, AnchoCentimetros = 20m, AltoCentimetros = 10m } } };
+        using var bad = await client.PostAsJsonAsync("/api/envios", Request(1.005m));
+        Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
+        Assert.Empty(await db.Envios.ToArrayAsync());
+        Assert.Empty(await db.Bultos.ToArrayAsync());
+        Assert.Empty(await db.OutboxMessages.ToArrayAsync());
+        using var response = await client.PostAsJsonAsync("/api/envios", Request(1250.55m));
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.Equal(2, (await Body(response)).GetProperty("bultos").GetArrayLength());
+        Assert.Single(await db.Envios.ToArrayAsync());
+        Assert.Equal(2, await db.Bultos.CountAsync());
+        Assert.Equal(2, await db.OutboxMessages.CountAsync());
+    }
+
+    [Fact]
+    public async Task ImportRejectsEffectivePrecisionBeforeHashingAndKeepsTrailingZeroIdempotency()
+    {
+        var data = await postgres.CreateDatabaseAsync();
+        using var factory = data.CreateShippingApiFactory(); using var client = factory.CreateHttpClient();
+        await using var db = data.CreateDbContext();
+        var (operatorId, commerceAccessId) = await GetCommerceAccessAsync(db);
+        await client.SetBearerForAccessAsync(data, commerceAccessId);
+        using var bad = await ImportAsync(client, Csv(Row("PRECISION", weight: "1.005")), operatorId);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, bad.StatusCode);
+        var body = await Body(bad);
+        Assert.Contains(body.GetProperty("filas")[0].GetProperty("errores").EnumerateArray(),
+            e => e.GetProperty("campo").GetString() == "pesoGramos" && e.GetProperty("codigo").GetString() == "InvalidPrecision");
+        Assert.Empty(await db.Envios.ToArrayAsync()); Assert.Empty(await db.IdentidadesEnvioImportado.ToArrayAsync());
+        Assert.Empty(await db.OutboxMessages.ToArrayAsync());
+        using var first = await ImportAsync(client, Csv(Row("PRECISION", weight: "1.00", length: "1.000")), operatorId);
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        var identity = await db.IdentidadesEnvioImportado.AsNoTracking().SingleAsync();
+        using var retry = await ImportAsync(client, Csv(Row("PRECISION", weight: "1.000", length: "1.00")), operatorId);
+        Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
+        Assert.Equal(1, Int(await Body(retry), "resumen", "existentes"));
+        var after = await db.IdentidadesEnvioImportado.AsNoTracking().SingleAsync();
+        Assert.Equal(identity.VersionHuella, after.VersionHuella); Assert.Equal(identity.Huella, after.Huella);
+        Assert.Single(await db.Envios.ToArrayAsync());
+    }
 
     [Fact]
     public async Task ImportLockFunctionOrdersDistinctEffectiveHashKeysGlobally()
@@ -43,13 +130,13 @@ public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOu
     public async Task Import_CreatesOnceAndRecognizesCompleteAndSubsetReimports()
     {
         var database = await postgres.CreateDatabaseAsync();
-        using var factory = database.CreateApiFactory();
+        using var factory = database.CreateShippingApiFactory();
         using var client = factory.CreateHttpClient();
         await using var db = database.CreateDbContext();
         var (operatorId, commerceAccessId) = await GetCommerceAccessAsync(db);
         await client.SetBearerForAccessAsync(database, commerceAccessId);
         var csv = Csv(
-            Row("PED-1", weight: "1200.555", length: "30.007"),
+            Row("PED-1", weight: "1200.55", length: "30.01"),
             Row("PED-2", address: "\"Calle 1, apto 2\""));
 
         using var first = await ImportAsync(client, csv, operatorId);
@@ -98,7 +185,7 @@ public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOu
     public async Task Import_CoalescesEquivalentInternalReferencesAndRejectsIncompatibleOnes()
     {
         var database = await postgres.CreateDatabaseAsync();
-        using var factory = database.CreateApiFactory();
+        using var factory = database.CreateShippingApiFactory();
         using var client = factory.CreateHttpClient();
         await using var db = database.CreateDbContext();
         var (operatorId, commerceAccessId) = await GetCommerceAccessAsync(db);
@@ -127,7 +214,7 @@ public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOu
     public async Task Import_RejectsInvalidRowsAtomicallyAndDistinguishesExternalConflict()
     {
         var database = await postgres.CreateDatabaseAsync();
-        using var factory = database.CreateApiFactory();
+        using var factory = database.CreateShippingApiFactory();
         using var client = factory.CreateHttpClient();
         await using var db = database.CreateDbContext();
         var (operatorId, commerceAccessId) = await GetCommerceAccessAsync(db);
@@ -147,7 +234,7 @@ public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOu
         Assert.Equal(beforeOutbox, await db.OutboxMessages.CountAsync());
 
         using var invalid = await ImportAsync(client,
-            Csv(Row("NEW-2"), "BAD,Row,bad-email,Address,BOX,1e2,1,1,1"), operatorId);
+            Csv(Row("NEW-2"), "BAD,Row,bad-email,Address,BOX,1e2,1,1,1,,-34.9,-56.2,Estandar"), operatorId);
         Assert.Equal(HttpStatusCode.UnprocessableEntity, invalid.StatusCode);
         var invalidBody = await Body(invalid);
         Assert.Equal(0, Int(invalidBody, "resumen", "creados"));
@@ -172,7 +259,7 @@ public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOu
     public async Task Import_IsCommerceScopedAndOperatorIsPartOfEquivalenceButNotIdentity()
     {
         var database = await postgres.CreateDatabaseAsync();
-        using var factory = database.CreateApiFactory();
+        using var factory = database.CreateShippingApiFactory();
         using var commerceOne = factory.CreateHttpClient();
         await using var db = database.CreateDbContext();
         var (operatorOne, accessOne) = await GetCommerceAccessAsync(db);
@@ -183,6 +270,7 @@ public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOu
         await AuthenticationTestData.Seeder(db, new AccesoInicial(secondCommerceEmail, "Second operator", "Second commerce", "csv-second-operator@example.test"))
             .SeedAsync();
         await ReglasEnvioTestData.SembrarInicialesAsync(db);
+        await ServiciosEnvioTestData.SembrarAsync(db);
         var secondCommerceId = await db.Comercios.Where(x => x.Nombre == "Second commerce").Select(x => x.Id).SingleAsync();
         var secondOperatorId = await db.Operadores.Where(x => x.Nombre == "Second operator").Select(x => x.Id).SingleAsync();
         var accessTwo = await db.AccesosUsuario.Where(x => x.ComercioId == secondCommerceId).Select(x => x.Id).SingleAsync();
@@ -220,6 +308,7 @@ public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOu
                 new AccesoInicial(secondCommerceEmail, secondOperatorName, "RLS Import Commerce Two", "csv-rls-op-two@example.test"))
                 .SeedAsync();
             await ReglasEnvioTestData.SembrarInicialesAsync(seed);
+            await ServiciosEnvioTestData.SembrarAsync(seed);
         }
 
         Guid firstOperatorId;
@@ -296,12 +385,12 @@ public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOu
     public async Task Import_ExistingIdentitySurvivesInactiveOperatorCancellationAndLatePhysicalReconciliation()
     {
         var database = await postgres.CreateDatabaseAsync();
-        using var factory = database.CreateApiFactory();
+        using var factory = database.CreateShippingApiFactory();
         using var client = factory.CreateHttpClient();
         await using var db = database.CreateDbContext();
         var (operatorId, commerceAccessId) = await GetCommerceAccessAsync(db);
         await client.SetBearerForAccessAsync(database, commerceAccessId);
-        var csv = Csv(Row("TERMINAL", weight: "100.125"));
+        var csv = Csv(Row("TERMINAL", weight: "100.12"));
         using var created = await ImportAsync(client, csv, operatorId);
         Assert.Equal(HttpStatusCode.OK, created.StatusCode);
         var createdBody = await Body(created);
@@ -340,7 +429,7 @@ public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOu
         Assert.Equal(1, Int(await Body(inactiveRetry), "resumen", "existentes"));
         using var inactiveNew = await ImportAsync(client, Csv(Row("NEW-INACTIVE")), operatorId);
         Assert.Equal(HttpStatusCode.UnprocessableEntity, inactiveNew.StatusCode);
-        using var inactiveMixed = await ImportAsync(client, Csv(Row("TERMINAL", weight: "100.125"), Row("NEW-INACTIVE-MIXED")), operatorId);
+        using var inactiveMixed = await ImportAsync(client, Csv(Row("TERMINAL", weight: "100.12"), Row("NEW-INACTIVE-MIXED")), operatorId);
         Assert.Equal(HttpStatusCode.UnprocessableEntity, inactiveMixed.StatusCode);
         var inactiveMixedBody = await Body(inactiveMixed);
         Assert.Equal(new[] { "YaExistente", "NoProcesado" }, States(inactiveMixedBody));
@@ -352,7 +441,7 @@ public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOu
     public async Task Import_ConcurrentOverlappingReferencesInReverseOrderSerializesWithoutDuplicates()
     {
         var database = await postgres.CreateDatabaseAsync();
-        using var factory = database.CreateApiFactory();
+        using var factory = database.CreateShippingApiFactory();
         using var client = factory.CreateHttpClient();
         await using var db = database.CreateDbContext();
         var (operatorId, commerceAccessId) = await GetCommerceAccessAsync(db);
@@ -391,7 +480,7 @@ public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOu
     {
         var database = await postgres.CreateDatabaseAsync();
         var interceptor = new PostCommitFailureInterceptor();
-        using var factory = database.CreateApiFactory(interceptor);
+        using var factory = database.CreateShippingApiFactory(interceptor);
         using var client = factory.CreateHttpClient();
         await using var db = database.CreateDbContext();
         var (operatorId, commerceAccessId) = await GetCommerceAccessAsync(db);
@@ -421,7 +510,7 @@ public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOu
     public async Task Import_ProcessesFiveHundredRowsAndReportsElapsedTime()
     {
         var database = await postgres.CreateDatabaseAsync();
-        using var factory = database.CreateApiFactory();
+        using var factory = database.CreateShippingApiFactory();
         using var client = factory.CreateHttpClient();
         await using var db = database.CreateDbContext();
         var (operatorId, commerceAccessId) = await GetCommerceAccessAsync(db);
@@ -465,7 +554,7 @@ public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOu
     {
         var database = await postgres.CreateDatabaseAsync();
         var interceptor = new FailImportInterceptor(failPoint);
-        using var factory = database.CreateApiFactory(interceptor);
+        using var factory = database.CreateShippingApiFactory(interceptor);
         using var client = factory.CreateHttpClient();
         await using var db = database.CreateDbContext();
         var (operatorId, commerceAccessId) = await GetCommerceAccessAsync(db);
@@ -487,7 +576,7 @@ public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOu
     public async Task Import_RejectsOperatorActorAndMalformedFileWithoutBusinessWrites()
     {
         var database = await postgres.CreateDatabaseAsync();
-        using var factory = database.CreateApiFactory();
+        using var factory = database.CreateShippingApiFactory();
         using var client = factory.CreateHttpClient();
         await using var db = database.CreateDbContext();
         var (operatorId, commerceAccessId) = await GetCommerceAccessAsync(db);
@@ -522,6 +611,7 @@ public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOu
         file.Headers.ContentType = new MediaTypeHeaderValue("text/csv");
         form.Add(file, "archivo", "envios.csv");
         form.Add(new StringContent(operatorId.ToString("D")), "operadorId");
+        form.Add(new StringContent("2"), "versionFormato");
         if (extraCommerceId is not null)
             form.Add(new StringContent(extraCommerceId.Value.ToString("D")), "comercioId");
         return client.PostAsync("/api/envios/importaciones", form);
@@ -534,6 +624,7 @@ public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOu
         file.Headers.ContentType = new MediaTypeHeaderValue("text/csv");
         form.Add(file, "archivo", "envios.csv");
         form.Add(new StringContent(operatorId.ToString("D")), "operadorId");
+        form.Add(new StringContent("2"), "versionFormato");
         return client.PostAsync("/api/envios/importaciones", form);
     }
 
@@ -541,7 +632,7 @@ public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOu
 
     private static string Row(string reference, string name = "Ada Lovelace", string address = "18 de Julio 123",
         string weight = "500", string length = "20")
-        => $"{reference},{name},ada@example.test,{address},BOX-{reference},{weight},{length},10,5";
+        => $"{reference},{name},ada@example.test,{address},BOX-{reference},{weight},{length},10,5,,-34.901,-56.201,Estandar";
 
     private static async Task<JsonElement> Body(HttpResponseMessage response)
         => await response.Content.ReadFromJsonAsync<JsonElement>();
