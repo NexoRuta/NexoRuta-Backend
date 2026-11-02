@@ -27,6 +27,13 @@ public sealed class KafkaOutboxWorker(
                     continue;
                 }
 
+                using var activity = WorkerTelemetry.StartOutboxActivity(message);
+                using var logScope = logger.BeginScope(new Dictionary<string, object?>
+                {
+                    ["correlation_id"] = WorkerTelemetry.CorrelationId(message),
+                    ["outbox_message_id"] = message.Id.ToString("D")
+                });
+
                 try
                 {
                     await handlers.HandleAsync(message, stoppingToken);

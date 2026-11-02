@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
+using NexoRuta.Infrastructure.Hosting;
 using NexoRuta.Application.Envios.Dtos;
 using NexoRuta.Application.Envios.Exceptions;
 using NexoRuta.Application.Envios.Interfaces;
@@ -28,7 +29,12 @@ public sealed class GeocodificadorGeoapify(IHttpClientFactory clientes, IConfigu
         // El caché solo contiene datos geográficos de direcciones solicitadas, nunca contactos ni credenciales.
         var operacion = autocompletar ? "autocomplete" : "search";
         var claveCache = "geoapify:" + operacion + ":" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(direccion.Trim())));
-        if (cache.TryGetValue<IReadOnlyList<PropuestaDestinoDatos>>(claveCache, out var guardadas)) return guardadas!;
+        if (cache.TryGetValue<IReadOnlyList<PropuestaDestinoDatos>>(claveCache, out var guardadas))
+        {
+            CacheTelemetry.Hit();
+            return guardadas!;
+        }
+        CacheTelemetry.Miss();
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -70,3 +76,4 @@ public sealed class GeocodificadorGeoapify(IHttpClientFactory clientes, IConfigu
         { throw new GeocodificacionNoDisponibleException(); }
     }
 }
+

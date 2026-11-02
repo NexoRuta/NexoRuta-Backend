@@ -36,6 +36,7 @@ public static class HostingTelemetry
                 .AddOtlpExporter())
             .WithTracing(tracing => tracing
                 .SetSampler(new ParentBasedSampler(new TraceIdRatioBasedSampler(ratio)))
+                .AddSource("NexoRuta.Worker")
                 .AddAspNetCoreInstrumentation(options => options.RecordException = false)
                 .AddProcessor(new SafeRequestProcessor())
                 .AddOtlpExporter());

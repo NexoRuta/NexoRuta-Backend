@@ -40,6 +40,7 @@ if (catalogImportCommand && (args.Length > 2 || (args.Length == 2 && !catalogImp
 }
 var commandMode = platformCommand || localBootstrapCommand || migrationCommand || catalogImportCommand;
 var builder = WebApplication.CreateBuilder(commandMode ? [] : args);
+builder.Host.UseNexoRutaLogging("NexoRuta.Api");
 var fleetStageOnly = builder.Configuration.GetValue<bool>(FleetStageMaintenance.ConfigurationKey);
 if (fleetStageOnly) FleetStageMaintenance.ValidateConfiguration(builder.Configuration, commandMode);
 if (localBootstrapCommand)
@@ -254,6 +255,7 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 
 app.UseRouting();
+app.Use(ApiTelemetry.MeasureRequestAsync);
 if (fleetStageOnly)
     app.Use(async (context, next) =>
     {
@@ -276,3 +278,4 @@ app.MapGet("/health/live", () => Results.Ok(new { status = "live" }));
 app.Run();
 
 public partial class Program { }
+

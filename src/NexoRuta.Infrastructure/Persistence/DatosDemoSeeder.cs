@@ -4,11 +4,16 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using NexoRuta.Application.Administracion.Context;
 using NexoRuta.Application.Administracion.Repositories;
+using NexoRuta.Application.Envios.Repositories;
 using NexoRuta.Application.Reparto.Dtos;
 using NexoRuta.Application.Reparto.Repositories;
 using NexoRuta.Application.Reparto.UseCases;
 using NexoRuta.Domain.Administracion;
 using NexoRuta.Domain.Envios;
+using NexoRuta.Domain.Tarifas;
+using NexoRuta.Domain.ZonasCobertura;
+using NexoRuta.Application.Envios.Commands;
+using NetTopologySuite;
 using NexoRuta.Domain.ReglasOperativas;
 using NexoRuta.Domain.Reparto;
 using NexoRuta.Infrastructure.Reparto;
@@ -18,6 +23,7 @@ namespace NexoRuta.Infrastructure.Persistence;
 public sealed class DatosDemoSeeder(
     NexoRutaDbContext db,
     IPlataformaRepository plataforma,
+    IEnviosRepository envios,
     IRepartidoresRepository repartidores,
     IConfiguracionRepartoRepository configuracionReparto,
     IRutasRepository rutas,
@@ -97,6 +103,7 @@ public sealed class DatosDemoSeeder(
             await rutas.ConfirmarFlotaAsync(operador.Contexto, vehiculo.Id, "verificar-inicial",
                 new(Guid.CreateVersion7(), null, vehiculo.Version, "Verificación explícita del vehículo sintético demo."), ct);
             await PublicarReglasAsync(operador, fechaReglas, ct);
+            await PublicarServicioDemoAsync(operador, ct);
             var versionReglasId = await db.ReglasOperativasOperadores.AsNoTracking()
                 .Where(x => x.OperadorId == operador.Id).Select(x => x.VersionVigenteId)
                 .SingleAsync(ct) ?? throw new InvalidOperationException("No se publicaron reglas operativas demo.");
@@ -223,6 +230,8 @@ public sealed class DatosDemoSeeder(
         await db.SaveChangesAsync(ct);
 
         var version = VersionReglasOperativas.CrearBorrador(operador.Id, operador.UsuarioId, ahoraUtc: publicadoEn);
+        db.VersionesReglasOperativas.Add(version);
+        await db.SaveChangesAsync(ct);
         version.ReemplazarConfiguracion(0,
             new(
                 MaxIntentosEntrega: 3,
@@ -238,8 +247,8 @@ public sealed class DatosDemoSeeder(
                     new("DESTINATARIO_AUSENTE", "Destinatario ausente", true),
                     new("DIRECCION_INCORRECTA", "Dirección incompleta", true)
                 ]));
+        await db.SaveChangesAsync(ct);
         version.Publicar(1, 1, operador.UsuarioId, publicadoEn);
-        db.VersionesReglasOperativas.Add(version);
         await db.SaveChangesAsync(ct);
         raiz.Publicar(version, publicadoEn);
         await db.SaveChangesAsync(ct);
@@ -255,15 +264,38 @@ public sealed class DatosDemoSeeder(
         var direccion = new Direccion(operador.Id, direccionTexto);
         var latitud = -34.90 + ordinal % 9 * 0.002;
         var longitud = -56.18 + ordinal % 11 * 0.002;
-        direccion.ConfirmarUbicacion(latitud, longitud, comercio.UsuarioId, creadoEn, version: 0);
         var envio = new Envio(operador.Id, comercio.Id, comercio.UsuarioId, destinatario.Id, direccion.Id,
             versionReglasId, creadoEn);
         var bulto = new Bulto(operador.Id, envio.Id, $"NR-{creadoEn:yyMMdd}-{ordinal + 1:0000}",
             650 + ordinal % 8 * 420, 28 + ordinal % 4 * 5, 18 + ordinal % 3 * 4, 10 + ordinal % 4 * 3);
-        await db.SetShipmentAsync(operador.Id, envio.Id, destinatario.Id, direccion.Id, bulto.Id, ct);
-        db.AddRange(destinatario, direccion, envio, bulto);
-        await db.SaveChangesAsync(ct);
+        await envios.GuardarAsync(envio, destinatario, direccion, [bulto],
+            new ServicioEnvioDeclarado(operador.Id, latitud, longitud, "Estandar"), ct);
         return new(envio, destinatario, bulto, latitud, longitud);
+    }
+
+    // Only the explicitly requested demo seed creates this synthetic service, for its new operators.
+    private async Task PublicarServicioDemoAsync(OrganizacionDemo operador, CancellationToken ct)
+    {
+        var geometria = NtsGeometryServices.Instance.CreateGeometryFactory(srid: 4326);
+        var poligono = geometria.CreateMultiPolygon([geometria.CreatePolygon([
+            new(-56.4, -35), new(-56, -35), new(-56, -34.7), new(-56.4, -34.7), new(-56.4, -35)])]);
+        var zona = ZonaCobertura.Crear(operador.Id, "Cobertura demo Montevideo", poligono, id: operador.Id,
+            franjasIniciales: [new(DiaSemanaIso.Lunes, new TimeOnly(9, 0), new TimeOnly(18, 0))]);
+        zona.Activar(zona.Version);
+        db.ZonasCobertura.Add(zona);
+        await db.SaveChangesAsync(ct);
+        var tarifario = TarifarioOperador.Crear(operador.Id);
+        db.TarifariosOperador.Add(tarifario);
+        await db.SaveChangesAsync(ct);
+        var version = VersionTarifario.CrearBorrador(operador.Id, operador.UsuarioId);
+        db.VersionesTarifario.Add(version);
+        await db.SaveChangesAsync(ct);
+        version.ReemplazarConfiguracion(0, [new(operador.Id, ModalidadTarifaria.Estandar, 100m, 10m, 200m, [])]);
+        await db.SaveChangesAsync(ct);
+        version.Publicar(version.VersionConcurrencia, 1, operador.UsuarioId, new HashSet<Guid> { zona.Id });
+        await db.SaveChangesAsync(ct);
+        tarifario.Publicar(version);
+        await db.SaveChangesAsync(ct);
     }
 
     private static DateTimeOffset AFechaUtc(DateOnly fecha, TimeOnly hora)
@@ -306,3 +338,4 @@ public sealed record EstadoDatosDemo(bool Sembrada, DateTimeOffset? SembradoEnUt
         ejecucion.Operadores, ejecucion.Comercios, ejecucion.CuentasOperador, ejecucion.CuentasComercio,
         ejecucion.Envios, ejecucion.Rutas, ejecucion.Operaciones);
 }
+

@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Diagnostics;
 using NexoRuta.Infrastructure.Outbox;
 using RabbitMQ.Client;
 
@@ -28,7 +29,8 @@ public sealed class RabbitMqOutboxPublisher(IConfiguration configuration) : IAsy
             throw new InvalidDataException("Invalid cancellation email scope.");
         // El consumidor obtiene el sobre autorizado desde PostgreSQL, nunca desde el cuerpo del broker.
         return (CancellationCodeEmailConsumer.Queue, new BasicProperties {
-            MessageId = message.Id.ToString("D"), Type = message.Tipo, Persistent = true, ContentType = "application/json"
+            MessageId = message.Id.ToString("D"), Type = message.Tipo, Persistent = true,
+            ContentType = "application/json", Headers = TraceHeaders(message)
         }, "{}"u8.ToArray());
     }
 
@@ -74,9 +76,18 @@ public sealed class RabbitMqOutboxPublisher(IConfiguration configuration) : IAsy
             MessageId = message.Id.ToString("D"),
             ContentType = "application/json",
             Type = message.Tipo,
-            Persistent = true
+            Persistent = true,
+            Headers = TraceHeaders(message)
             // The tracking queue is classic without x-max-priority; the database scheduler handles priority.
-        }, Encoding.UTF8.GetBytes(message.Payload));
+        }, Encoding.UTF8.GetBytes(message.BusinessPayload));
+    }
+
+    private static Dictionary<string, object?>? TraceHeaders(OutboxClaim message)
+    {
+        var traceParent = Activity.Current?.Id ?? message.TraceParent;
+        return string.IsNullOrWhiteSpace(traceParent)
+            ? null
+            : new Dictionary<string, object?> { ["traceparent"] = Encoding.UTF8.GetBytes(traceParent) };
     }
 
     private static (string Queue, BasicProperties Properties, ReadOnlyMemory<byte> Body) CreateEmailPublication(OutboxClaim message)

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Confluent.Kafka;
@@ -63,9 +64,12 @@ public sealed class KafkaEnvioCreadoPublisher : IDisposable
             mensaje.CreadoEnUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)));
         headers.Add("operadorId", Encoding.UTF8.GetBytes(mensaje.OperadorId.Value.ToString("D")));
         headers.Add("contentType", Encoding.UTF8.GetBytes("application/json"));
+        var traceParent = Activity.Current?.Id ?? mensaje.TraceParent;
+        if (!string.IsNullOrWhiteSpace(traceParent))
+            headers.Add("traceparent", Encoding.UTF8.GetBytes(traceParent));
         return new Message<string, string>
         {
-            Key = mensaje.EnvioId.Value.ToString("D"), Value = mensaje.Payload, Headers = headers
+            Key = mensaje.EnvioId.Value.ToString("D"), Value = mensaje.BusinessPayload, Headers = headers
         };
     }
 
