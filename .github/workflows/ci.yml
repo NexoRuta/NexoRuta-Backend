@@ -90,7 +90,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: NexoRuta/NexoRuta-Frontend
-          ref: 9ec7f39cc55f43983436a86443d2e6213fd01550
+          ref: 5528cd94774123494e5a28e2d8dcf44bd0ffe28d
           path: frontend
           token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
@@ -110,6 +110,16 @@ jobs:
           dotnet build ../frontend/NexoRuta.sln -c Release --no-restore -p:OfficialDepartmentSource="$PWD/src/ZonasCobertura/Data/departamentos-uruguay.geojson"
       - name: Install pinned Chromium for browser integration
         run: npx --yes --package=playwright@1.62.1 playwright install --with-deps chromium
+      - name: Verify the critical operational decision flow first
+        if: matrix.shard == 0
+        env:
+          DOTNET_PROCESSOR_COUNT: "4"
+        run: >-
+          dotnet test tests/NexoRuta.IntegrationTests/NexoRuta.IntegrationTests.csproj
+          -c Release --no-build --no-restore
+          --filter FullyQualifiedName~BackofficeBrowserIniciaDecisionOperativaConConflictoYReintentoSeguro
+          --logger "trx;LogFileName=critical-route-decision.trx"
+          --results-directory artifacts/integration/critical
       - name: Run the verified integration shard
         env:
           DOTNET_PROCESSOR_COUNT: "4"
