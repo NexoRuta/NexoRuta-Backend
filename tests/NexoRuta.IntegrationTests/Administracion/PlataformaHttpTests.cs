@@ -1,4 +1,3 @@
-using NexoRuta.Domain.Envios;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -514,7 +513,7 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
         await using var db = database.CreateDbContext();
         var userId=Guid.NewGuid(); var operatorId=Guid.NewGuid(); var commerceId=Guid.NewGuid();
         var recipientId=Guid.NewGuid(); var addressId=Guid.NewGuid();
-        var shipment=new Envio(operatorId,commerceId,userId,recipientId,addressId);
+        var shipment=new { Id=Guid.NewGuid(), CreadoPorUsuarioId=userId };
         var role=new Rol("legacy","Legacy",operatorId,null); role.ProtegerComoRolSistema();
         var access=new AccesoUsuario(userId,operatorId,null,role);
         var permission=new Permiso("envios.consultar","View shipments");
