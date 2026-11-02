@@ -21,6 +21,7 @@ internal static class RepartoHttpData
         db.Destinatarios.Add(destinatario); db.Direcciones.Add(direccion); db.Envios.Add(envio);
         db.Bultos.Add(new Bulto(operador.OperadorId.Value, envio.Id, "RUTA-TEST", 1000, 10, 10, 10));
         await db.SaveChangesAsync();
+        await ServiciosEnvioTestData.AdjuntarCargoAsync(db, envio, await db.Bultos.Where(b => b.EnvioId == envio.Id).ToArrayAsync());
         await client.SetBearerForAccessAsync(data, comercio.Id);
         if (confirmar)
         {

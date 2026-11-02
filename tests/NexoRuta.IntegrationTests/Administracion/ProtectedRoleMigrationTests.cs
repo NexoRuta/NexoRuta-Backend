@@ -72,10 +72,10 @@ public sealed class ProtectedRoleMigrationTests(PostgresFixture postgres) : ICla
             await upgraded.Database.MigrateAsync();
             Assert.Equal(userId, (await upgraded.Usuarios.SingleAsync()).Id);
             Assert.Equal(accessId, (await upgraded.AccesosUsuario.SingleAsync()).Id);
-            var role = await upgraded.Roles.SingleAsync();
+            var role = await upgraded.Roles.SingleAsync(r => r.Id == roleId);
             Assert.Equal(roleId, role.Id);
             Assert.True(role.EsProtegidoSistema);
-            Assert.Equal(permissionId, await upgraded.RolesPermisos.Select(x => x.PermisoId).SingleAsync());
+            Assert.Equal(permissionId, await upgraded.RolesPermisos.Where(x => x.RolId == roleId).Select(x => x.PermisoId).SingleAsync());
             Assert.Equal(operatorId, role.OperadorId);
         }
     }

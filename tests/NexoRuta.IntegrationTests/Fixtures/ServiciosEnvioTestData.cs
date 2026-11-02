@@ -1,4 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using NexoRuta.Domain.Envios;
 using NetTopologySuite;
 using NexoRuta.Api.Features.Envios.Contracts.Requests;
 using NexoRuta.Application.Envios.Commands;
@@ -47,5 +50,26 @@ internal static class ServiciosEnvioTestData
         version.ReemplazarConfiguracion(0,[new(operador,ModalidadTarifaria.Estandar,importeBase,porKg,porM3,[])]);
         await db.SaveChangesAsync(); version.Publicar(version.VersionConcurrencia,root.UltimoNumeroPublicacion+1,usuario,new HashSet<Guid>{operador});
         await db.SaveChangesAsync(); root.Publicar(version); await db.SaveChangesAsync(); await tx.CommitAsync(); return version.Id;
+    }
+
+    // Explicit fixture setup for tests of routing; production admission is tested separately under restricted roles.
+    public static async Task AdjuntarCargoAsync(NexoRutaDbContext db, Envio envio, IReadOnlyList<Bulto> bultos)
+    {
+        var usuario = await db.AccesosUsuario.Where(a => a.OperadorId == envio.OperadorId).Select(a => a.UsuarioId).FirstAsync();
+        var versionId = await PublicarServicioAsync(db, envio.OperadorId, usuario);
+        var version = await db.VersionesTarifario.SingleAsync(v => v.Id == versionId);
+        var tarifa = await db.TarifasZonaModalidad.SingleAsync(t => t.OperadorId == envio.OperadorId
+            && t.VersionId == versionId && t.ZonaId == envio.OperadorId && t.Modalidad == ModalidadTarifaria.Estandar);
+        var zona = await db.ZonasCobertura.SingleAsync(z => z.Id == envio.OperadorId);
+        var calculo = CalculadoraTarifas.Calcular(new(envio.OperadorId, ModalidadTarifaria.Estandar,
+            tarifa.ImporteBaseUyu, tarifa.PrecioPorKilogramoUyu, tarifa.PrecioPorMetroCubicoUyu, [],
+            version.Id, version.NumeroVersionPublicada, version.VersionConcurrencia),
+            bultos.Select(b => new BultoCalculo(b.PesoGramos, b.LargoCentimetros, b.AnchoCentimetros, b.AltoCentimetros)).ToArray());
+        var json = new JsonSerializerOptions { Converters = { new JsonStringEnumConverter() } };
+        var servicio = JsonSerializer.Serialize(Comando(envio.OperadorId), json);
+        var resultado = JsonSerializer.Serialize(calculo, json);
+        var cobertura = JsonSerializer.Serialize(new { ZonaId = zona.Id, VersionZona = zona.Version, RevisionZona = zona.RevisionActual });
+        var id = Guid.CreateVersion7();
+        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO public.\"TarifasEnvio\" (\"Id\",\"OperadorId\",\"EnvioId\",\"VersionTarifarioId\",\"Servicio\",\"Resultado\",\"Cobertura\") VALUES ({id},{envio.OperadorId},{envio.Id},{versionId},{servicio}::jsonb,{resultado}::jsonb,{cobertura}::jsonb)");
     }
 }

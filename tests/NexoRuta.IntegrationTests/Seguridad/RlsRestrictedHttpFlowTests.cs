@@ -33,6 +33,7 @@ public sealed class RlsRestrictedHttpFlowTests(PostgresFixture postgres) : IClas
                 new AccesoInicial(commerceEmail, "Chosen operator", "Test commerce", "rls-http-operator@example.test"))
                 .SeedAsync();
             await ReglasEnvioTestData.SembrarInicialesAsync(owner);
+            await ServiciosEnvioTestData.SembrarAsync(owner);
             operatorId = await owner.Operadores.Select(x => x.Id).SingleAsync();
             var access = await owner.AccesosUsuario.SingleAsync(x => x.ComercioId != null);
             commerceAccessId = access.Id;
@@ -220,6 +221,7 @@ public sealed class RlsRestrictedHttpFlowTests(PostgresFixture postgres) : IClas
                 new AccesoInicial(commerceBEmail, "History operator B", "History commerce B", "history-operator-b@example.test"))
                 .SeedAsync();
             await ReglasEnvioTestData.SembrarInicialesAsync(owner);
+            await ServiciosEnvioTestData.SembrarAsync(owner);
 
             var commerceUserIdA = await owner.Usuarios.Where(x => x.Email == commerceAEmail).Select(x => x.Id).SingleAsync();
             var commerceUserIdB = await owner.Usuarios.Where(x => x.Email == commerceBEmail).Select(x => x.Id).SingleAsync();
@@ -294,6 +296,7 @@ public sealed class RlsRestrictedHttpFlowTests(PostgresFixture postgres) : IClas
                 new AccesoInicial(commerceEmail, "Chosen operator", "Test commerce", operatorEmail))
                 .SeedAsync();
             await ReglasEnvioTestData.SembrarInicialesAsync(owner);
+            await ServiciosEnvioTestData.SembrarAsync(owner);
             operatorId = await owner.Operadores.Select(x => x.Id).SingleAsync();
         }
 

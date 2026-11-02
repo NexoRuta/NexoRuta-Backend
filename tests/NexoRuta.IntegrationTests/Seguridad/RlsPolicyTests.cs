@@ -111,7 +111,14 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
                 Assert.False(reader.GetBoolean(5), $"PUBLIC must not execute {reader.GetString(0)}.");
                 var config = reader.GetFieldValue<string[]>(1);
                 var searchPath = Assert.Single(config, value => value.StartsWith("search_path=", StringComparison.Ordinal));
-                Assert.Contains(searchPath.Replace(" ", "", StringComparison.Ordinal),
+                var normalizedPath = searchPath.Replace(" ", "", StringComparison.Ordinal);
+                if (normalizedPath == "search_path=pg_catalog,public")
+                {
+                    var pinned = string.Join("\\n", new NexoRuta.Infrastructure.Persistence.Migrations.PinGuardFunctionSearchPaths()
+                        .UpOperations.OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.SqlOperation>().Select(o => o.Sql));
+                    Assert.Contains($"ALTER FUNCTION nexoruta_app.{reader.GetString(0)}() SET search_path = pg_catalog, public", pinned);
+                }
+                else Assert.Contains(normalizedPath,
                     new[] { "search_path=pg_catalog", "search_path=pg_catalog,nexoruta_app" });
             }
             Assert.True(count >= 15, "Expected the scoped context and security-definer functions to be installed.");
@@ -300,9 +307,10 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
             var user = await db.Usuarios.SingleAsync(x => x.Id == rows.UserA);
             loginEmail = user.Email;
             user.ActualizarPasswordHash(new PasswordHasher<Usuario>().HashPassword(user, AuthenticationTestData.Password));
-            var permission = new Permiso("envios.consultar", "Consult shipments");
+            var permission = await db.Permisos.SingleOrDefaultAsync(p => p.Codigo == "envios.consultar")
+                ?? new Permiso("envios.consultar", "Consult shipments");
             var roleId = await db.AccesosUsuario.Where(x => x.Id == rows.AccessA).Select(x => x.RolId!.Value).SingleAsync();
-            db.Add(permission);
+            if (db.Entry(permission).State == EntityState.Detached) db.Add(permission);
             db.Add(new RolPermiso(roleId, permission.Id));
             var operatorUser = new Usuario(operatorEmail);
             operatorUser.ActualizarPasswordHash(new PasswordHasher<Usuario>().HashPassword(operatorUser, AuthenticationTestData.Password));
@@ -813,11 +821,21 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
     [Fact]
     public async Task UpgradeFromThePreviousSchemaPreservesUserAccessAndShipmentGuids()
     {
-        var database = await postgres.CreateDatabaseAsync();
-        var rows = await SeedTenantGraphAsync(database);
+        var database = await postgres.CreateDatabaseAsync(PreviousMigration);
+        var rows = new TenantRows(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
         await using (var db = database.CreateDbContext())
         {
-            await db.Database.MigrateAsync(PreviousMigration);
+            var role = Guid.NewGuid();
+            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Usuarios\" (\"Id\",\"Email\",\"PasswordHash\") VALUES ({rows.UserA},{"legacy-rls@example.test"},{AuthenticationTestData.Hash("legacy-rls@example.test")})");
+            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Operadores\" (\"Id\",\"Nombre\") VALUES ({rows.OperatorA},'Legacy operator')");
+            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Comercios\" (\"Id\",\"Nombre\") VALUES ({rows.CommerceA},'Legacy commerce')");
+            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Roles\" (\"Id\",\"Codigo\",\"Nombre\",\"TipoOrganizacion\",\"OrganizacionId\",\"ComercioId\") VALUES ({role},'legacy-rls','Legacy role','Comercio',{rows.CommerceA},{rows.CommerceA})");
+            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"AccesosUsuario\" (\"Id\",\"UsuarioId\",\"ComercioId\",\"RolId\") VALUES ({rows.AccessA},{rows.UserA},{rows.CommerceA},{role})");
+            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Destinatarios\" (\"Id\",\"OperadorId\",\"Nombre\") VALUES ({rows.RecipientA1},{rows.OperatorA},'Legacy recipient')");
+            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Direcciones\" (\"Id\",\"OperadorId\",\"Descripcion\") VALUES ({rows.AddressA1},{rows.OperatorA},'Legacy address')");
+            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Envios\" (\"Id\",\"OperadorId\",\"ComercioId\",\"CreadoPorUsuarioId\",\"DestinatarioId\",\"DireccionId\",\"Estado\") VALUES ({rows.ShipmentA1},{rows.OperatorA},{rows.CommerceA},{rows.UserA},{rows.RecipientA1},{rows.AddressA1},'Admitido')");
             await HistoricRecipientEmail.MigrateAsync(db);
         }
 

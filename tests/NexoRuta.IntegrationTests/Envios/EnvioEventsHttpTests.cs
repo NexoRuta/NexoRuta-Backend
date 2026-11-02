@@ -26,6 +26,7 @@ public sealed class EnvioEventsHttpTests(PostgresFixture postgres) : IClassFixtu
                 new AccesoInicial(commerceEmail, "History operator", "History commerce", "history-operator@example.test"))
                 .SeedAsync();
             await ReglasEnvioTestData.SembrarInicialesAsync(seed);
+            await ServiciosEnvioTestData.SembrarAsync(seed);
             operatorId = await seed.Operadores.Select(x => x.Id).SingleAsync();
         }
 

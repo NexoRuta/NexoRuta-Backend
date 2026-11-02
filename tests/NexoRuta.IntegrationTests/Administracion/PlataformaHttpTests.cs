@@ -257,7 +257,7 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
         Assert.Equal(created.AccesoId, access.Id);
         Assert.Equal(created.RolId, access.RolId);
         Assert.Equal(created.Organizacion.Id, access.OrganizacionId);
-        var role = await db.Roles.SingleAsync();
+        var role = await db.Roles.SingleAsync(r => r.Id == created.RolId);
         Assert.True(role.EsProtegidoSistema);
         Assert.Equal(type, role.TipoOrganizacion);
         var grants = await (from grant in db.RolesPermisos join p in db.Permisos on grant.PermisoId equals p.Id
@@ -406,7 +406,8 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
         Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync($"/api/admin/{(kind == "operadores" ? "comercios" : "operadores")}", Request("Cross-kind", "same@example.test"))).StatusCode);
         await using var db = database.CreateDbContext();
         Assert.Equal(2, await db.Operadores.CountAsync() + await db.Comercios.CountAsync());
-        Assert.Equal(2, await db.Roles.CountAsync());
+        Assert.Equal(2, await db.AccesosUsuario.Select(a => a.RolId).Distinct().CountAsync());
+        Assert.Equal(kind == "operadores" ? 4 : 2, await db.Roles.CountAsync());
         Assert.Equal(2, await db.AccesosUsuario.CountAsync());
         Assert.Equal(3, await db.Usuarios.CountAsync());
         var user = await db.Usuarios.SingleAsync(x => x.Email == "same@example.test");
@@ -455,6 +456,8 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
     public async Task FailureAfterSavingAllEntitiesRollsBackIncludingNewCatalogEntries(TipoAccesoUsuario type)
     {
         var database = await postgres.CreateDatabaseAsync();
+        Guid[] originalPermissions;
+        await using (var baseline = database.CreateDbContext()) originalPermissions = await baseline.Permisos.Select(p => p.Id).OrderBy(id => id).ToArrayAsync();
         await using (var db = database.CreateDbContext(new FailAfterSave()))
             await Assert.ThrowsAsync<InvalidOperationException>(() => Repository(db).CrearAsync(type, "Rollback", "rollback@example.test", Password, default));
         await using var verification = database.CreateDbContext();
@@ -462,7 +465,7 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
         Assert.Empty(await verification.Comercios.ToListAsync());
         Assert.Empty(await verification.Usuarios.ToListAsync());
         Assert.Empty(await verification.Roles.ToListAsync());
-        Assert.Empty(await verification.Permisos.ToListAsync());
+        Assert.Equal(originalPermissions, await verification.Permisos.Select(p => p.Id).OrderBy(id => id).ToArrayAsync());
         Assert.Empty(await verification.RolesPermisos.ToListAsync());
         Assert.Empty(await verification.AccesosUsuario.ToListAsync());
     }

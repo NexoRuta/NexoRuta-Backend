@@ -28,6 +28,7 @@ public sealed class OperadoresDisponiblesHttpTests(PostgresFixture postgres) : I
                 new AccesoInicial("owner@example.test", "Alpha operator", "Test commerce", "operator@example.test"))
                 .SeedAsync();
             await ReglasEnvioTestData.SembrarInicialesAsync(db);
+            await ServiciosEnvioTestData.SembrarAsync(db);
             var commerceAccess = await db.AccesosUsuario.Where(x => x.ComercioId != null).SingleAsync();
             commerceAccessId = commerceAccess.Id;
             originalOperatorId = await db.Operadores.Select(x => x.Id).SingleAsync();
@@ -202,7 +203,7 @@ public sealed class OperadoresDisponiblesHttpTests(PostgresFixture postgres) : I
         const string csvHeader = "referenciaExterna,nombreDestinatario,emailDestinatario,direccion,codigoBulto,pesoGramos,largoCentimetros,anchoCentimetros,altoCentimetros,zonaId,latitud,longitud,modalidad";
         var form = new MultipartFormDataContent();
         form.Add(new ByteArrayContent(Encoding.UTF8.GetBytes(
-            $"{csvHeader}\r\n{reference},Ada Lovelace,ada@example.test,18 de Julio 123,B-001,1250,30,20,10")), "archivo", "envios.csv");
+            $"{csvHeader}\r\n{reference},Ada Lovelace,ada@example.test,18 de Julio 123,B-001,1250,30,20,10,,-34.901,-56.201,Estandar")), "archivo", "envios.csv");
         form.Add(new StringContent(operatorId.ToString("D")), "operadorId");
         form.Add(new StringContent("2"), "versionFormato");
         return client.PostAsync("/api/envios/importaciones", form);

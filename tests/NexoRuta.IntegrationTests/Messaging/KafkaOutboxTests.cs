@@ -216,7 +216,7 @@ public sealed class KafkaOutboxTests(PostgresFixture postgres, KafkaFixture kafk
 
     private static async Task<OutboxMessage> CreateEventAsync(IntegrationDatabase database)
     {
-        using var factory = new IntegrationApiFactory(database, "Development");
+        using var factory = new IntegrationApiFactory(database, "Development", seedShippingServices: true);
         using var client = factory.CreateHttpClient();
         await using var db = database.CreateDbContext();
         var operadorId = await db.Operadores.Select(x => x.Id).SingleAsync();
@@ -226,8 +226,8 @@ public sealed class KafkaOutboxTests(PostgresFixture postgres, KafkaFixture kafk
             Content = JsonContent.Create(new
             {
                 operadorId, destinatarioNombre = "Kafka test recipient", destinatarioEmail = "destinatario@example.test", direccion = "Test address",
-                codigoBulto = $"Kafka-{Guid.NewGuid():N}", pesoGramos = 1200m,
-                largoCentimetros = 25m, anchoCentimetros = 20m, altoCentimetros = 15m
+                servicio = ServiciosEnvioTestData.Declarar(operadorId),
+                bultos = new[] { new { codigo = $"Kafka-{Guid.NewGuid():N}", pesoGramos = 1200m, largoCentimetros = 25m, anchoCentimetros = 20m, altoCentimetros = 15m } }
             })
         };
         await client.SetBearerForAccessAsync(database, accesoId);

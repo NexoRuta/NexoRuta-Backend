@@ -163,7 +163,7 @@ public sealed class SolicitudesReactivacionHttpTests(PostgresFixture postgres) :
         var inactiveEmail = $"inactive-{Guid.NewGuid():N}@example.test";
         await using (var db = database.CreateDbContext())
         {
-            var role = await db.Roles.SingleAsync(x => route == "comercios" ? x.ComercioId == id : x.OperadorId == id);
+            var role = await db.Roles.SingleAsync(x => x.Id == (db.AccesosUsuario.Where(a => a.EsPropietario && (route == "comercios" ? a.ComercioId == id : a.OperadorId == id)).Select(a => a.RolId).Single()));
             var inactiveUser = new Usuario(inactiveEmail, AuthenticationTestData.Hash(inactiveEmail));
             var inactiveAccess = new AccesoUsuario(inactiveUser.Id, route == "operadores" ? id : null,
                 route == "comercios" ? id : null, role);

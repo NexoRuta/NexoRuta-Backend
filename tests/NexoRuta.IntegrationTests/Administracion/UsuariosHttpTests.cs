@@ -28,9 +28,9 @@ public sealed class UsuariosHttpTests(PostgresFixture postgres) : IClassFixture<
         var ownerUser = await db.Usuarios.SingleAsync(x => x.Id == owner.UsuarioId);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
             await LoginAsync(client, ownerUser.Email, AuthenticationTestData.Password));
-        var role = await db.Roles.SingleAsync(x => operador
+        var role = await db.Roles.SingleAsync(x => !x.EsProtegidoSistema && (operador
             ? x.OperadorId == owner.OperadorId && x.Id != owner.RolId
-            : x.ComercioId == owner.ComercioId && x.Id != owner.RolId);
+            : x.ComercioId == owner.ComercioId && x.Id != owner.RolId));
         var original = $"employee's-{Guid.NewGuid():N}@example.test";
         using var creation = await client.PostAsJsonAsync("/api/usuarios", new { Email = original, Password = NewUserPassword, RolId = role.Id });
         Assert.Equal(HttpStatusCode.Created, creation.StatusCode);
@@ -571,7 +571,7 @@ public sealed class UsuariosHttpTests(PostgresFixture postgres) : IClassFixture<
         await using var db = database.CreateDbContext();
         var actor = await AuthenticateOperatorAdminAsync(db, client);
         var role = await db.Roles.SingleAsync(x =>
-            x.OperadorId == actor.OperadorId && x.Id != actor.RolId);
+            x.OperadorId == actor.OperadorId && !x.EsProtegidoSistema && x.Id != actor.RolId);
         var email = CreateBoundaryEmail(56);
 
         Assert.Equal(254, email.Length);
@@ -599,7 +599,7 @@ public sealed class UsuariosHttpTests(PostgresFixture postgres) : IClassFixture<
         await using var db = database.CreateDbContext();
         var actor = await AuthenticateOperatorAdminAsync(db, client);
         var role = await db.Roles.SingleAsync(x =>
-            x.OperadorId == actor.OperadorId && x.Id != actor.RolId);
+            x.OperadorId == actor.OperadorId && !x.EsProtegidoSistema && x.Id != actor.RolId);
         var email = CreateBoundaryEmail(57);
 
         Assert.Equal(255, email.Length);
@@ -625,7 +625,7 @@ public sealed class UsuariosHttpTests(PostgresFixture postgres) : IClassFixture<
         await using var db = database.CreateDbContext();
         var actor = await AuthenticateOperatorAdminAsync(db, client);
         var role = await db.Roles.SingleAsync(x =>
-            x.OperadorId == actor.OperadorId && x.Id != actor.RolId);
+            x.OperadorId == actor.OperadorId && !x.EsProtegidoSistema && x.Id != actor.RolId);
         var validEmail = $"validation-{Guid.NewGuid():N}@example.test";
         var invalidRequests = new object[]
         {
@@ -693,7 +693,7 @@ public sealed class UsuariosHttpTests(PostgresFixture postgres) : IClassFixture<
         AccesoUsuario actor,
         string email)
     {
-        var role = await db.Roles.SingleAsync(x => x.OperadorId == actor.OperadorId && x.Id != actor.RolId);
+        var role = await db.Roles.SingleAsync(x => x.OperadorId == actor.OperadorId && !x.EsProtegidoSistema && x.Id != actor.RolId);
         using var response = await client.PostAsJsonAsync("/api/usuarios", new
         {
             Email = email,

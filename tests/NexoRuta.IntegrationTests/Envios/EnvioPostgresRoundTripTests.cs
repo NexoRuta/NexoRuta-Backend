@@ -635,6 +635,7 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         await AuthenticationTestData.Seeder(db, inicial).SeedAsync();
         var comercio = await Cuenta(db, inicial.UsuarioEmail, TipoAccesoUsuario.Comercio);
         var operador = await Cuenta(db, inicial.OperadorUsuarioEmail, TipoAccesoUsuario.Operador);
+        await ServiciosEnvioTestData.PublicarReglasYServicioAsync(db, operador.OperadorId!.Value, operador.UsuarioId);
         var destinatario = new Destinatario(operador.OperadorId!.Value, "Ana", "destinatario@example.test");
         var direccion = new Direccion(operador.OperadorId.Value, "Rivera 123");
         var envio = new Envio(operador.OperadorId.Value, comercio.ComercioId!.Value,

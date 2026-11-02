@@ -31,28 +31,28 @@ public sealed class BootstrapTests(PostgresFixture postgres) : IClassFixture<Pos
         var seeder = new DatosInicialesSeeder(db, initial,
             new ConfigurationBuilder().AddInMemoryCollection(settings).Build(), AuthenticationTestData.UserManager(db), AuthenticationTestData.PlatformRepository(db));
         await seeder.SeedAsync();
-        Assert.Equal(count, await db.Roles.CountAsync());
+        Assert.Equal(count, await db.Roles.CountAsync(r => !r.EsProtegidoSistema));
         Assert.All(await db.AccesosUsuario.ToListAsync(), access => Assert.Null(access.RolId));
         if (count > 0)
         {
-            var role = await db.Roles.OrderBy(x => x.Codigo).FirstAsync();
+            var role = await db.Roles.Where(r => !r.EsProtegidoSistema).OrderBy(x => x.Codigo).FirstAsync();
             role.Renombrar("Administrator-edited name");
-            db.RemoveRange(await db.RolesPermisos.ToListAsync());
+            db.RemoveRange(await db.RolesPermisos.Where(g => db.Roles.Any(r => r.Id == g.RolId && !r.EsProtegidoSistema)).ToListAsync());
             await db.SaveChangesAsync();
         }
         db.Entry(await db.Comercios.SingleAsync()).Property(x => x.Nombre).CurrentValue = "Edited commerce";
         await db.SaveChangesAsync();
         await seeder.SeedAsync();
-        Assert.Equal(count, await db.Roles.CountAsync());
-        Assert.Empty(await db.RolesPermisos.ToListAsync());
+        Assert.Equal(count, await db.Roles.CountAsync(r => !r.EsProtegidoSistema));
+        Assert.Empty(await db.RolesPermisos.Where(g => db.Roles.Any(r => r.Id == g.RolId && !r.EsProtegidoSistema)).ToListAsync());
         Assert.Equal("Edited commerce", (await db.Comercios.SingleAsync()).Nombre);
         if (count > 0)
         {
-            Assert.Contains(await db.Roles.ToListAsync(), x => x.Nombre == "Administrator-edited name");
-            db.RemoveRange(await db.Roles.ToListAsync());
+            Assert.Contains(await db.Roles.Where(r => !r.EsProtegidoSistema).ToListAsync(), x => x.Nombre == "Administrator-edited name");
+            db.RemoveRange(await db.Roles.Where(r => !r.EsProtegidoSistema).ToListAsync());
             await db.SaveChangesAsync();
             await seeder.SeedAsync();
-            Assert.Empty(await db.Roles.ToListAsync()); // Administrative deletion must not recreate initial roles.
+            Assert.Empty(await db.Roles.Where(r => !r.EsProtegidoSistema).ToListAsync()); // Administrative deletion must not recreate initial roles.
         }
         Assert.Equal(2, await db.Usuarios.CountAsync());
         Assert.Equal(2, await db.AccesosUsuario.CountAsync());

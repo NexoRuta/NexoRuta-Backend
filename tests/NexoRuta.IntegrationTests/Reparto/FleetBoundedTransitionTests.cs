@@ -25,6 +25,7 @@ public sealed class FleetBoundedTransitionTests(PostgresFixture postgres):IClass
                 Assert.Empty(await db.OcupacionesRuta.ToArrayAsync()); Assert.Empty(await db.HechosFlota.ToArrayAsync());
             }
         }
+        await using (var upgraded = data.CreateDbContext()) await upgraded.Database.MigrateAsync();
         using var factory = data.CreateApiFactory(); using var client = factory.CreateHttpClient();
         var prepared = await Preparar(data,client); // Synthetic fixture only; not reconciliation of restored local records.
         using var planned = await client.PostAsJsonAsync("/api/rutas",Solicitud(prepared)); Assert.Equal(HttpStatusCode.OK,planned.StatusCode);

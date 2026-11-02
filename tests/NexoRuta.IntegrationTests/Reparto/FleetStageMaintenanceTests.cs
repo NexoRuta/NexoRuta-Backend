@@ -76,6 +76,6 @@ public sealed class FleetStageMaintenanceTests(PostgresFixture postgres):IClassF
         var error = Assert.Throws<InvalidOperationException>(() => factory.CreateHttpClient());
         Assert.Contains("requires exactly Stage", error.Message);
         await using var db = data.CreateDbContext();
-        Assert.Equal("20261101213104_AddRoadEstimationHistory", (await db.Database.GetAppliedMigrationsAsync()).Last());
+        Assert.Equal(db.Database.GetMigrations().Last(), (await db.Database.GetAppliedMigrationsAsync()).Last());
     }
 }

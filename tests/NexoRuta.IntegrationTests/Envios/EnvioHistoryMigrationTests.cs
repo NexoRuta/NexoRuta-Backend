@@ -75,7 +75,12 @@ public sealed class EnvioHistoryMigrationTests(PostgresFixture postgres, ITestOu
                 var address = new Direccion(operatorId, $"History address {i}");
                 var shipment = new Envio(operatorId, commerceId, userId, recipient.Id, address.Id, ruleVersion.Id);
                 var parcel = new Bulto(operatorId, shipment.Id, $"HIST-{i:D3}", 500m, 20m, 10m, 5m);
-                db.AddRange(recipient, address, shipment, parcel);
+                db.AddRange(recipient, address);
+                await db.SaveChangesAsync();
+                // Seed the actual legacy columns; the current EF model also maps later shipment timestamps.
+                await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO public.\"Envios\" (\"Id\",\"OperadorId\",\"ComercioId\",\"CreadoPorUsuarioId\",\"DestinatarioId\",\"DireccionId\",\"VersionReglasId\",\"Estado\") VALUES ({shipment.Id},{operatorId},{commerceId},{userId},{recipient.Id},{address.Id},{ruleVersion.Id},'Admitido')");
+                db.Bultos.Add(parcel);
+                await db.SaveChangesAsync();
                 shipments.Add(shipment);
             }
             await db.SaveChangesAsync();
