@@ -1732,14 +1732,14 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
         public async Task ClickButtonContainingAsync(string text)
         {
             var literal = JsonSerializer.Serialize(text);
-            var clicked = await EvaluateAsync($"(()=>{{const b=Array.from(document.querySelectorAll('button')).find(button=>button.innerText.includes({literal}));if(!b)return false;b.click();return true;}})()");
+            var clicked = await EvaluateAsync($"(()=>{{const b=Array.from(document.querySelectorAll('button')).find(button=>button.textContent?.includes({literal}));if(!b)return false;const panel=b.closest('details');if(panel)panel.open=true;b.click();return true;}})()");
             Assert.Equal(JsonValueKind.True, clicked.ValueKind);
         }
 
         public async Task ClickButtonContainingKeyboardAsync(string text)
         {
             var literal = JsonSerializer.Serialize(text);
-            var focused = await EvaluateAsync($"(()=>{{const b=Array.from(document.querySelectorAll('button')).find(button=>button.innerText.includes({literal}));if(!b)return false;b.focus();return document.activeElement===b;}})()");
+            var focused = await EvaluateAsync($"(()=>{{const b=Array.from(document.querySelectorAll('button')).find(button=>button.textContent?.includes({literal}));if(!b)return false;const panel=b.closest('details');if(panel)panel.open=true;b.focus();return document.activeElement===b;}})()");
             Assert.Equal(JsonValueKind.True, focused.ValueKind);
             await CallAsync("Input.dispatchKeyEvent", new { type = "keyDown", key = "Enter", code = "Enter", text = "\r", unmodifiedText = "\r", windowsVirtualKeyCode = 13 });
             await CallAsync("Input.dispatchKeyEvent", new { type = "keyUp", key = "Enter", code = "Enter", windowsVirtualKeyCode = 13 });
