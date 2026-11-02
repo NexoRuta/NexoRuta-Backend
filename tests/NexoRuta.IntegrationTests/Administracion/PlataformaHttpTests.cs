@@ -521,10 +521,10 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
         await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Usuarios\" (\"Id\",\"Email\",\"PasswordHash\") VALUES ({userId},{"legacy-upgrade@example.test"},{hash})");
         await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Operadores\" (\"Id\",\"Nombre\") VALUES ({operatorId},'Legacy operator')");
         await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Comercios\" (\"Id\",\"Nombre\") VALUES ({commerceId},'Legacy commerce')");
-        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Roles\" (\"Id\",\"Codigo\",\"Nombre\",\"OperadorId\",\"EsProtegidoSistema\") VALUES ({role.Id},'legacy','Legacy',{operatorId},true)");
+        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Roles\" (\"Id\",\"Codigo\",\"Nombre\",\"OperadorId\",\"TipoOrganizacion\",\"EsProtegidoSistema\") VALUES ({role.Id},'legacy','Legacy',{operatorId},'Operador',true)");
         await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Permisos\" (\"Id\",\"Codigo\",\"Nombre\") VALUES ({permission.Id},'envios.consultar','View shipments')");
         await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"RolesPermisos\" (\"RolId\",\"PermisoId\") VALUES ({role.Id},{permission.Id})");
-        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"AccesosUsuario\" (\"Id\",\"UsuarioId\",\"OperadorId\",\"RolId\") VALUES ({access.Id},{userId},{operatorId},{role.Id})");
+        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"AccesosUsuario\" (\"Id\",\"UsuarioId\",\"OperadorId\",\"RolId\",\"TipoOrganizacion\") VALUES ({access.Id},{userId},{operatorId},{role.Id},'Operador')");
         await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Destinatarios\" (\"Id\",\"OperadorId\",\"Nombre\") VALUES ({recipientId},{operatorId},'Legacy recipient')");
         await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Direcciones\" (\"Id\",\"OperadorId\",\"Descripcion\") VALUES ({addressId},{operatorId},'Legacy address')");
         await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Envios\" (\"Id\",\"OperadorId\",\"ComercioId\",\"CreadoPorUsuarioId\",\"DestinatarioId\",\"DireccionId\",\"Estado\") VALUES ({shipment.Id},{operatorId},{commerceId},{userId},{recipientId},{addressId},'Admitido')");

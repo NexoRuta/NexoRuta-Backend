@@ -64,6 +64,17 @@ public sealed partial class PushOutboxTests
         Assert.True(await worker.ProcesarSiguienteAsync(default));
         Assert.Equal(p.Fids, Assert.Single(transporte.Enviados).Fids);
 
+        using (var occupied = await p.Client.PostAsJsonAsync($"/api/rutas/{nueva.Id}/despacho", new { nueva.Version }))
+            Assert.Equal(HttpStatusCode.Conflict, occupied.StatusCode);
+        var fleet = Assert.Single((await p.Client.GetFromJsonAsync<VehiculoFlotaResponse[]>("/api/reparto/flota"))!);
+        var occupation = fleet.Ocupaciones.Single(o => o.RutaId == origen.Id);
+        using var returned = await p.Client.PostAsJsonAsync($"/api/reparto/flota/{fleet.Id}/retorno",
+            new ComandoFlotaRequest(Guid.NewGuid(),occupation.Id,occupation.Version,"Regreso sintético tras retirar la parada."));
+        Assert.Equal(HttpStatusCode.OK,returned.StatusCode);
+        var returnedFact = (await returned.Content.ReadFromJsonAsync<ResultadoFlotaResponse>())!;
+        using var released = await p.Client.PostAsJsonAsync($"/api/reparto/flota/{fleet.Id}/liberar",
+            new ComandoFlotaRequest(Guid.NewGuid(),occupation.Id,returnedFact.Version,"Vehículo sintético sin carga en tránsito."));
+        Assert.Equal(HttpStatusCode.OK,released.StatusCode);
         using var final = await p.Client.PostAsJsonAsync($"/api/rutas/{nueva.Id}/despacho", new { nueva.Version });
         Assert.Equal(HttpStatusCode.OK, final.StatusCode);
     }

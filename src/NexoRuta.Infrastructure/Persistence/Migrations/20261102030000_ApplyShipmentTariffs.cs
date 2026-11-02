@@ -57,6 +57,7 @@ public sealed class ApplyShipmentTariffs : Migration
             FOREIGN KEY ("OperadorId","VersionTarifarioId") REFERENCES public."VersionesTarifario"("OperadorId","Id"));
         CREATE FUNCTION nexoruta_app.guard_shipment_tariff() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $$
         BEGIN RAISE EXCEPTION 'Applied shipment tariffs are immutable.' USING ERRCODE='55000'; END $$;
+        ALTER FUNCTION nexoruta_app.guard_shipment_tariff() OWNER TO nexoruta_schema_owner;
         REVOKE ALL ON FUNCTION nexoruta_app.guard_shipment_tariff() FROM PUBLIC;
         CREATE TRIGGER immutable_shipment_tariff BEFORE UPDATE OR DELETE ON public."TarifasEnvio"
             FOR EACH ROW EXECUTE FUNCTION nexoruta_app.guard_shipment_tariff();

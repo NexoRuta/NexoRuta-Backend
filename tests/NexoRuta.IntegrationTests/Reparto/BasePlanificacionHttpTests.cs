@@ -132,6 +132,8 @@ public sealed class BasePlanificacionHttpTests(PostgresFixture postgres) : IClas
         {
             var access=await setup.AccesosUsuario.SingleAsync(a=>a.OperadorId!=null);
             await client.SetBearerForAccessAsync(data,access.Id);
+            using var config=await client.PutAsJsonAsync("/api/reparto/configuracion",Politica());
+            Assert.Equal(HttpStatusCode.OK,config.StatusCode);
             using var profile=await client.PutAsJsonAsync($"/api/repartidores/{access.Id}",new {Nombre="Historical driver",Activo=true});
             Assert.Equal(HttpStatusCode.OK,profile.StatusCode);
             using var vehicle=await client.PutAsJsonAsync("/api/reparto/vehiculos",new {Matricula="HIS1234",PesoMaximoGramos=100000m,VolumenMaximoCm3=1000000m,Activo=true});

@@ -4,9 +4,6 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
-using NexoRuta.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using NexoRuta.Domain.Administracion;
@@ -45,6 +42,9 @@ public sealed class EnvioHistoryMigrationTests(PostgresFixture postgres, ITestOu
                 ALTER TABLE public."VersionesReglasOperativas"
                     ADD CONSTRAINT "CK_VersionesReglasOperativas_ProofValidationDeadline"
                     CHECK ("PlazoValidacionPruebaMinutos" IS NULL OR "PlazoValidacionPruebaMinutos" BETWEEN 1 AND 525600);
+                -- Current API compatibility column exists only while seeding/canceling this legacy fixture.
+                -- It is removed before the real date migration runs.
+                ALTER TABLE public."Envios" ADD COLUMN "CreadoEnUtc" timestamp with time zone NOT NULL DEFAULT now();
                 ALTER TABLE public."Envios"
                     ADD COLUMN "EntregaFisicaRecibidaEnUtc" timestamp with time zone NULL,
                     ADD COLUMN "PlazoPruebaVenceEnUtc" timestamp with time zone NULL;
@@ -91,14 +91,7 @@ public sealed class EnvioHistoryMigrationTests(PostgresFixture postgres, ITestOu
         }
 
         var runtime = await RlsRestrictedHttpFlowTests.RestrictApiAsync(database);
-        using var api = new IntegrationApiFactory(runtime, settings: RlsRestrictedHttpFlowTests.ApiSettings(),
-            configureTestServices: services =>
-            {
-                services.RemoveAll<NexoRutaDbContext>();
-                services.AddScoped(_ => new NexoRutaDbContext(new DbContextOptionsBuilder<NexoRutaDbContext>()
-                    .UseNexoRutaPostgres(runtime.ConnectionString)
-                    .ReplaceService<IModelCustomizer, LegacyCutoverModelCustomizer>().Options));
-            });
+        using var api = new IntegrationApiFactory(runtime, settings: RlsRestrictedHttpFlowTests.ApiSettings());
         using var client = api.CreateHttpClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", await LoginAsync(client, commerceEmail));
         using (var cancel = await client.PostAsJsonAsync($"/api/envios/{canceledShipmentId}/cancelacion",
@@ -118,7 +111,10 @@ public sealed class EnvioHistoryMigrationTests(PostgresFixture postgres, ITestOu
 
         var stopwatch = Stopwatch.StartNew();
         await using (var db = database.CreateDbContext())
+        {
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE public.\"Envios\" DROP COLUMN \"CreadoEnUtc\"");
             await db.GetService<IMigrator>().MigrateAsync();
+        }
         stopwatch.Stop();
         output.WriteLine($"Cutover migration: {shipmentCount} shipments, one audited cancellation; {stopwatch.Elapsed.TotalMilliseconds:F0} ms on ephemeral PostgreSQL 18/PostGIS Testcontainers.");
 
@@ -141,16 +137,6 @@ public sealed class EnvioHistoryMigrationTests(PostgresFixture postgres, ITestOu
         Assert.Equal(cancellationId, reconstructed.OrigenId);
         Assert.Equal(outboxCount, await verify.OutboxMessages.CountAsync());
         Assert.Equal(1, await verify.EnvioEventos.CountAsync(x => x.CancelacionEnvioId == cancellationId));
-    }
-
-    // Only the isolated pre-cutover fixture lacks this later column; use the same restricted runtime role.
-    public sealed class LegacyCutoverModelCustomizer(ModelCustomizerDependencies dependencies) : ModelCustomizer(dependencies)
-    {
-        public override void Customize(ModelBuilder modelBuilder, DbContext context)
-        {
-            base.Customize(modelBuilder, context);
-            modelBuilder.Entity<Envio>().Ignore(x => x.CreadoEnUtc);
-        }
     }
 
     private static async Task<string> LoginAsync(HttpClient client, string email)

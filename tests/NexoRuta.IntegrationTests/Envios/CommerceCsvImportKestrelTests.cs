@@ -130,7 +130,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
 
             using (var created = await PostCsvAsync(http, operatorId, Csv(Row("KESTREL-NEW"))))
             {
-                Assert.Equal(HttpStatusCode.OK, created.StatusCode);
+                Assert.True(created.StatusCode == HttpStatusCode.OK, await created.Content.ReadAsStringAsync());
                 Assert.Equal("Creado", FirstState(await created.Content.ReadAsStringAsync()));
             }
             var outboxAfterFirst = await CountOutboxAsync(database);
@@ -400,6 +400,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             Assert.Equal(HttpStatusCode.OK, vehicleResponse.StatusCode);
             using var vehicleJson = JsonDocument.Parse(await vehicleResponse.Content.ReadAsStringAsync());
             var vehicleId = vehicleJson.RootElement.GetProperty("id").GetGuid();
+            await VerifyVehicleAsync(api, vehicleId);
             using var received = await api.PostAsJsonAsync($"/api/deposito/envios/{shipmentId}/recepcion", new { Version = 0 });
             Assert.True(received.StatusCode == HttpStatusCode.NoContent,
                 $"Deposit receipt failed: {(int)received.StatusCode} {await received.Content.ReadAsStringAsync()}");
@@ -611,6 +612,14 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             Assert.Equal(HttpStatusCode.Created, receiptCreated.StatusCode);
             using var receiptCreatedJson = JsonDocument.Parse(await receiptCreated.Content.ReadAsStringAsync());
             var receiptShipmentId = receiptCreatedJson.RootElement.GetProperty("id").GetGuid();
+            // Preserve the unconfirmed-address scenario independently of the now-confirmed admission flow.
+            await using (var setup = database.CreateDbContext())
+            {
+                var addressId = await setup.Envios.Where(e => e.Id == receiptShipmentId).Select(e => e.DireccionId).SingleAsync();
+                var address = await setup.Direcciones.SingleAsync(d => d.Id == addressId);
+                address.CambiarDescripcion("Dirección pendiente de confirmar de la fixture", address.Version);
+                await setup.SaveChangesAsync();
+            }
             using var planningCandidate = await api.PostAsJsonAsync("/api/envios", new
             {
                 OperadorId = operatorId, Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(operatorId),
@@ -666,6 +675,8 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             var fechaSeleccionada = fecha.AddDays(1);
             var fechaDeReservaOriginal = fecha;
             var sourceVehicleId = sourceVehicleJson.RootElement.GetProperty("id").GetGuid();
+            await VerifyVehicleAsync(api, sourceVehicleId);
+            await VerifyVehicleAsync(api, targetVehicleJson.RootElement.GetProperty("id").GetGuid());
             using var reservaVaciaOriginal = await api.PostAsJsonAsync("/api/rutas", new
             {
                 RepartidorAccesoId = operatorAccessId,
@@ -1143,6 +1154,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             Assert.Equal(HttpStatusCode.OK, vehicleResponse.StatusCode);
             using var vehicleJson = JsonDocument.Parse(await vehicleResponse.Content.ReadAsStringAsync());
             var vehicleId = vehicleJson.RootElement.GetProperty("id").GetGuid();
+            await VerifyVehicleAsync(api, vehicleId);
             using var received = await api.PostAsJsonAsync($"/api/deposito/envios/{shipmentId}/recepcion", new { Version = 0 });
             Assert.Equal(HttpStatusCode.NoContent, received.StatusCode);
 
@@ -1360,6 +1372,13 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
         return body.RootElement.GetProperty("accessToken").GetString()!;
     }
 
+    private static async Task VerifyVehicleAsync(HttpClient client, Guid vehicle)
+    {
+        using var result = await client.PostAsJsonAsync($"/api/reparto/flota/{vehicle}/verificar-inicial",
+            new { ComandoId=Guid.NewGuid(),Version=0,Motivo="Inspección sintética del vehículo vacío de la fixture." });
+        Assert.True(result.StatusCode==HttpStatusCode.OK,await result.Content.ReadAsStringAsync());
+    }
+
     private static async Task<HttpResponseMessage> PostCsvAsync(HttpClient client, Guid operatorId, string csv)
         => await PostCsvBytesAsync(client, operatorId, Encoding.UTF8.GetBytes(csv));
 
@@ -1370,6 +1389,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
         file.Headers.ContentType = new MediaTypeHeaderValue("text/csv") { CharSet = "utf-8" };
         form.Add(file, "archivo", "envios.csv");
         form.Add(new StringContent(operatorId.ToString("D"), Encoding.UTF8), "operadorId");
+        form.Add(new StringContent("2"), "versionFormato");
         return await client.PostAsync("/api/envios/importaciones", form);
     }
 

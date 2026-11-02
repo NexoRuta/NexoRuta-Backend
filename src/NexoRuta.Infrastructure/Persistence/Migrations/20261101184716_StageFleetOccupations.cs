@@ -130,14 +130,27 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                 columns: new[] { "RepartidorAccesoId", "OperadorId" });
             migrationBuilder.Sql("""
                 DO $privileged$ BEGIN
-                    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = current_user AND (rolsuper OR rolbypassrls)) THEN
+                    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = current_user
+                        AND (rolsuper OR rolbypassrls OR (rolcreaterole
+                            AND pg_has_role(current_user,'nexoruta_schema_owner','USAGE')))) THEN
                         RAISE EXCEPTION 'Fleet transition requires an authorized migration identity able to inspect every tenant; no RLS-filtered backfill is permitted.';
                     END IF;
+                    IF EXISTS (SELECT 1 FROM pg_policy
+                        WHERE polrelid='public."HojasRuta"'::regclass AND NOT polpermissive) THEN
+                        RAISE EXCEPTION 'Fleet transition cannot prove complete visibility with restrictive route policies.';
+                    END IF;
                 END $privileged$;
+                -- The inherited schema owner creates an unfiltered SELECT policy only for this
+                -- migration transaction. Runtime keeps FORCE RLS and receives no new privilege.
+                LOCK TABLE public."HojasRuta" IN SHARE ROW EXCLUSIVE MODE;
+                CREATE POLICY migration_fleet_stage_read ON public."HojasRuta"
+                    FOR SELECT TO CURRENT_USER USING (true);
                 -- These are legacy assignments requiring verification, NOT reconstructed historical dispatch events.
                 INSERT INTO public."OcupacionesRuta" ("Id", "OperadorId", "RutaId", "VehiculoId", "RepartidorAccesoId", "Legada", "Version")
                 SELECT gen_random_uuid(), "OperadorId", "Id", "VehiculoId", "RepartidorAccesoId", true, 0
                 FROM public."HojasRuta" WHERE "Estado" IN ('Despachada', 'EnCurso');
+
+                DROP POLICY migration_fleet_stage_read ON public."HojasRuta";
 
                 ALTER TABLE public."OcupacionesRuta" OWNER TO nexoruta_schema_owner;
                 ALTER TABLE public."HechosFlota" OWNER TO nexoruta_schema_owner;
