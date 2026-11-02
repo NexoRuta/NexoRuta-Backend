@@ -48,7 +48,12 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                         CREATE ROLE nexoruta_proof_deadline_fn NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
                     ELSIF EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE oid = v_role
                         AND (rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls))
-                        OR EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members WHERE roleid = v_role OR member = v_role) THEN
+                        OR EXISTS (
+                            SELECT 1 FROM pg_catalog.pg_auth_members m
+                            WHERE m.member = v_role OR (m.roleid = v_role
+                                AND m.member IS DISTINCT FROM (
+                                    SELECT oid FROM pg_catalog.pg_roles WHERE rolname = session_user
+                                        AND (rolsuper OR rolcreaterole)))) THEN
                         RAISE EXCEPTION 'Role nexoruta_proof_deadline_fn already exists with unsafe attributes or memberships.'
                             USING ERRCODE = '42501';
                     END IF;
