@@ -76,7 +76,7 @@ jobs:
       run:
         working-directory: backend
     env:
-      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/nexoruta-playwright
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright-browsers
     timeout-minutes: 35
     strategy:
       fail-fast: false
