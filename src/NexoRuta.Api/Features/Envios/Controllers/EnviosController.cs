@@ -27,11 +27,15 @@ public sealed class EnviosController(
     [HttpGet("operadores/{id:guid}/servicios-envio")]
     [Authorize(Policy = "envios.crear")]
     [Authorize(Policy = nameof(TipoAccesoUsuario.Comercio))]
-    [ProducesResponseType<IReadOnlyList<NexoRuta.Application.Envios.Repositories.ServicioEnvioDisponible>>(200)]
+    [ProducesResponseType<IReadOnlyList<ServicioEnvioDisponibleResponse>>(200)]
     public async Task<IActionResult> Servicios(Guid id, [FromQuery, System.ComponentModel.DataAnnotations.Required] double? latitud, [FromQuery, System.ComponentModel.DataAnnotations.Required] double? longitud, CancellationToken ct)
     {
         Response.Headers.CacheControl = "no-store";
-        try { return Ok(await servicios.ListarAsync(id, latitud!.Value, longitud!.Value, ct)); }
+        try
+        {
+            var disponibles = await servicios.ListarAsync(id, latitud!.Value, longitud!.Value, ct);
+            return Ok(disponibles.Select(s => new ServicioEnvioDisponibleResponse(s.ZonaId, s.ZonaNombre, s.Modalidad)).ToArray());
+        }
         catch (ArgumentException error) { return BadRequest(new { message = error.Message }); }
     }
 
