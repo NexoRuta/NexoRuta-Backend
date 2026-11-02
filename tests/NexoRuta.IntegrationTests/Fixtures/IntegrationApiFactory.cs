@@ -15,7 +15,7 @@ namespace NexoRuta.IntegrationTests.Fixtures;
 public sealed class IntegrationApiFactory(IntegrationDatabase database, string environment = "Testing",
     IDictionary<string, string?>? settings = null, IInterceptor[]? interceptors = null,
     bool replaceDbContext = true, ICorreoSender? correoSender = null,
-    bool seedOperationalRules = true, TimeProvider? timeProvider = null) : WebApplicationFactory<NexoRuta.Api.Controllers.AuthController>
+    bool seedOperationalRules = true, TimeProvider? timeProvider = null, Action<IServiceCollection>? configureTestServices = null) : WebApplicationFactory<NexoRuta.Api.Controllers.AuthController>
 {
     protected override IHost CreateHost(IHostBuilder builder)
     {
@@ -87,6 +87,7 @@ public sealed class IntegrationApiFactory(IntegrationDatabase database, string e
                 services.RemoveAll<TimeProvider>();
                 services.AddSingleton(timeProvider);
             }
+            configureTestServices?.Invoke(services);
         });
     }
 

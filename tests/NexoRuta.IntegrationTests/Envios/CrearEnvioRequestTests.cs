@@ -8,6 +8,10 @@ public sealed class CrearEnvioRequestTests
 {
     [Theory]
     [InlineData("es-UY", "0.01", true)]
+    [InlineData("es-UY", "1.005", false)]
+    [InlineData("es-UY", "1.000", true)]
+    [InlineData("en-US", "1.005", false)]
+    [InlineData("en-US", "1.00", true)]
     [InlineData("es-UY", "999999999", true)]
     [InlineData("es-UY", "0.009", false)]
     [InlineData("es-UY", "1000000000", false)]
@@ -30,7 +34,7 @@ public sealed class CrearEnvioRequestTests
             };
             var errors = new List<ValidationResult>();
             Assert.Equal(expected, Validator.TryValidateObject(request, new ValidationContext(request), errors, true));
-            Assert.Equal(expected ? 0 : 4, errors.Count);
+            Assert.Equal(expected ? 0 : 4, errors.SelectMany(e => e.MemberNames).Distinct().Count());
         }
         finally
         {

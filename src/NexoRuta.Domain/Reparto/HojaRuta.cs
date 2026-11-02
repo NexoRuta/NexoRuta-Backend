@@ -19,6 +19,7 @@ public sealed class HojaRuta
     public DateTimeOffset? FinEnUtc { get; private set; }
     public long UltimaSecuencia { get; private set; }
     public DateTimeOffset? SalidaEnUtc { get; private set; }
+    public PlanTemporalRuta? PlanTemporal { get; private set; }
     private readonly List<ParadaRuta> paradas = [];
     public IReadOnlyList<ParadaRuta> Paradas => paradas.AsReadOnly();
     private HojaRuta() { }
@@ -34,15 +35,30 @@ public sealed class HojaRuta
         VehiculoVolumenMaximoCm3 = vehiculo.VolumenMaximoCm3;
     }
 
-    public void AgregarParada(Guid envioId, DateTimeOffset llegada)
+    public void AgregarParada(Guid envioId, DateTimeOffset llegada, int? servicioMinutos = null)
     {
         if (Estado != EstadoHojaRuta.Planificada || paradas.Any(x => x.EnvioId == envioId))
             throw new InvalidOperationException("La ruta ya está despachada o el envío está repetido.");
+        servicioMinutos ??= PlanTemporal?.ServicioPredeterminadoMinutos;
+        if (servicioMinutos < 0) throw new ArgumentException("El servicio debe ser no negativo en minutos.");
         var ultima = paradas.MaxBy(p => p.Orden);
-        if (ultima is not null && llegada < ultima.LlegadaEstimadaUtc)
+        if (ultima is not null && llegada < FinServicio(ultima))
             throw new ArgumentException("Las llegadas estimadas deben respetar el orden de las paradas.");
-        paradas.Add(new ParadaRuta(Id, OperadorId, envioId, (ultima?.Orden ?? 0) + 1, llegada));
+        paradas.Add(new ParadaRuta(Id, OperadorId, envioId, (ultima?.Orden ?? 0) + 1, llegada, servicioMinutos));
         Version++;
+    }
+
+    private static DateTimeOffset FinServicio(ParadaRuta parada)
+    {
+        try { return parada.LlegadaEstimadaUtc.AddMinutes(parada.ServicioMinutos ?? 0); }
+        catch (ArgumentOutOfRangeException) { throw new ArgumentException("El servicio excede el rango temporal representable."); }
+    }
+    public void CapturarPlanTemporal(BaseOperativa? baseActual, DateTimeOffset? salida, string zona)
+    {
+        if (PlanTemporal is not null || Estado != EstadoHojaRuta.Planificada) throw new InvalidOperationException("El snapshot temporal inicial no se sobrescribe.");
+        PlanTemporal = new(salida?.ToUniversalTime(), zona, baseActual?.Version, baseActual?.Direccion,
+            baseActual?.Latitud, baseActual?.Longitud, baseActual?.ConfirmadaEnUtc, baseActual?.ConfirmadaPorAccesoId,
+            baseActual?.ServicioPredeterminadoMinutos, baseActual?.MargenRetornoMinutos, Version, paradas.OrderBy(p => p.Orden).Select(p => p.EnvioId).ToArray());
     }
 
     public void Despachar(long versionEsperada)
@@ -65,6 +81,15 @@ public sealed class HojaRuta
     {
         if (Estado != EstadoHojaRuta.Despachada || instante == default) throw new InvalidOperationException("La ruta no está lista para iniciar.");
         Estado = EstadoHojaRuta.EnCurso; InicioEnUtc = instante.ToUniversalTime(); Version++;
+    }
+
+    public void AnularDespachoSinInicio()
+    {
+        if (Estado != EstadoHojaRuta.Despachada || InicioEnUtc is not null || SalidaEnUtc is not null)
+            throw new InvalidOperationException("Solo se anula una autorización que nunca inició jornada ni salida.");
+        foreach (var parada in paradas.Where(p => p.Activa))
+            parada.Suspender("Autorización anulada sin inicio; requiere reasignación explícita, no cancelación del envío.");
+        Estado = EstadoHojaRuta.Cancelada; ReservaRecursosActiva = false; Version++;
     }
 
     public void ConfirmarSalida(DateTimeOffset instante)

@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using NexoRuta.Api.Validation;
 
 namespace NexoRuta.Api.Features.Envios.Contracts.Requests;
 
@@ -20,14 +21,14 @@ public sealed class CrearEnvioRequest
     public string CodigoBulto { get; set; } = "";
 
     [Required, Range(typeof(decimal), "0.01", "999999999", ParseLimitsInInvariantCulture = true)]
-    public decimal PesoGramos { get; set; }
+    [DosDecimales] public decimal PesoGramos { get; set; }
 
     [Required, Range(typeof(decimal), "0.01", "999999999", ParseLimitsInInvariantCulture = true)]
-    public decimal LargoCentimetros { get; set; }
+    [DosDecimales] public decimal LargoCentimetros { get; set; }
 
     [Required, Range(typeof(decimal), "0.01", "999999999", ParseLimitsInInvariantCulture = true)]
-    public decimal AnchoCentimetros { get; set; }
+    [DosDecimales] public decimal AnchoCentimetros { get; set; }
 
     [Required, Range(typeof(decimal), "0.01", "999999999", ParseLimitsInInvariantCulture = true)]
-    public decimal AltoCentimetros { get; set; }
+    [DosDecimales] public decimal AltoCentimetros { get; set; }
 }

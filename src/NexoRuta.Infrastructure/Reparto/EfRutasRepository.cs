@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 using NexoRuta.Application.Reparto.Dtos;
+using NexoRuta.Application.Administracion.Context;
 using NexoRuta.Application.Reparto.Exceptions;
 using NexoRuta.Application.Reparto.Repositories;
 using NexoRuta.Domain.Envios;
@@ -10,7 +11,7 @@ using NexoRuta.Infrastructure.Persistence;
 
 namespace NexoRuta.Infrastructure.Reparto;
 
-public sealed partial class EfRutasRepository(NexoRutaDbContext db, TimeProvider reloj) : IRutasRepository
+public sealed partial class EfRutasRepository(NexoRutaDbContext db, TimeProvider reloj, NexoRuta.Application.Reparto.Estimaciones.IProveedorTramosViales? proveedorVial = null, GeoapifyRoutingOptions? opcionesRouting = null) : IRutasRepository
 {
     public async Task<IReadOnlyList<HojaRutaDatos>> ListarAsync(Guid operadorId, Guid? repartidorId, DateOnly fecha, CancellationToken ct)
     {
@@ -78,31 +79,44 @@ public sealed partial class EfRutasRepository(NexoRutaDbContext db, TimeProvider
         if (envios.Any(x => !bultos.Any(b => b.EnvioId == x.Id))) throw new ConflictoRepartoException("Todos los envíos deben tener bultos.");
         if (bultos.Any(x => x.Custodia != EstadoCustodiaBulto.Deposito))
             throw new ConflictoRepartoException("La planificación requiere que todos los bultos estén recibidos físicamente en depósito.");
-        if (bultos.Sum(x => x.PesoGramos) > vehiculo.PesoMaximoGramos
-            || bultos.Sum(x => x.LargoCentimetros * x.AnchoCentimetros * x.AltoCentimetros) > vehiculo.VolumenMaximoCm3)
-            throw new ConflictoRepartoException("La ruta supera la capacidad de peso o volumen del vehículo.");
+        if (CapacidadCarga.Exceso(vehiculo, bultos) is { } exceso) throw new ConflictoRepartoException(exceso);
         var hoja = new HojaRuta(operadorId, datos.RepartidorAccesoId, vehiculo, datos.Fecha, politica.Version);
         var zona = TimeZoneInfo.FindSystemTimeZoneById(politica.ZonaHoraria);
+        var baseActual = await db.BasesOperativas.AsNoTracking().SingleOrDefaultAsync(b => b.OperadorId == operadorId, ct);
+        if (datos.SalidaPlanificadaEnUtc is { } salidaPropuesta && (salidaPropuesta == default || DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(salidaPropuesta, zona).DateTime) != datos.Fecha))
+            throw new ArgumentException("La salida planificada debe pertenecer a la fecha operativa en su zona horaria.");
         await db.SetShipmentHistoryContextAsync("PlanificacionRuta", hoja.Id, hoja.Id, reloj.GetUtcNow(), cancellationToken: ct);
         foreach (var parada in datos.Paradas)
         {
-            if (DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(parada.LlegadaEstimadaUtc, zona).DateTime) != datos.Fecha)
-                throw new ArgumentException("Las llegadas deben corresponder a la fecha de la ruta en la zona del operador.");
-            hoja.AgregarParada(parada.EnvioId, parada.LlegadaEstimadaUtc);
+            if (DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(parada.LlegadaEstimadaUtc, zona).DateTime) < datos.Fecha
+                || datos.SalidaPlanificadaEnUtc is { } salidaPrevista && parada.LlegadaEstimadaUtc < salidaPrevista)
+                throw new ArgumentException("Las llegadas manuales no pueden preceder la fecha operativa ni la salida planificada.");
+            hoja.AgregarParada(parada.EnvioId, parada.LlegadaEstimadaUtc, parada.ServicioMinutos ?? baseActual?.ServicioPredeterminadoMinutos);
             var envio = envios.Single(x => x.Id == parada.EnvioId);
             envio.CambiarEstado(EstadoEnvio.AsignadoRuta, envio.Version);
         }
+        hoja.CapturarPlanTemporal(baseActual, datos.SalidaPlanificadaEnUtc, politica.ZonaHoraria);
         db.HojasRuta.Add(hoja); await db.SaveChangesAsync(ct);
         var salida = await Datos(hoja, ct); await tx.CommitAsync(ct); return salida;
     }
 
-    public async Task<HojaRutaDatos?> DespacharAsync(Guid operadorId, Guid rutaId, long version, CancellationToken ct)
+    public async Task<HojaRutaDatos?> DespacharAsync(ContextoUsuario actor, Guid rutaId, long version, CancellationToken ct)
     {
+        var operadorId = actor.OperadorId ?? throw new RepartoNoPermitidoException();
         await using var tx = await db.BeginOrJoinAsync(ct);
         await Contexto(operadorId, ct); await Bloquear(operadorId, ct);
         var hoja = await db.HojasRuta.Include(x => x.Paradas).SingleOrDefaultAsync(x => x.OperadorId == operadorId && x.Id == rutaId, ct);
         if (hoja is null) return null;
         if (hoja.Version != version || hoja.Estado != EstadoHojaRuta.Planificada) throw new ConflictoRepartoException("La ruta cambió o ya fue despachada.");
+        var politica = await db.ConfiguracionesReparto.SingleAsync(p => p.OperadorId == operadorId && p.Version == hoja.ConfiguracionVersion, ct);
+        var hoy = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(reloj.GetUtcNow(), TimeZoneInfo.FindSystemTimeZoneById(politica.ZonaHoraria)).DateTime);
+        if (hoja.Fecha != hoy) throw new ConflictoRepartoException("Solo se despacha en la fecha operativa de la ruta; las rutas futuras permanecen planificadas.");
+        var ocupaciones = await (from o in db.OcupacionesRuta join h in db.HojasRuta on o.RutaId equals h.Id
+            where o.OperadorId == operadorId && h.OperadorId == operadorId && o.LiberadaEnUtc == null && o.AnuladaEnUtc == null
+                && (o.VehiculoId == hoja.VehiculoId || o.RepartidorAccesoId == hoja.RepartidorAccesoId)
+            select new { o.RutaId, h.Fecha }).ToArrayAsync(ct);
+        if (ocupaciones.Length > 0) throw new ConflictoRepartoException("Vehículo o repartidor ocupado. " + string.Join(" ",
+            ocupaciones.Select(o => $"La ruta {o.RutaId} del {o.Fecha:yyyy-MM-dd} mantiene la ocupación; revisala en Rutas y depósito antes de volver a despachar.")));
         if (!await RepartidorHabilitado(operadorId, hoja.RepartidorAccesoId, ct)
             || !await db.Vehiculos.AnyAsync(x => x.OperadorId == operadorId && x.Id == hoja.VehiculoId && x.Activo, ct))
             throw new ConflictoRepartoException("Repartidor o vehículo deshabilitados.");
@@ -110,7 +124,17 @@ public sealed partial class EfRutasRepository(NexoRutaDbContext db, TimeProvider
         if (ids.Length == 0 || await db.Bultos.AnyAsync(x => x.OperadorId == operadorId && ids.Contains(x.EnvioId) && x.Custodia != EstadoCustodiaBulto.Deposito, ct)
             || await db.Envios.CountAsync(x => x.OperadorId == operadorId && ids.Contains(x.Id) && x.Estado == EstadoEnvio.AsignadoRuta, ct) != ids.Length)
             throw new ConflictoRepartoException("Todos los envíos deben seguir asignados y sus bultos recibidos físicamente en depósito.");
-        hoja.Despachar(version); await db.SaveChangesAsync(ct);
+        var vehiculo = await db.Vehiculos.SingleAsync(x => x.OperadorId == operadorId && x.Id == hoja.VehiculoId, ct);
+        if (vehiculo.VerificacionInicialEnUtc is null)
+            throw new ConflictoRepartoException("El vehículo requiere verificar su disponibilidad inicial en el panel de flota antes de despachar.");
+        var bultos = await db.Bultos.Where(x => x.OperadorId == operadorId && ids.Contains(x.EnvioId)).ToArrayAsync(ct);
+        if (CapacidadCarga.Exceso(vehiculo, bultos) is { } exceso) throw new ConflictoRepartoException(exceso);
+        hoja.Despachar(version);
+        var ocupacion = new OcupacionRuta(hoja, actor.AccesoId, reloj.GetUtcNow());
+        db.OcupacionesRuta.Add(ocupacion);
+        RegistrarHechoFlota(actor, vehiculo.Id, "despacho", new(ocupacion.Id, ocupacion.Id, 0, "Autorización operativa de despacho."),
+            new(ocupacion.Id, vehiculo.Id, hoja.Id, ocupacion.Id, ocupacion.Version, "despacho", ocupacion.AdquiridaEnUtc!.Value));
+        await db.SaveChangesAsync(ct);
         var salida = await Datos(hoja, ct); await tx.CommitAsync(ct); return salida;
     }
 
@@ -208,16 +232,26 @@ public sealed partial class EfRutasRepository(NexoRutaDbContext db, TimeProvider
                 bultos.Where(b => b.EnvioId == p.EnvioId).Select(b => new BultoRutaDatos(b.Id, b.Codigo, b.PesoGramos,
                     b.LargoCentimetros * b.AnchoCentimetros * b.AltoCentimetros, b.Custodia.ToString(), b.Version)).ToArray(),
                 ReglasDatos(reglas[detalle.Envio.VersionReglasId]), resumenesIntentos[p.EnvioId].Cantidad,
-                resumenesIntentos[p.EnvioId].ProximoIntentoElegibleUtc);
+                resumenesIntentos[p.EnvioId].ProximoIntentoElegibleUtc, p.ServicioMinutos);
         }).ToArray();
         var cierres = await db.OperacionesJornada.AsNoTracking().Where(o => o.OperadorId == hoja.OperadorId && o.RutaId == hoja.Id
             && o.Tipo == "FinJornada" && o.Resultado == "Aplicada").Select(o => o.IncidenciasCierre).ToArrayAsync(ct);
+        var estadoTemporal=await EstadoTemporalActual(hoja,ct);
         return new(hoja.Id, hoja.JornadaId, hoja.RepartidorAccesoId, hoja.VehiculoId, hoja.VehiculoMatricula, hoja.Fecha,
             hoja.Estado.ToString(), hoja.Version, hoja.UltimaSecuencia,
             new(politica.Version, politica.ZonaHoraria, politica.MaximoParadas,
                 politica.RequiereFotoIntento, politica.BloquearDiscrepanciasCarga), paradas, cierres.SelectMany(LeerIncidencias).ToArray(),
-            hoja.ReservaRecursosActiva);
+            hoja.ReservaRecursosActiva, hoja.PlanTemporal is not { } t ? null : new(t.SalidaPlanificadaEnUtc, t.ZonaHoraria, t.BaseVersion,
+                t.DireccionBase, t.LatitudBase, t.LongitudBase, t.BaseConfirmadaEnUtc, t.BaseConfirmadaPorAccesoId,
+                t.ServicioPredeterminadoMinutos, t.MargenRetornoMinutos, t.VersionRutaAlPlanificar, t.OrdenEnvios),
+            estadoTemporal.Estado, estadoTemporal.Motivo, hoja.SalidaEnUtc);
     }
+    private static string MotivoTemporal(HojaRuta hoja) => hoja.Paradas.All(p => !p.Activa) ? "Sin paradas activas; no hay recorrido estimable."
+        : hoja.PlanTemporal is not { } t ? "Datos temporales no configurados; llegadas manuales."
+        : t.BaseConfirmadaEnUtc is null ? "Base operativa no confirmada; llegadas manuales."
+        : t.SalidaPlanificadaEnUtc is null ? "Salida planificada no informada; llegadas manuales."
+        : hoja.Paradas.Any(p => p.Activa && p.ServicioMinutos is null) || t.MargenRetornoMinutos is null ? "Tiempos de servicio o margen no configurados."
+        : "Sin cálculo registrado; las llegadas manuales se conservan.";
     private static ReglasEnvioDatos ReglasDatos(VersionReglasOperativas v) => new(v.Id, v.NumeroVersionPublicada!.Value,
         v.MaxIntentosEntrega!.Value, v.IntervaloEntreIntentosMinutos!.Value, v.PoliticaDevolucionAlAgotarIntentos!.Value.ToString(),
         v.RequisitosPrueba.Any(p => p.Tipo == TipoPruebaEntrega.FirmaEnPantalla),

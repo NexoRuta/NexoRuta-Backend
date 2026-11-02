@@ -18,6 +18,9 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
     public DbSet<NexoRuta.Domain.Reparto.Repartidor> Repartidores => Set<NexoRuta.Domain.Reparto.Repartidor>();
     public DbSet<NexoRuta.Domain.Reparto.ConfiguracionReparto> ConfiguracionesReparto => Set<NexoRuta.Domain.Reparto.ConfiguracionReparto>();
     public DbSet<NexoRuta.Domain.Reparto.Vehiculo> Vehiculos => Set<NexoRuta.Domain.Reparto.Vehiculo>();
+    public DbSet<NexoRuta.Domain.Reparto.BaseOperativa> BasesOperativas => Set<NexoRuta.Domain.Reparto.BaseOperativa>();
+    public DbSet<NexoRuta.Domain.Reparto.OcupacionRuta> OcupacionesRuta => Set<NexoRuta.Domain.Reparto.OcupacionRuta>();
+    public DbSet<NexoRuta.Infrastructure.Reparto.HechoFlota> HechosFlota => Set<NexoRuta.Infrastructure.Reparto.HechoFlota>();
     public DbSet<NexoRuta.Domain.Reparto.HojaRuta> HojasRuta => Set<NexoRuta.Domain.Reparto.HojaRuta>();
     public DbSet<NexoRuta.Domain.Reparto.ParadaRuta> ParadasRuta => Set<NexoRuta.Domain.Reparto.ParadaRuta>();
     public DbSet<NexoRuta.Domain.Reparto.DecisionDevolucionEnvio> DecisionesDevolucionEnvio => Set<NexoRuta.Domain.Reparto.DecisionDevolucionEnvio>();
@@ -84,10 +87,15 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
         modelBuilder.ApplyConfiguration(new Reparto.RepartidorConfiguration());
         modelBuilder.ApplyConfiguration(new Reparto.ConfiguracionRepartoConfiguration());
         modelBuilder.ApplyConfiguration(new Reparto.VehiculoConfiguration());
+        modelBuilder.ApplyConfiguration(new Reparto.OcupacionRutaConfiguration());
+        modelBuilder.ApplyConfiguration(new Reparto.HechoFlotaConfiguration());
         modelBuilder.ApplyConfiguration(new Notificaciones.AvisoRepartoConfiguration());
         modelBuilder.ApplyConfiguration(new Notificaciones.InstalacionMovilConfiguration());
         modelBuilder.ApplyConfiguration(new Notificaciones.EntregaPushConfiguration());
         modelBuilder.ApplyConfiguration(new Reparto.HojaRutaConfiguration());
+        modelBuilder.ApplyConfiguration(new Reparto.BaseOperativaConfiguration());
+        modelBuilder.ApplyConfiguration(new Reparto.PerfilVialRegistroConfiguration());
+        modelBuilder.ApplyConfiguration(new Reparto.EstimacionRegistroConfiguration());
         modelBuilder.ApplyConfiguration(new Reparto.OperacionJornadaConfiguration());
         modelBuilder.ApplyConfiguration(new Reparto.EvidenciaRepartoConfiguration());
         modelBuilder.ApplyConfiguration(new Reparto.PruebaEntregaConfiguration());

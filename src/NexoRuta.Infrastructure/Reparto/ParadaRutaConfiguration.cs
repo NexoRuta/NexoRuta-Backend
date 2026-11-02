@@ -10,6 +10,7 @@ public sealed class ParadaRutaConfiguration : IEntityTypeConfiguration<ParadaRut
     public void Configure(EntityTypeBuilder<ParadaRuta> entity)
     {
         entity.ToTable("ParadasRuta", t => t.HasCheckConstraint("CK_ParadasRuta_Orden", "\"Orden\" > 0"));
+        entity.ToTable("ParadasRuta", t => t.HasCheckConstraint("CK_ParadasRuta_Servicio", "\"ServicioMinutos\" IS NULL OR \"ServicioMinutos\" >= 0"));
         entity.HasKey(x => new { x.RutaId, x.EnvioId });
         entity.Property(x => x.MotivoSuspension).HasMaxLength(500);
         entity.HasIndex(x => new { x.OperadorId, x.EnvioId }).IsUnique().HasFilter("\"Activa\" = TRUE");

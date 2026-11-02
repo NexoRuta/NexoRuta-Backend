@@ -7,14 +7,16 @@ public sealed class ParadaRuta
     public Guid EnvioId { get; private set; }
     public int Orden { get; private set; }
     public DateTimeOffset LlegadaEstimadaUtc { get; private set; }
+    public int? ServicioMinutos { get; private set; }
     public bool Activa { get; private set; } = true;
     public string? MotivoSuspension { get; private set; }
     private ParadaRuta() { }
-    public ParadaRuta(Guid rutaId, Guid operadorId, Guid envioId, int orden, DateTimeOffset llegadaEstimada)
+    public ParadaRuta(Guid rutaId, Guid operadorId, Guid envioId, int orden, DateTimeOffset llegadaEstimada, int? servicioMinutos = null)
     {
-        if (rutaId == Guid.Empty || operadorId == Guid.Empty || envioId == Guid.Empty || orden < 1 || llegadaEstimada == default)
+        if (rutaId == Guid.Empty || operadorId == Guid.Empty || envioId == Guid.Empty || orden < 1 || llegadaEstimada == default || servicioMinutos < 0)
             throw new ArgumentException("La parada requiere ruta, operador, envío, orden y llegada estimada.");
         RutaId = rutaId; OperadorId = operadorId; EnvioId = envioId; Orden = orden;
+        ServicioMinutos = servicioMinutos;
         LlegadaEstimadaUtc = llegadaEstimada.ToUniversalTime();
     }
     public void Suspender(string motivo)

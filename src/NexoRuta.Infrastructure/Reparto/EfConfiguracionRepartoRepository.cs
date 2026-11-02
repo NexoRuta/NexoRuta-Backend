@@ -7,7 +7,7 @@ using NexoRuta.Infrastructure.Persistence;
 
 namespace NexoRuta.Infrastructure.Reparto;
 
-public sealed class EfConfiguracionRepartoRepository(NexoRutaDbContext db) : IConfiguracionRepartoRepository
+public sealed partial class EfConfiguracionRepartoRepository(NexoRutaDbContext db) : IConfiguracionRepartoRepository
 {
     public async Task<ConfiguracionRepartoDatos?> ObtenerAsync(Guid operadorId, CancellationToken ct)
     {

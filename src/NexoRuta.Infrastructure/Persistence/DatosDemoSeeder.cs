@@ -94,6 +94,8 @@ public sealed class DatosDemoSeeder(
                 new(Guid.Empty, $"S{(char)('A' + operadorIndex)}{(char)('A' + operadorIndex)} {1234 + operadorIndex}",
                     350_000, 12_000_000, Activo: true, Version: 0), ct)
                 ?? throw new InvalidOperationException("No se pudo crear el vehículo demo.");
+            await rutas.ConfirmarFlotaAsync(operador.Contexto, vehiculo.Id, "verificar-inicial",
+                new(Guid.CreateVersion7(), null, vehiculo.Version, "Verificación explícita del vehículo sintético demo."), ct);
             await PublicarReglasAsync(operador, fechaReglas, ct);
             var versionReglasId = await db.ReglasOperativasOperadores.AsNoTracking()
                 .Where(x => x.OperadorId == operador.Id).Select(x => x.VersionVigenteId)
@@ -127,10 +129,11 @@ public sealed class DatosDemoSeeder(
                     envio.Envio.Id, horaInicio.AddHours(1).AddMinutes(index * 45))).ToArray();
                 var hoja = await rutas.PlanificarAsync(operador.Id,
                     new(repartidor.AccesoId, vehiculo.Id, fechaRuta, paradas), ct);
-                var despachada = await rutas.DespacharAsync(operador.Id, hoja.Id, hoja.Version, ct)
+                var relojDemo = new RelojDemo(horaInicio);
+                var rutasDia = new EfRutasRepository(db, relojDemo);
+                var despachada = await rutasDia.DespacharAsync(operador.Contexto, hoja.Id, hoja.Version, ct)
                     ?? throw new InvalidOperationException("No se pudo despachar una ruta demo.");
 
-                var relojDemo = new RelojDemo(horaInicio);
                 var operaciones = new EfOperacionesRepartoRepository(db, relojDemo, configuration);
                 var actorRepartidor = new UsuarioActualDemo(operador.Contexto);
                 var jornada = new EjecutarRepartoUseCase(actorRepartidor, repartidores, operaciones);
@@ -185,6 +188,11 @@ public sealed class DatosDemoSeeder(
                 }
 
                 await AplicarAsync("FinJornada", null, null, horaInicio.AddHours(8), new { });
+                var ocupacion = await db.OcupacionesRuta.SingleAsync(o => o.RutaId == hoja.Id, ct);
+                await rutasDia.ConfirmarFlotaAsync(operador.Contexto, vehiculo.Id, "retorno",
+                    new(Guid.CreateVersion7(), ocupacion.Id, ocupacion.Version, "Retorno sintético demo."), ct);
+                await rutasDia.ConfirmarFlotaAsync(operador.Contexto, vehiculo.Id, "liberar",
+                    new(Guid.CreateVersion7(), ocupacion.Id, ocupacion.Version, "Carga sintética resuelta; disponibilidad demo."), ct);
                 cantidadRutas++;
             }
         }

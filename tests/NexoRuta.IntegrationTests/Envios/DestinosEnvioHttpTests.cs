@@ -23,7 +23,10 @@ public sealed class DestinosEnvioHttpTests(PostgresFixture postgres) : IClassFix
         var runtime = await RlsRestrictedHttpFlowTests.RestrictApiAsync(data);
         using var factory = new IntegrationApiFactory(runtime, settings: RlsRestrictedHttpFlowTests.ApiSettings());
         var geo = new GeocodificadorPrueba();
-        using var host = factory.WithWebHostBuilder(b => b.ConfigureTestServices(s => { s.RemoveAll<IGeocodificador>(); s.AddSingleton<IGeocodificador>(geo); }));
+        using var host = factory.WithWebHostBuilder(b => b.ConfigureTestServices(s => { s.RemoveAll<IGeocodificador>(); s.AddSingleton<IGeocodificador>(geo); s.AddKeyedScoped<NexoRuta.Application.Envios.UseCases.GestionarDestinoEnvioUseCase>(
+            NexoRuta.Infrastructure.Envios.Geocodificacion.GeocodificadorMapboxTemporal.Servicio, (p,_) => new(
+                p.GetRequiredService<NexoRuta.Application.Administracion.Interfaces.IUsuarioActual>(),
+                p.GetRequiredService<NexoRuta.Application.Envios.Repositories.IDestinosEnvioRepository>(),geo)); }));
         using var client = host.CreateClient(); await using var db = data.CreateDbContext();
         var comercio = await db.AccesosUsuario.SingleAsync(x => x.ComercioId != null);
         var op = await db.AccesosUsuario.SingleAsync(x => x.OperadorId != null);
@@ -39,12 +42,14 @@ public sealed class DestinosEnvioHttpTests(PostgresFixture postgres) : IClassFix
         var candidatas = (await propuesta.Content.ReadFromJsonAsync<PropuestasDestinoDatos>())!;
         Assert.Equal(2, candidatas.Propuestas.Count); Assert.Equal("Dirección de prueba 123", Assert.Single(geo.Consultas));
         Assert.Null((await db.Direcciones.AsNoTracking().SingleAsync()).ConfirmadaEnUtc);
-        using var confirmar = await client.PutAsJsonAsync(url, new { actual.Version, Latitud = -34.901, Longitud = -56.201 });
+        using var confirmar = await client.PutAsJsonAsync(url, new { actual.Version, Latitud = -34.901, Longitud = -56.201, Direccion = "  Seleccionada 123  " });
         Assert.Equal(HttpStatusCode.NoContent, confirmar.StatusCode);
         var confirmada = (await client.GetFromJsonAsync<DestinoEnvioDatos>(url))!;
+        Assert.Equal("Seleccionada 123", confirmada.Direccion);
         Assert.Equal(1, confirmada.Version); Assert.Equal(-34.901, confirmada.Latitud); Assert.NotNull(confirmada.ConfirmadaEnUtc);
-        using var repetir = await client.PutAsJsonAsync(url, new { Version = 0, Latitud = -34.1, Longitud = -56.1 }); Assert.Equal(HttpStatusCode.Conflict, repetir.StatusCode);
+        using var repetir = await client.PutAsJsonAsync(url, new { Version = 0, Latitud = -34.1, Longitud = -56.1, Direccion = "No debe guardarse" }); Assert.Equal(HttpStatusCode.Conflict, repetir.StatusCode);
         var direccion = await db.Direcciones.AsNoTracking().SingleAsync(); Assert.Equal(comercio.UsuarioId, direccion.ConfirmadaPorUsuarioId);
+        Assert.Equal("Seleccionada 123", direccion.Descripcion); Assert.Equal(-34.901, direccion.Latitud); Assert.Equal(-56.201, direccion.Longitud); Assert.Equal(1, direccion.Version);
         await client.SetBearerForAccessAsync(data, op.Id);
         using var recepcion = await client.PostAsJsonAsync($"/api/deposito/envios/{envio.Id}/recepcion", new { Version = 0 }); Assert.Equal(HttpStatusCode.NoContent, recepcion.StatusCode);
         await client.SetBearerForAccessAsync(data, comercio.Id);
@@ -60,7 +65,10 @@ public sealed class DestinosEnvioHttpTests(PostgresFixture postgres) : IClassFix
         var runtime = await RlsRestrictedHttpFlowTests.RestrictApiAsync(data);
         using var factory = new IntegrationApiFactory(runtime, settings: RlsRestrictedHttpFlowTests.ApiSettings());
         var geo = new GeocodificadorPrueba();
-        using var host = factory.WithWebHostBuilder(b => b.ConfigureTestServices(s => { s.RemoveAll<IGeocodificador>(); s.AddSingleton<IGeocodificador>(geo); }));
+        using var host = factory.WithWebHostBuilder(b => b.ConfigureTestServices(s => { s.RemoveAll<IGeocodificador>(); s.AddSingleton<IGeocodificador>(geo); s.AddKeyedScoped<NexoRuta.Application.Envios.UseCases.GestionarDestinoEnvioUseCase>(
+            NexoRuta.Infrastructure.Envios.Geocodificacion.GeocodificadorMapboxTemporal.Servicio, (p,_) => new(
+                p.GetRequiredService<NexoRuta.Application.Administracion.Interfaces.IUsuarioActual>(),
+                p.GetRequiredService<NexoRuta.Application.Envios.Repositories.IDestinosEnvioRepository>(),geo)); }));
         using var client = host.CreateClient(); await using var db = data.CreateDbContext();
         var comercio = await db.AccesosUsuario.SingleAsync(x => x.ComercioId != null);
         var operador = await db.AccesosUsuario.SingleAsync(x => x.OperadorId != null);
@@ -141,7 +149,7 @@ public sealed class DestinosEnvioHttpTests(PostgresFixture postgres) : IClassFix
         db.AddRange(persona, direccion, envio); await db.SaveChangesAsync();
         await client.SetBearerForAccessAsync(data, comercio.Id); var url = $"/api/envios/{envio.Id}/destino";
         using var noProveedor = await client.PostAsync(url + "/propuestas", null); Assert.Equal(HttpStatusCode.ServiceUnavailable, noProveedor.StatusCode);
-        foreach (var body in new object[] { new { Version = 0 }, new { Latitud = 0, Longitud = 0 }, new { Version = 0, Latitud = 91, Longitud = 0 }, new { Version = 0, Latitud = 0, Longitud = 0, OperadorId = op.Id } })
+        foreach (var body in new object[] { new { Version = 0 }, new { Latitud = 0, Longitud = 0 }, new { Version = 0, Latitud = 91, Longitud = 0 }, new { Version = 0, Latitud = 0, Longitud = 0, OperadorId = op.Id }, new { Version = 0, Latitud = 0, Longitud = 0, Direccion = " " }, new { Version = 0, Latitud = 0, Longitud = 0, Direccion = new string('x',241) } })
         {
             using var invalida = await client.PutAsJsonAsync(url, body); Assert.Equal(HttpStatusCode.BadRequest, invalida.StatusCode);
         }
@@ -169,7 +177,7 @@ public sealed class DestinosEnvioHttpTests(PostgresFixture postgres) : IClassFix
     {
         public List<string> Consultas { get; } = [];
         public string Atribucion => "Proveedor controlado";
-        public Task<IReadOnlyList<PropuestaDestinoDatos>> BuscarAsync(string direccion, CancellationToken ct)
+        public Task<IReadOnlyList<PropuestaDestinoDatos>> BuscarAsync(string direccion, CancellationToken ct, bool autocompletar = false)
         { Consultas.Add(direccion); return Task.FromResult<IReadOnlyList<PropuestaDestinoDatos>>([new("Primera", -34.9, -56.2), new("Segunda", -34.8, -56.1)]); }
     }
 }

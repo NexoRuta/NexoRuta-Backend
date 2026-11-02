@@ -25,6 +25,32 @@ public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOu
     private const string Header = "referenciaExterna,nombreDestinatario,emailDestinatario,direccion,codigoBulto,pesoGramos,largoCentimetros,anchoCentimetros,altoCentimetros";
 
     [Fact]
+    public async Task ImportRejectsEffectivePrecisionBeforeHashingAndKeepsTrailingZeroIdempotency()
+    {
+        var data = await postgres.CreateDatabaseAsync();
+        using var factory = data.CreateApiFactory(); using var client = factory.CreateHttpClient();
+        await using var db = data.CreateDbContext();
+        var (operatorId, commerceAccessId) = await GetCommerceAccessAsync(db);
+        await client.SetBearerForAccessAsync(data, commerceAccessId);
+        using var bad = await ImportAsync(client, Csv(Row("PRECISION", weight: "1.005")), operatorId);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, bad.StatusCode);
+        var body = await Body(bad);
+        Assert.Contains(body.GetProperty("filas")[0].GetProperty("errores").EnumerateArray(),
+            e => e.GetProperty("campo").GetString() == "pesoGramos" && e.GetProperty("codigo").GetString() == "InvalidPrecision");
+        Assert.Empty(await db.Envios.ToArrayAsync()); Assert.Empty(await db.IdentidadesEnvioImportado.ToArrayAsync());
+        Assert.Empty(await db.OutboxMessages.ToArrayAsync());
+        using var first = await ImportAsync(client, Csv(Row("PRECISION", weight: "1.00", length: "1.000")), operatorId);
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        var identity = await db.IdentidadesEnvioImportado.AsNoTracking().SingleAsync();
+        using var retry = await ImportAsync(client, Csv(Row("PRECISION", weight: "1.000", length: "1.00")), operatorId);
+        Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
+        Assert.Equal(1, Int(await Body(retry), "resumen", "existentes"));
+        var after = await db.IdentidadesEnvioImportado.AsNoTracking().SingleAsync();
+        Assert.Equal(identity.VersionHuella, after.VersionHuella); Assert.Equal(identity.Huella, after.Huella);
+        Assert.Single(await db.Envios.ToArrayAsync());
+    }
+
+    [Fact]
     public async Task ImportLockFunctionOrdersDistinctEffectiveHashKeysGlobally()
     {
         var database = await postgres.CreateDatabaseAsync();
@@ -49,7 +75,7 @@ public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOu
         var (operatorId, commerceAccessId) = await GetCommerceAccessAsync(db);
         await client.SetBearerForAccessAsync(database, commerceAccessId);
         var csv = Csv(
-            Row("PED-1", weight: "1200.555", length: "30.007"),
+            Row("PED-1", weight: "1200.55", length: "30.01"),
             Row("PED-2", address: "\"Calle 1, apto 2\""));
 
         using var first = await ImportAsync(client, csv, operatorId);
@@ -301,7 +327,7 @@ public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOu
         await using var db = database.CreateDbContext();
         var (operatorId, commerceAccessId) = await GetCommerceAccessAsync(db);
         await client.SetBearerForAccessAsync(database, commerceAccessId);
-        var csv = Csv(Row("TERMINAL", weight: "100.125"));
+        var csv = Csv(Row("TERMINAL", weight: "100.12"));
         using var created = await ImportAsync(client, csv, operatorId);
         Assert.Equal(HttpStatusCode.OK, created.StatusCode);
         var createdBody = await Body(created);
@@ -340,7 +366,7 @@ public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOu
         Assert.Equal(1, Int(await Body(inactiveRetry), "resumen", "existentes"));
         using var inactiveNew = await ImportAsync(client, Csv(Row("NEW-INACTIVE")), operatorId);
         Assert.Equal(HttpStatusCode.UnprocessableEntity, inactiveNew.StatusCode);
-        using var inactiveMixed = await ImportAsync(client, Csv(Row("TERMINAL", weight: "100.125"), Row("NEW-INACTIVE-MIXED")), operatorId);
+        using var inactiveMixed = await ImportAsync(client, Csv(Row("TERMINAL", weight: "100.12"), Row("NEW-INACTIVE-MIXED")), operatorId);
         Assert.Equal(HttpStatusCode.UnprocessableEntity, inactiveMixed.StatusCode);
         var inactiveMixedBody = await Body(inactiveMixed);
         Assert.Equal(new[] { "YaExistente", "NoProcesado" }, States(inactiveMixedBody));

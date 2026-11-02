@@ -284,6 +284,11 @@ public sealed class ImportarEnviosUseCase(
             errors.Add(new("OutOfRange", field, "El valor debe estar entre 0.01 y 999999999."));
             return null;
         }
+        if (decimal.Round(number, 2) != number)
+        {
+            errors.Add(new("InvalidPrecision", field, "Ingresá como máximo dos decimales efectivos."));
+            return null;
+        }
         return number;
     }
 
