@@ -671,7 +671,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             using var receivedCandidate = await api.PostAsJsonAsync($"/api/deposito/envios/{planningCandidateId}/recepcion", new { Version = 0 });
             Assert.Equal(HttpStatusCode.NoContent, receivedCandidate.StatusCode);
             var fecha = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow,
-                TimeZoneInfo.FindSystemTimeZoneById("America/Montevideo")).DateTime);
+                TimeZoneInfo.FindSystemTimeZoneById("America/Montevideo")).DateTime).AddDays(-1);
             var fechaSeleccionada = fecha.AddDays(1);
             var fechaDeReservaOriginal = fecha;
             var sourceVehicleId = sourceVehicleJson.RootElement.GetProperty("id").GetGuid();
@@ -1234,14 +1234,14 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             await browser.WaitForAsync("document.body.innerText.includes('No se puede reprogramar ni realizar otra tentativa')");
             Assert.True(await browser.EvaluateBooleanAsync("document.querySelector('textarea[name=MotivoDevolucion][maxlength=\\\"500\\\"]') !== null"));
             Assert.True(await browser.EvaluateBooleanAsync("document.querySelector('input[name=ConfirmarDevolucion][required]') !== null"));
-            var initialCommand = await browser.EvaluateStringAsync("document.querySelector('input[name=ComandoId]')?.value || ''");
+            var initialCommand = await browser.EvaluateStringAsync("document.querySelector('form[action*=IniciarDevolucion] input[name=ComandoId]')?.value || ''");
             Assert.False(string.IsNullOrWhiteSpace(initialCommand));
             await browser.FillReturnAndSetStaleVersionAsync("Control del despachador");
-            await browser.ClickButtonContainingAsync("Iniciar devolución");
+            await browser.ClickButtonContainingAsync("Confirmar decisión");
             await browser.WaitForAsync("document.querySelector('.alert-danger') !== null");
             Assert.Equal("Control del despachador", await browser.EvaluateStringAsync("document.querySelector('textarea[name=MotivoDevolucion]')?.value || ''"));
-            Assert.Equal(initialCommand, await browser.EvaluateStringAsync("document.querySelector('input[name=ComandoId]')?.value || ''"));
-            Assert.NotEqual("0", await browser.EvaluateStringAsync("document.querySelector('input[name=VersionEnvio]')?.value || ''"));
+            Assert.Equal(initialCommand, await browser.EvaluateStringAsync("document.querySelector('form[action*=IniciarDevolucion] input[name=ComandoId]')?.value || ''"));
+            Assert.NotEqual("0", await browser.EvaluateStringAsync("document.querySelector('form[action*=IniciarDevolucion] input[name=VersionEnvio]')?.value || ''"));
 
             await browser.SetViewportAsync(1280, 900, mobile: false);
             await browser.CaptureScreenshotAsync(Path.Combine(tempRoot, "desktop.png"));
@@ -1250,7 +1250,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
                 "Backoffice routes horizontally overflow at 320 CSS pixels.");
             await browser.CaptureScreenshotAsync(Path.Combine(tempRoot, "mobile.png"));
             await browser.VerifyKeyboardFocusAsync();
-            await browser.ClickButtonContainingAsync("Iniciar devolución");
+            await browser.ClickButtonContainingAsync("Confirmar decisión");
             await browser.WaitForAsync("document.querySelector('.nr-routes-alert.is-success')?.innerText.includes('Devolución iniciada') === true");
 
             await using var verify = database.CreateDbContext();
@@ -1613,21 +1613,21 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
         public async Task FillReturnAndSetStaleVersionAsync(string reason)
         {
             var literal = JsonSerializer.Serialize(reason);
-            var result = await EvaluateAsync($"(()=>{{const f=document.querySelector('form[action*=\\\"IniciarDevolucion\\\"]');if(!f)return false;const m=f.querySelector('textarea[name=MotivoDevolucion]');const c=f.querySelector('input[name=ConfirmarDevolucion]');const v=f.querySelector('input[name=VersionEnvio]');if(!m||!c||!v)return false;m.value={literal};m.dispatchEvent(new Event('input',{{bubbles:true}}));c.checked=true;v.value='0';return true;}})()");
+            var result = await EvaluateAsync($"(()=>{{const f=document.querySelector('form[action*=\\\"IniciarDevolucion\\\"]');if(!f)return false;const panel=f.closest('details');if(panel)panel.open=true;const m=f.querySelector('textarea[name=MotivoDevolucion]');const c=f.querySelector('input[name=ConfirmarDevolucion]');const v=f.querySelector('input[name=VersionEnvio]');if(!m||!c||!v)return false;m.value={literal};m.dispatchEvent(new Event('input',{{bubbles:true}}));c.checked=true;v.value='0';return true;}})()");
             Assert.Equal(JsonValueKind.True, result.ValueKind);
         }
 
         public async Task FillLossAndSetStaleVersionAsync(string reason)
         {
             var literal = JsonSerializer.Serialize(reason);
-            var result = await EvaluateAsync($"(()=>{{const f=document.querySelector('form[action*=\\\"ConfirmarExtravio\\\"]');if(!f)return false;const m=f.querySelector('textarea[name=MotivoExtravio]');const c=f.querySelector('input[name=ConfirmarExtravio]');const v=f.querySelector('input[name=VersionEnvio]');if(!m||!c||!v)return false;m.value={literal};m.dispatchEvent(new Event('input',{{bubbles:true}}));c.checked=true;v.value='0';return true;}})()");
+            var result = await EvaluateAsync($"(()=>{{const f=document.querySelector('form[action*=\\\"ConfirmarExtravio\\\"]');if(!f)return false;const panel=f.closest('details');if(panel)panel.open=true;const m=f.querySelector('textarea[name=MotivoExtravio]');const c=f.querySelector('input[name=ConfirmarExtravio]');const v=f.querySelector('input[name=VersionEnvio]');if(!m||!c||!v)return false;m.value={literal};m.dispatchEvent(new Event('input',{{bubbles:true}}));c.checked=true;v.value='0';return true;}})()");
             Assert.Equal(JsonValueKind.True, result.ValueKind);
         }
 
         public async Task FillLossAsync(string reason)
         {
             var literal = JsonSerializer.Serialize(reason);
-            var result = await EvaluateAsync($"(()=>{{const f=document.querySelector('form[action*=\\\"ConfirmarExtravio\\\"]');if(!f)return false;const m=f.querySelector('textarea[name=MotivoExtravio]');const c=f.querySelector('input[name=ConfirmarExtravio]');if(!m||!c)return false;m.value={literal};m.dispatchEvent(new Event('input',{{bubbles:true}}));c.checked=true;return true;}})()");
+            var result = await EvaluateAsync($"(()=>{{const f=document.querySelector('form[action*=\\\"ConfirmarExtravio\\\"]');if(!f)return false;const panel=f.closest('details');if(panel)panel.open=true;const m=f.querySelector('textarea[name=MotivoExtravio]');const c=f.querySelector('input[name=ConfirmarExtravio]');if(!m||!c)return false;m.value={literal};m.dispatchEvent(new Event('input',{{bubbles:true}}));c.checked=true;return true;}})()");
             Assert.Equal(JsonValueKind.True, result.ValueKind);
         }
 
@@ -1732,7 +1732,8 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
         public async Task ClickButtonContainingAsync(string text)
         {
             var literal = JsonSerializer.Serialize(text);
-            await EvaluateAsync($"(()=>{{const b=Array.from(document.querySelectorAll('button')).find(button=>button.innerText.includes({literal}));if(!b)return false;b.click();return true;}})()");
+            var clicked = await EvaluateAsync($"(()=>{{const b=Array.from(document.querySelectorAll('button')).find(button=>button.innerText.includes({literal}));if(!b)return false;b.click();return true;}})()");
+            Assert.Equal(JsonValueKind.True, clicked.ValueKind);
         }
 
         public async Task ClickButtonContainingKeyboardAsync(string text)
