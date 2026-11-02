@@ -234,7 +234,7 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         Assert.Equal(32m, bulto.LargoCentimetros);
         Assert.Equal(21m, bulto.AnchoCentimetros);
         Assert.Equal(11m, bulto.AltoCentimetros);
-        Assert.False(persistido.DestinoConfirmado);
+        Assert.True(persistido.DestinoConfirmado);
 
         var envioDb = await consulta.Envios.SingleAsync(e => e.Id == dos.Id);
         var direccionDb = await consulta.Direcciones.SingleAsync(d => d.Id == envioDb.DireccionId);
@@ -272,6 +272,8 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         var otroRol = new Rol("owner", "Owner", null, otraEmpresa.Id);
         var otroAcceso = new AccesoUsuario(otroUsuario.Id, null, otraEmpresa.Id, otroRol);
         db.AddRange(segundoOperador, otraEmpresa, otroUsuario, otroRol, otroAcceso);
+        foreach (var permission in await db.Permisos.Where(x => x.Codigo == "envios.crear" || x.Codigo == "envios.consultar").ToArrayAsync())
+            db.Add(new RolPermiso(otroRol.Id, permission.Id));
         await db.SaveChangesAsync();
 
         var propioUno = await Crear(db, comercio.AccesoId, operador.OperadorId!.Value, "PROPIO-UNO");

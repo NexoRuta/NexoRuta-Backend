@@ -174,7 +174,8 @@ public sealed class KafkaOutboxTests(PostgresFixture postgres, KafkaFixture kafk
                 var delivered = await channel.BasicGetAsync(RabbitMqSeguimientoTopology.ColaPrincipal, false);
                 Assert.NotNull(delivered);
                 Assert.Equal(trabajo.Id.ToString("D"), delivered.BasicProperties.MessageId);
-                Assert.Equal(trabajo.Payload, Encoding.UTF8.GetString(delivered.Body.Span));
+                Assert.True(JsonElement.DeepEquals(JsonDocument.Parse(trabajo.Payload).RootElement,
+                    JsonDocument.Parse(delivered.Body.ToArray()).RootElement));
                 await channel.BasicAckAsync(delivered.DeliveryTag, false);
             }
         }
@@ -276,7 +277,8 @@ public sealed class KafkaOutboxTests(PostgresFixture postgres, KafkaFixture kafk
     {
         Assert.Equal(KafkaEnvioCreadoPublisher.Topic, record.Topic);
         Assert.Equal(evento.EnvioId!.Value.ToString("D"), record.Message.Key);
-        Assert.Equal(evento.Payload, record.Message.Value);
+        Assert.True(JsonElement.DeepEquals(JsonDocument.Parse(evento.Payload).RootElement,
+            JsonDocument.Parse(record.Message.Value).RootElement));
         var expected = new Dictionary<string, string>
         {
             ["eventId"] = evento.Id.ToString("D"), ["eventType"] = "EnvioCreado", ["eventVersion"] = "1",

@@ -22,6 +22,11 @@ namespace NexoRuta.IntegrationTests.Envios;
 
 public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xunit.Abstractions.ITestOutputHelper output) : IClassFixture<PostgresFixture>
 {
+#if DEBUG
+    private const string BuildConfiguration = "Debug";
+#else
+    private const string BuildConfiguration = "Release";
+#endif
     private const long MaximumFileBytes = 5 * 1024 * 1024;
     private const string Header = "referenciaExterna,nombreDestinatario,emailDestinatario,direccion,codigoBulto,pesoGramos,largoCentimetros,anchoCentimetros,altoCentimetros,zonaId,latitud,longitud,modalidad";
 
@@ -42,7 +47,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             seedSettings["AccesoInicial:UsuarioEmail"] = commerceEmail;
             seedSettings["AccesoInicial:OperadorUsuarioEmail"] = operatorEmail;
             seedSettings["DataProtection:KeysDirectory"] = Path.Combine(tempRoot, "api-keys");
-            using (var seedFactory = new IntegrationApiFactory(database, settings: seedSettings))
+            using (var seedFactory = new IntegrationApiFactory(database, settings: seedSettings, seedShippingServices: true))
             using (seedFactory.CreateHttpClient()) { }
 
             Guid operatorId;
@@ -62,8 +67,8 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             var apiUrl = $"http://127.0.0.1:{apiPort}";
             var commerceUrl = $"http://127.0.0.1:{commercePort}";
             var root = FindWorkspaceRoot();
-            var apiDll = Path.Combine(root, "backend", "src", "NexoRuta.Api", "bin", "Debug", "net10.0", "NexoRuta.Api.dll");
-            var commerceDll = Path.Combine(root, "frontend", "src", "NexoRuta.Commerce", "bin", "Debug", "net10.0", "NexoRuta.Commerce.dll");
+            var apiDll = Path.Combine(root, "backend", "src", "NexoRuta.Api", "bin", BuildConfiguration, "net10.0", "NexoRuta.Api.dll");
+            var commerceDll = Path.Combine(root, "frontend", "src", "NexoRuta.Commerce", "bin", BuildConfiguration, "net10.0", "NexoRuta.Commerce.dll");
             Assert.True(File.Exists(apiDll), "Build the API before the Kestrel verification.");
             Assert.True(File.Exists(commerceDll), "Build Commerce before the browser verification.");
 
@@ -303,7 +308,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             seedSettings["AccesoInicial:UsuarioEmail"] = commerceEmail;
             seedSettings["AccesoInicial:OperadorUsuarioEmail"] = operatorEmail;
             seedSettings["DataProtection:KeysDirectory"] = Path.Combine(tempRoot, "api-keys");
-            using (var bootstrap = new IntegrationApiFactory(database, settings: seedSettings))
+            using (var bootstrap = new IntegrationApiFactory(database, settings: seedSettings, seedShippingServices: true))
             using (bootstrap.CreateHttpClient()) { }
 
             Guid operatorId;
@@ -323,8 +328,8 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             var apiUrl = $"http://127.0.0.1:{apiPort}";
             var backofficeUrl = $"http://127.0.0.1:{backofficePort}";
             var root = FindWorkspaceRoot();
-            var apiDll = Path.Combine(root, "backend", "src", "NexoRuta.Api", "bin", "Debug", "net10.0", "NexoRuta.Api.dll");
-            var backofficeDll = Path.Combine(root, "frontend", "src", "NexoRuta.Backoffice", "bin", "Debug", "net10.0", "NexoRuta.Backoffice.dll");
+            var apiDll = Path.Combine(root, "backend", "src", "NexoRuta.Api", "bin", BuildConfiguration, "net10.0", "NexoRuta.Api.dll");
+            var backofficeDll = Path.Combine(root, "frontend", "src", "NexoRuta.Backoffice", "bin", BuildConfiguration, "net10.0", "NexoRuta.Backoffice.dll");
             Assert.True(File.Exists(apiDll), "Build the API before the isolated browser check.");
             Assert.True(File.Exists(backofficeDll), "Build Backoffice before the browser check.");
 
@@ -374,7 +379,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             using var shipmentJson = JsonDocument.Parse(await shipmentResponse.Content.ReadAsStringAsync());
             var shipmentId = shipmentJson.RootElement.GetProperty("id").GetGuid();
             using var destination = await api.PutAsJsonAsync($"/api/envios/{shipmentId}/destino",
-                new { Version = 0, Latitud = -34.9, Longitud = -56.2 });
+                new { Version = 1, Latitud = -34.9, Longitud = -56.2 });
             Assert.Equal(HttpStatusCode.NoContent, destination.StatusCode);
 
             var operatorToken = await LoginAsync(api, operatorEmail, AuthenticationTestData.Password);
@@ -515,7 +520,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             seedSettings["AccesoInicial:UsuarioEmail"] = commerceEmail;
             seedSettings["AccesoInicial:OperadorUsuarioEmail"] = operatorEmail;
             seedSettings["DataProtection:KeysDirectory"] = Path.Combine(tempRoot, "api-keys");
-            using (var bootstrap = new IntegrationApiFactory(database, settings: seedSettings))
+            using (var bootstrap = new IntegrationApiFactory(database, settings: seedSettings, seedShippingServices: true))
             using (bootstrap.CreateHttpClient()) { }
 
             Guid operatorId;
@@ -546,8 +551,8 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             var apiUrl = $"http://127.0.0.1:{apiPort}";
             var backofficeUrl = $"http://127.0.0.1:{backofficePort}";
             var root = FindWorkspaceRoot();
-            var apiDll = Path.Combine(root, "backend", "src", "NexoRuta.Api", "bin", "Debug", "net10.0", "NexoRuta.Api.dll");
-            var backofficeDll = Path.Combine(root, "frontend", "src", "NexoRuta.Backoffice", "bin", "Debug", "net10.0", "NexoRuta.Backoffice.dll");
+            var apiDll = Path.Combine(root, "backend", "src", "NexoRuta.Api", "bin", BuildConfiguration, "net10.0", "NexoRuta.Api.dll");
+            var backofficeDll = Path.Combine(root, "frontend", "src", "NexoRuta.Backoffice", "bin", BuildConfiguration, "net10.0", "NexoRuta.Backoffice.dll");
             Assert.True(File.Exists(apiDll), "Build the API before the isolated browser check.");
             Assert.True(File.Exists(backofficeDll), "Build Backoffice before the browser check.");
 
@@ -618,10 +623,10 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             using var planningCandidateJson = JsonDocument.Parse(await planningCandidate.Content.ReadAsStringAsync());
             var planningCandidateId = planningCandidateJson.RootElement.GetProperty("id").GetGuid();
             using var destination = await api.PutAsJsonAsync($"/api/envios/{shipmentId}/destino",
-                new { Version = 0, Latitud = -34.9, Longitud = -56.2 });
+                new { Version = 1, Latitud = -34.9, Longitud = -56.2 });
             Assert.Equal(HttpStatusCode.NoContent, destination.StatusCode);
             using var candidateDestination = await api.PutAsJsonAsync($"/api/envios/{planningCandidateId}/destino",
-                new { Version = 0, Latitud = -34.91, Longitud = -56.21 });
+                new { Version = 1, Latitud = -34.91, Longitud = -56.21 });
             Assert.Equal(HttpStatusCode.NoContent, candidateDestination.StatusCode);
 
             var operatorToken = await LoginAsync(api, operatorEmail, AuthenticationTestData.Password);
@@ -1042,7 +1047,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             seedSettings["AccesoInicial:UsuarioEmail"] = commerceEmail;
             seedSettings["AccesoInicial:OperadorUsuarioEmail"] = operatorEmail;
             seedSettings["DataProtection:KeysDirectory"] = Path.Combine(tempRoot, "api-keys");
-            using (var bootstrap = new IntegrationApiFactory(database, settings: seedSettings))
+            using (var bootstrap = new IntegrationApiFactory(database, settings: seedSettings, seedShippingServices: true))
             using (bootstrap.CreateHttpClient()) { }
 
             Guid operatorId;
@@ -1069,8 +1074,8 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             var apiUrl = $"http://127.0.0.1:{apiPort}";
             var backofficeUrl = $"http://127.0.0.1:{backofficePort}";
             var root = FindWorkspaceRoot();
-            var apiDll = Path.Combine(root, "backend", "src", "NexoRuta.Api", "bin", "Debug", "net10.0", "NexoRuta.Api.dll");
-            var backofficeDll = Path.Combine(root, "frontend", "src", "NexoRuta.Backoffice", "bin", "Debug", "net10.0", "NexoRuta.Backoffice.dll");
+            var apiDll = Path.Combine(root, "backend", "src", "NexoRuta.Api", "bin", BuildConfiguration, "net10.0", "NexoRuta.Api.dll");
+            var backofficeDll = Path.Combine(root, "frontend", "src", "NexoRuta.Backoffice", "bin", BuildConfiguration, "net10.0", "NexoRuta.Backoffice.dll");
             Assert.True(File.Exists(apiDll), "Build the API before the isolated browser check.");
             Assert.True(File.Exists(backofficeDll), "Build Backoffice before the isolated browser check.");
 
@@ -1117,7 +1122,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             using var shipmentJson = JsonDocument.Parse(await shipmentResponse.Content.ReadAsStringAsync());
             var shipmentId = shipmentJson.RootElement.GetProperty("id").GetGuid();
             using var destination = await api.PutAsJsonAsync($"/api/envios/{shipmentId}/destino",
-                new { Version = 0, Latitud = -34.9, Longitud = -56.2 });
+                new { Version = 1, Latitud = -34.9, Longitud = -56.2 });
             Assert.Equal(HttpStatusCode.NoContent, destination.StatusCode);
 
             var operatorToken = await LoginAsync(api, operatorEmail, AuthenticationTestData.Password);
@@ -1406,13 +1411,17 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
 
     private static string FindChromium()
     {
-        var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ms-playwright");
-        if (!Directory.Exists(root)) return string.Empty;
-        return Directory.GetDirectories(root, "chromium-*")
-            .Select(path => Path.Combine(path, "chrome-win64", "chrome.exe"))
-            .Where(File.Exists)
-            .OrderByDescending(path => path, StringComparer.Ordinal)
-            .FirstOrDefault() ?? string.Empty;
+        var roots = new[]
+        {
+            Environment.GetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ms-playwright"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "ms-playwright")
+        };
+        return roots.Where(root => !string.IsNullOrWhiteSpace(root) && Directory.Exists(root))
+            .SelectMany(root => Directory.GetDirectories(root!, "chromium-*"))
+            .SelectMany(path => new[] { Path.Combine(path,"chrome-win64","chrome.exe"),
+                Path.Combine(path,"chrome-linux64","chrome"),Path.Combine(path,"chrome-linux","chrome") })
+            .Where(File.Exists).OrderByDescending(path=>path,StringComparer.Ordinal).FirstOrDefault() ?? string.Empty;
     }
 
     private static KestrelProcess StartDotnet(string dll, string workingDirectory, string url,
@@ -1560,8 +1569,25 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
         {
             await EvaluateAsync($"(()=>{{const s=document.querySelector('#envio-operador');s.value={JsonSerializer.Serialize(operatorId.ToString("D"))};s.dispatchEvent(new Event('change',{{bubbles:true}}));return true;}})()");
             await WaitForAsync("document.querySelector('form.nr-creation-form button[type=submit]') && !document.querySelector('form.nr-creation-form button[type=submit]').disabled");
-            await EvaluateAsync("(()=>{const f=document.querySelector('form.nr-creation-form');const labels=Array.from(f.querySelectorAll('label'));const find=t=>labels.find(l=>l.textContent.trim().startsWith(t))?.querySelector('input');const fields=[[find('Nombre'),'Commerce browser individual'],[find('Correo'),'commerce-individual@example.test'],[find('Dirección'),'18 de Julio 123'],[find('Código'),'BROWSER-INDIVIDUAL'],[find('Peso'),'500'],[find('Largo'),'20'],[find('Ancho'),'15'],[find('Alto'),'10']];if(fields.some(([i])=>!i))throw new Error('Individual form fields were not found by their labels.');for(const [i,v] of fields){i.value=v;i.dispatchEvent(new Event('input',{bubbles:true}));i.dispatchEvent(new Event('change',{bubbles:true}));}f.querySelector('button[type=submit]').click();return true;})()");
-            await WaitForAsync("document.querySelector('.alert-success')?.innerText.toLowerCase().includes('guardado') === true");
+            await EvaluateAsync("""
+                (()=>{
+                    const f=document.querySelector('form.nr-creation-form');
+                    const labels=Array.from(f.querySelectorAll('label'));
+                    const find=t=>labels.find(l=>l.textContent.trim().startsWith(t))?.querySelector('input');
+                    const fields=[[find('Nombre'),'Commerce browser individual'],[find('Correo'),'commerce-individual@example.test'],
+                        [find('Dirección'),'18 de Julio 123'],[find('Código'),'BROWSER-INDIVIDUAL'],
+                        [find('Peso'),'500'],[find('Largo'),'20'],[find('Ancho'),'15'],[find('Alto'),'10'],
+                        [find('Latitud'),'-34.901'],[find('Longitud'),'-56.201']];
+                    if(fields.some(([i])=>!i))throw new Error('Individual form fields were not found by their labels.');
+                    for(const [i,v] of fields){i.value=v;i.dispatchEvent(new Event('input',{bubbles:true}));i.dispatchEvent(new Event('change',{bubbles:true}));}
+                    return true;
+                })()
+                """);
+            await WaitForAsync("document.querySelector('#alta-servicio')?.value && !document.querySelector('#alta-servicio').disabled");
+            await EvaluateAsync("document.querySelector('form.nr-creation-form button[type=submit]').click();true");
+            await WaitForAsync("document.querySelector('.nr-price-review') !== null");
+            await EvaluateAsync("document.querySelector('form.nr-creation-form button[type=submit]').click();true");
+            await WaitForAsync("document.querySelector('.nr-admission-success') !== null");
         }
 
         public async Task FillReturnAndSetStaleVersionAsync(string reason)

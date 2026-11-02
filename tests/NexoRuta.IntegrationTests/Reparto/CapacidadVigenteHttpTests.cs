@@ -43,7 +43,7 @@ public sealed class CapacidadVigenteHttpTests(PostgresFixture postgres) : IClass
         foreach (var (schema, fields) in new[]
         {
             ("VehiculoContract", new[] { "pesoMaximoGramos", "volumenMaximoCm3" }),
-            ("CrearEnvioRequest", new[] { "pesoGramos", "largoCentimetros", "anchoCentimetros", "altoCentimetros" })
+            ("BultoDeclaradoRequest", new[] { "pesoGramos", "largoCentimetros", "anchoCentimetros", "altoCentimetros" })
         })
             foreach (var field in fields) Assert.Equal(0.01m, schemas.GetProperty(schema).GetProperty("properties").GetProperty(field).GetProperty("multipleOf").GetDecimal());
     }

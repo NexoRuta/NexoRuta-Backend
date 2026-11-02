@@ -356,7 +356,11 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
         var op2 = await Create("operadores", "operator2@example.test");
         var commerce1 = await Create("comercios", "commerce1@example.test");
         var commerce2 = await Create("comercios", "commerce2@example.test");
-        await using (var reglas = database.CreateDbContext()) await ReglasEnvioTestData.SembrarInicialesAsync(reglas);
+        await using (var reglas = database.CreateDbContext())
+        {
+            await ReglasEnvioTestData.SembrarInicialesAsync(reglas);
+            await ServiciosEnvioTestData.SembrarAsync(reglas);
+        }
         // Only four explicit logins after the platform login, within the existing five/minute limiter.
         await Login(client, "commerce1@example.test");
         var available = await client.GetFromJsonAsync<JsonElement[]>("/api/operadores");
@@ -505,29 +509,34 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
     [Fact]
     public async Task UpgradeFromPreviousSchemaPreservesIdentitiesRolesGrantsAndShipments()
     {
-        var database = await postgres.CreateDatabaseAsync();
+        var database = await postgres.CreateDatabaseAsync("20261016021011_ProtectSystemAdministratorRoles");
         await using var db = database.CreateDbContext();
-        await db.Database.MigrateAsync();
-        var shipment = await SeguimientoTestData.CreateEnvioAsync(db);
-        var role = new Rol("legacy", "Legacy", shipment.OperadorId, null);
-        role.ProtegerComoRolSistema();
-        var access = new AccesoUsuario(shipment.CreadoPorUsuarioId, shipment.OperadorId, null, role);
-        var permission = new Permiso("envios.consultar", "View shipments");
-        db.AddRange(role, permission, new RolPermiso(role.Id, permission.Id));
-        await db.SaveChangesAsync();
-        db.AccesosUsuario.Add(access);
-        await db.SaveChangesAsync();
-        var hash = (await db.Usuarios.SingleAsync()).PasswordHash;
-        await db.Database.MigrateAsync("20261016021011_ProtectSystemAdministratorRoles");
+        var userId=Guid.NewGuid(); var operatorId=Guid.NewGuid(); var commerceId=Guid.NewGuid();
+        var recipientId=Guid.NewGuid(); var addressId=Guid.NewGuid();
+        var shipment=new Envio(operatorId,commerceId,userId,recipientId,addressId);
+        var role=new Rol("legacy","Legacy",operatorId,null); role.ProtegerComoRolSistema();
+        var access=new AccesoUsuario(userId,operatorId,null,role);
+        var permission=new Permiso("envios.consultar","View shipments");
+        const string hash="preserved-legacy-password-hash";
+        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Usuarios\" (\"Id\",\"Email\",\"PasswordHash\") VALUES ({userId},{\"legacy-upgrade@example.test\"},{hash})");
+        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Operadores\" (\"Id\",\"Nombre\") VALUES ({operatorId},'Legacy operator')");
+        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Comercios\" (\"Id\",\"Nombre\") VALUES ({commerceId},'Legacy commerce')");
+        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Roles\" (\"Id\",\"Codigo\",\"Nombre\",\"OperadorId\",\"EsProtegidoSistema\") VALUES ({role.Id},'legacy','Legacy',{operatorId},true)");
+        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Permisos\" (\"Id\",\"Codigo\",\"Nombre\") VALUES ({permission.Id},'envios.consultar','View shipments')");
+        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"RolesPermisos\" (\"RolId\",\"PermisoId\") VALUES ({role.Id},{permission.Id})");
+        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"AccesosUsuario\" (\"Id\",\"UsuarioId\",\"OperadorId\",\"RolId\") VALUES ({access.Id},{userId},{operatorId},{role.Id})");
+        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Destinatarios\" (\"Id\",\"OperadorId\",\"Nombre\") VALUES ({recipientId},{operatorId},'Legacy recipient')");
+        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Direcciones\" (\"Id\",\"OperadorId\",\"Descripcion\") VALUES ({addressId},{operatorId},'Legacy address')");
+        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Envios\" (\"Id\",\"OperadorId\",\"ComercioId\",\"CreadoPorUsuarioId\",\"DestinatarioId\",\"DireccionId\",\"Estado\") VALUES ({shipment.Id},{operatorId},{commerceId},{userId},{recipientId},{addressId},'Admitido')");
         await HistoricRecipientEmail.MigrateAsync(db);
         db.ChangeTracker.Clear();
         Assert.Equal(shipment.Id, await db.Envios.Select(e => e.Id).SingleAsync());
         Assert.Equal(access.Id, (await db.AccesosUsuario.SingleAsync()).Id);
         Assert.Equal(shipment.CreadoPorUsuarioId, (await db.Usuarios.SingleAsync()).Id);
         Assert.Equal(hash, (await db.Usuarios.SingleAsync()).PasswordHash);
-        Assert.Equal(role.Id, (await db.Roles.SingleAsync()).Id);
-        Assert.True((await db.Roles.SingleAsync()).EsProtegidoSistema);
-        Assert.Equal(permission.Id, (await db.RolesPermisos.SingleAsync()).PermisoId);
+        Assert.Equal(role.Id, (await db.Roles.SingleAsync(r => r.Id == role.Id)).Id);
+        Assert.True((await db.Roles.SingleAsync(r => r.Id == role.Id)).EsProtegidoSistema);
+        Assert.Equal(permission.Id, (await db.RolesPermisos.SingleAsync(r => r.RolId == role.Id)).PermisoId);
         Assert.Empty(await db.AccesosPlataforma.ToListAsync());
         Assert.Empty(await db.RolesPlataforma.ToListAsync());
         Assert.True(db.Model.FindEntityType(typeof(AccesoUsuario))!.GetIndexes().Single(x => x.Properties.Select(p => p.Name).SequenceEqual(["UsuarioId"])).IsUnique);

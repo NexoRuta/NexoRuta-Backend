@@ -89,6 +89,17 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
             Assert.False((bool)(await identityTables.ExecuteScalarAsync())!, "Identity's global account store must remain queryable before tenant selection.");
         }
 
+        // A pinned public path is safe only while runtime and PUBLIC cannot create shadow objects.
+        await using (var schema = new NpgsqlCommand("""
+            SELECT NOT EXISTS (
+                SELECT 1 FROM pg_namespace n,
+                LATERAL aclexplode(COALESCE(n.nspacl,acldefault('n',n.nspowner))) a
+                WHERE n.nspname='public' AND a.privilege_type='CREATE' AND a.grantee=0)
+                AND NOT has_schema_privilege('nexoruta_api','public','CREATE')
+                AND NOT has_schema_privilege('nexoruta_worker','public','CREATE')
+                AND NOT has_schema_privilege('nexoruta_bootstrap','public','CREATE')
+            """, connection))
+            Assert.True((bool)(await schema.ExecuteScalarAsync())!);
         await using (var functions = new NpgsqlCommand("""
             SELECT p.proname, p.proconfig, r.rolcanlogin, r.rolsuper, r.rolbypassrls,
                    EXISTS (
@@ -112,14 +123,8 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
                 var config = reader.GetFieldValue<string[]>(1);
                 var searchPath = Assert.Single(config, value => value.StartsWith("search_path=", StringComparison.Ordinal));
                 var normalizedPath = searchPath.Replace(" ", "", StringComparison.Ordinal);
-                if (normalizedPath == "search_path=pg_catalog,public")
-                {
-                    var pinned = string.Join("\\n", new NexoRuta.Infrastructure.Persistence.Migrations.PinGuardFunctionSearchPaths()
-                        .UpOperations.OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.SqlOperation>().Select(o => o.Sql));
-                    Assert.Contains($"ALTER FUNCTION nexoruta_app.{reader.GetString(0)}() SET search_path = pg_catalog, public", pinned);
-                }
-                else Assert.Contains(normalizedPath,
-                    new[] { "search_path=pg_catalog", "search_path=pg_catalog,nexoruta_app" });
+                Assert.Contains(normalizedPath,
+                    new[] { "search_path=pg_catalog", "search_path=pg_catalog,nexoruta_app", "search_path=pg_catalog,public" });
             }
             Assert.True(count >= 15, "Expected the scoped context and security-definer functions to be installed.");
         }
@@ -831,7 +836,7 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
             await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Usuarios\" (\"Id\",\"Email\",\"PasswordHash\") VALUES ({rows.UserA},{"legacy-rls@example.test"},{AuthenticationTestData.Hash("legacy-rls@example.test")})");
             await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Operadores\" (\"Id\",\"Nombre\") VALUES ({rows.OperatorA},'Legacy operator')");
             await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Comercios\" (\"Id\",\"Nombre\") VALUES ({rows.CommerceA},'Legacy commerce')");
-            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Roles\" (\"Id\",\"Codigo\",\"Nombre\",\"TipoOrganizacion\",\"OrganizacionId\",\"ComercioId\") VALUES ({role},'legacy-rls','Legacy role','Comercio',{rows.CommerceA},{rows.CommerceA})");
+            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Roles\" (\"Id\",\"Codigo\",\"Nombre\",\"ComercioId\") VALUES ({role},'legacy-rls','Legacy role',{rows.CommerceA})");
             await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"AccesosUsuario\" (\"Id\",\"UsuarioId\",\"ComercioId\",\"RolId\") VALUES ({rows.AccessA},{rows.UserA},{rows.CommerceA},{role})");
             await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Destinatarios\" (\"Id\",\"OperadorId\",\"Nombre\") VALUES ({rows.RecipientA1},{rows.OperatorA},'Legacy recipient')");
             await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Direcciones\" (\"Id\",\"OperadorId\",\"Descripcion\") VALUES ({rows.AddressA1},{rows.OperatorA},'Legacy address')");

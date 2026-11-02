@@ -214,7 +214,7 @@ public sealed class UsuariosHttpTests(PostgresFixture postgres) : IClassFixture<
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", managerToken);
         var employeeEmail = $"employee-{Guid.NewGuid():N}@example.test";
         var employeeRole = await db.Roles.Where(x => x.OperadorId == ownerAccess.OperadorId &&
-            x.ComercioId == ownerAccess.ComercioId && x.Id != ownerRoleId).OrderBy(x => x.Codigo).FirstAsync();
+            x.ComercioId == ownerAccess.ComercioId && x.Id != ownerRoleId && !x.EsProtegidoSistema).OrderBy(x => x.Codigo).FirstAsync();
         using var created = await client.PostAsJsonAsync("/api/usuarios", new
         { Email = employeeEmail, Password = NewUserPassword, RolId = employeeRole.Id });
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);

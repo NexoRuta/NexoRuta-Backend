@@ -127,11 +127,20 @@ public sealed class BasePlanificacionHttpTests(PostgresFixture postgres) : IClas
     public async Task AdditiveMigrationLeavesHistoricalSheetsWithoutInventedBaseOrDeparture()
     {
         var data=await postgres.CreateDatabaseAsync("20261101185119_EnforceFleetOccupationExclusivity");
-        using var factory=data.CreateApiFactory();using var client=factory.CreateHttpClient();var p=await Preparar(data,client,verificarFlota:false);
+        using var factory=data.CreateApiFactory();using var client=factory.CreateHttpClient();
+        await using(var setup=data.CreateDbContext())
+        {
+            var access=await setup.AccesosUsuario.SingleAsync(a=>a.OperadorId!=null);
+            await client.SetBearerForAccessAsync(data,access.Id);
+            using var profile=await client.PutAsJsonAsync($"/api/repartidores/{access.Id}",new {Nombre="Historical driver",Activo=true});
+            Assert.Equal(HttpStatusCode.OK,profile.StatusCode);
+            using var vehicle=await client.PutAsJsonAsync("/api/reparto/vehiculos",new {Matricula="HIS1234",PesoMaximoGramos=100000m,VolumenMaximoCm3=1000000m,Activo=true});
+            Assert.Equal(HttpStatusCode.OK,vehicle.StatusCode);
+        }
         await using var db=data.CreateDbContext();var v=await db.Vehiculos.SingleAsync();var id=Guid.NewGuid();var day=new DateOnly(2020,1,2);var jornada=Guid.NewGuid();
         await db.Database.ExecuteSqlInterpolatedAsync($"""
             INSERT INTO "HojasRuta" ("Id","OperadorId","RepartidorAccesoId","VehiculoId","VehiculoMatricula","VehiculoPesoMaximoGramos","VehiculoVolumenMaximoCm3","JornadaId","Fecha","ConfiguracionVersion","Version","ReservaRecursosActiva","Estado","UltimaSecuencia")
-            VALUES ({id},{v.OperadorId},{p.AccesoId},{v.Id},{v.Matricula},{v.PesoMaximoGramos},{v.VolumenMaximoCm3},{jornada},{day},1,0,false,'Finalizada',0)
+            VALUES ({id},{v.OperadorId},{(await db.AccesosUsuario.SingleAsync(a=>a.OperadorId!=null)).Id},{v.Id},{v.Matricula},{v.PesoMaximoGramos},{v.VolumenMaximoCm3},{jornada},{day},1,0,false,'Finalizada',0)
             """);
         await db.Database.MigrateAsync();var historical=await db.HojasRuta.SingleAsync();Assert.Equal(id,historical.Id);Assert.Null(historical.PlanTemporal);Assert.Null(historical.SalidaEnUtc);Assert.Empty(await db.BasesOperativas.ToArrayAsync());
         Assert.Empty(await db.OcupacionesRuta.ToArrayAsync());

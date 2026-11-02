@@ -4,6 +4,9 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using NexoRuta.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using NexoRuta.Domain.Administracion;
@@ -88,7 +91,14 @@ public sealed class EnvioHistoryMigrationTests(PostgresFixture postgres, ITestOu
         }
 
         var runtime = await RlsRestrictedHttpFlowTests.RestrictApiAsync(database);
-        using var api = new IntegrationApiFactory(runtime, settings: RlsRestrictedHttpFlowTests.ApiSettings());
+        using var api = new IntegrationApiFactory(runtime, settings: RlsRestrictedHttpFlowTests.ApiSettings(),
+            configureTestServices: services =>
+            {
+                services.RemoveAll<NexoRutaDbContext>();
+                services.AddScoped(_ => new NexoRutaDbContext(new DbContextOptionsBuilder<NexoRutaDbContext>()
+                    .UseNexoRutaPostgres(runtime.ConnectionString)
+                    .ReplaceService<IModelCustomizer, LegacyCutoverModelCustomizer>().Options));
+            });
         using var client = api.CreateHttpClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", await LoginAsync(client, commerceEmail));
         using (var cancel = await client.PostAsJsonAsync($"/api/envios/{canceledShipmentId}/cancelacion",
@@ -131,6 +141,16 @@ public sealed class EnvioHistoryMigrationTests(PostgresFixture postgres, ITestOu
         Assert.Equal(cancellationId, reconstructed.OrigenId);
         Assert.Equal(outboxCount, await verify.OutboxMessages.CountAsync());
         Assert.Equal(1, await verify.EnvioEventos.CountAsync(x => x.CancelacionEnvioId == cancellationId));
+    }
+
+    // Only the isolated pre-cutover fixture lacks this later column; use the same restricted runtime role.
+    public sealed class LegacyCutoverModelCustomizer(ModelCustomizerDependencies dependencies) : ModelCustomizer(dependencies)
+    {
+        public override void Customize(ModelBuilder modelBuilder, DbContext context)
+        {
+            base.Customize(modelBuilder, context);
+            modelBuilder.Entity<Envio>().Ignore(x => x.CreadoEnUtc);
+        }
     }
 
     private static async Task<string> LoginAsync(HttpClient client, string email)

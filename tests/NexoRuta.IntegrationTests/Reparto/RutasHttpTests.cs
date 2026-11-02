@@ -328,6 +328,8 @@ public sealed class RutasHttpTests(PostgresFixture postgres) : IClassFixture<Pos
         secondShipmentSetup.AddRange(destinatario, direccion, segundoEnvio,
             new Bulto(operatorAccess.OperadorId.Value, segundoEnvio.Id, "RUTA-TEST-2", 1000, 10, 10, 10));
         await secondShipmentSetup.SaveChangesAsync();
+        await ServiciosEnvioTestData.AdjuntarCargoAsync(secondShipmentSetup, segundoEnvio,
+            await secondShipmentSetup.Bultos.Where(b => b.EnvioId == segundoEnvio.Id).ToArrayAsync());
         await client.SetBearerForAccessAsync(data, comercio.Id);
         using var destinoSegundo = await client.PutAsJsonAsync($"/api/envios/{segundoEnvio.Id}/destino",
             new { Version = 0, Latitud = -34.9, Longitud = -56.2 });
