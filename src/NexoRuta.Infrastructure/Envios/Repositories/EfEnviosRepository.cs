@@ -69,12 +69,12 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
         Envio envio,
         Destinatario destinatario,
         Direccion direccion,
-        Bulto bulto,
+        IReadOnlyList<Bulto> bultos,
         CancellationToken cancellationToken = default)
     {
         await using var transaction = await db.BeginOrJoinAsync(cancellationToken);
         await VerificarOrganizacionesParaAltaAsync(envio.ComercioId, envio.OperadorId, cancellationToken);
-        await CrearEnBaseAsync(envio, destinatario, direccion, bulto, null, cancellationToken);
+        await CrearEnBaseAsync(envio, destinatario, direccion, bultos, null, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
@@ -94,7 +94,7 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
         await VerificarOrganizacionesParaAltaAsync(commerceId, operatorId, cancellationToken);
         foreach (var item in envios)
         {
-            await CrearEnBaseAsync(item.Envio, item.Destinatario, item.Direccion, item.Bulto, item, cancellationToken);
+            await CrearEnBaseAsync(item.Envio, item.Destinatario, item.Direccion, item.Bultos, item, cancellationToken);
             // The RLS INSERT policy scopes each outbox pair to the currently selected shipment.
             await db.SaveChangesAsync(cancellationToken);
         }
@@ -118,14 +118,15 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
         Envio envio,
         Destinatario destinatario,
         Direccion direccion,
-        Bulto bulto,
+        IReadOnlyList<Bulto> bultos,
         EnvioImportadoParaPersistir? identidad,
         CancellationToken cancellationToken)
     {
         if (destinatario.OperadorId != envio.OperadorId || direccion.OperadorId != envio.OperadorId ||
-            bulto.OperadorId != envio.OperadorId || bulto.EnvioId != envio.Id)
+            bultos.Count == 0 || bultos.Any(b => b.OperadorId != envio.OperadorId || b.EnvioId != envio.Id))
             throw new ArgumentException("Shipment aggregate tenant keys must refer to the same shipment and operator.");
 
+        var bulto = bultos[0];
         await db.SetShipmentHistoryContextAsync(
             identidad is null ? "AltaIndividual" : "Importacion",
             envio.Id,
@@ -136,10 +137,10 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
         {
             createdId = await db.Database.SqlQueryRaw<Guid>(
                 "SELECT " + RlsSqlFunctionContract.CreateShipment +
-                "({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11}, {12}) AS \"Value\"",
-                envio.Id, destinatario.Id, direccion.Id, bulto.Id,
-                destinatario.Nombre, destinatario.Email, direccion.Descripcion, bulto.Codigo,
-                bulto.PesoGramos, bulto.LargoCentimetros, bulto.AnchoCentimetros, bulto.AltoCentimetros, envio.VersionReglasId)
+                "({0}, {1}, {2}, {3}, {4}, {5}, {6}::jsonb, {7}) AS \"Value\"",
+                envio.Id, destinatario.Id, direccion.Id,
+                destinatario.Nombre, destinatario.Email, direccion.Descripcion,
+                JsonSerializer.Serialize(bultos), envio.VersionReglasId)
                 .SingleAsync(cancellationToken);
         }
         catch (PostgresException error) when (error.SqlState == "NXR01")

@@ -15,6 +15,7 @@ using NexoRuta.Domain.ReglasOperativas;
 using NexoRuta.IntegrationTests.Fixtures;
 using NexoRuta.Infrastructure.Administracion;
 using NexoRuta.Infrastructure.Outbox;
+using NexoRuta.IntegrationTests.Seguridad;
 using Npgsql;
 using Xunit.Abstractions;
 
@@ -23,6 +24,66 @@ namespace NexoRuta.IntegrationTests.Envios;
 public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOutputHelper output) : IClassFixture<PostgresFixture>
 {
     private const string Header = "referenciaExterna,nombreDestinatario,emailDestinatario,direccion,codigoBulto,pesoGramos,largoCentimetros,anchoCentimetros,altoCentimetros";
+
+    [Fact]
+    public async Task MultiParcelCsvPersistsEveryParcelAndReorderedRetryDoesNotDuplicate()
+    {
+        var database = await postgres.CreateDatabaseAsync();
+        using var seed = database.CreateApiFactory(); using (seed.CreateHttpClient()) { }
+        var runtime = await RlsRestrictedHttpFlowTests.RestrictApiAsync(database);
+        using var factory = new IntegrationApiFactory(runtime, settings: RlsRestrictedHttpFlowTests.ApiSettings());
+        using var client = factory.CreateHttpClient();
+        await using var db = database.CreateDbContext();
+        var (operatorId, accessId) = await GetCommerceAccessAsync(db);
+        await client.SetBearerForAccessAsync(database, accessId);
+        var first = Row("MULTI");
+        var second = Row("MULTI", weight: "1250.55").Replace("BOX-MULTI", "BOX-SECOND");
+        using var response = await ImportAsync(client, Csv(first, second), operatorId);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var shipment = Assert.Single(await db.Envios.ToArrayAsync());
+        var parcels = await db.Bultos.Where(b => b.EnvioId == shipment.Id).OrderBy(b => b.Codigo).ToArrayAsync();
+        Assert.Equal(2, parcels.Length);
+        Assert.Equal(new[] { 500m, 1250.55m }, parcels.Select(b => b.PesoGramos));
+        Assert.Equal(2, await db.OutboxMessages.CountAsync());
+        using var retry = await ImportAsync(client, Csv(second, first, first), operatorId);
+        Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
+        Assert.Single(await db.Envios.ToArrayAsync());
+        Assert.Equal(2, await db.Bultos.CountAsync());
+        Assert.Equal(2, await db.OutboxMessages.CountAsync());
+        using var list = await client.GetAsync("/api/envios");
+        Assert.Equal(HttpStatusCode.OK, list.StatusCode);
+        var listed = await Body(list);
+        Assert.Equal(2, listed[0].GetProperty("bultos").GetArrayLength());
+    }
+
+    [Fact]
+    public async Task MultiParcelIndividualHttpPersistsAllAndRejectsInvalidSecondParcelAtomically()
+    {
+        var database = await postgres.CreateDatabaseAsync();
+        using var seed = database.CreateApiFactory(); using (seed.CreateHttpClient()) { }
+        var runtime = await RlsRestrictedHttpFlowTests.RestrictApiAsync(database);
+        using var factory = new IntegrationApiFactory(runtime, settings: RlsRestrictedHttpFlowTests.ApiSettings());
+        using var client = factory.CreateHttpClient();
+        await using var db = database.CreateDbContext();
+        var (operatorId, accessId) = await GetCommerceAccessAsync(db);
+        await client.SetBearerForAccessAsync(database, accessId);
+        object Request(decimal weight) => new { OperadorId = operatorId, DestinatarioNombre = "Ada",
+            DestinatarioEmail = "ada@example.test", Direccion = "Dirección sintética",
+            Bultos = new[] {
+                new { Codigo = "HTTP-ONE", PesoGramos = 500m, LargoCentimetros = 20m, AnchoCentimetros = 10m, AltoCentimetros = 5m },
+                new { Codigo = "HTTP-TWO", PesoGramos = weight, LargoCentimetros = 30m, AnchoCentimetros = 20m, AltoCentimetros = 10m } } };
+        using var bad = await client.PostAsJsonAsync("/api/envios", Request(1.005m));
+        Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
+        Assert.Empty(await db.Envios.ToArrayAsync());
+        Assert.Empty(await db.Bultos.ToArrayAsync());
+        Assert.Empty(await db.OutboxMessages.ToArrayAsync());
+        using var response = await client.PostAsJsonAsync("/api/envios", Request(1250.55m));
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.Equal(2, (await Body(response)).GetProperty("bultos").GetArrayLength());
+        Assert.Single(await db.Envios.ToArrayAsync());
+        Assert.Equal(2, await db.Bultos.CountAsync());
+        Assert.Equal(2, await db.OutboxMessages.CountAsync());
+    }
 
     [Fact]
     public async Task ImportRejectsEffectivePrecisionBeforeHashingAndKeepsTrailingZeroIdempotency()

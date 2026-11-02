@@ -261,8 +261,7 @@ public sealed class JwtRbacHttpTests(PostgresFixture postgres) : IClassFixture<P
         {
             using var request = Request(token, HttpMethod.Post);
             request.Content = JsonContent.Create(new { OperadorId = operatorId, DestinatarioNombre = "Recipient", DestinatarioEmail = "destinatario@example.test",
-                Direccion = "Address 123", CodigoBulto = Guid.NewGuid().ToString("N"), PesoGramos = 100,
-                LargoCentimetros = 10, AnchoCentimetros = 10, AltoCentimetros = 10 });
+                Direccion = "Address 123", Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = Guid.NewGuid().ToString("N"), PesoGramos = 100, LargoCentimetros = 10, AnchoCentimetros = 10, AltoCentimetros = 10  } }});
             using var response = await client.SendAsync(request);
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
             return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
@@ -280,8 +279,7 @@ public sealed class JwtRbacHttpTests(PostgresFixture postgres) : IClassFixture<P
         }
         using var forbiddenRequest = Request(operatorJwt, HttpMethod.Post);
         forbiddenRequest.Content = JsonContent.Create(new { OperadorId = operatorAccess.OperadorId,
-            DestinatarioNombre = "Recipient", DestinatarioEmail = "destinatario@example.test", Direccion = "Address 123", CodigoBulto = "DENIED",
-            PesoGramos = 100, LargoCentimetros = 10, AnchoCentimetros = 10, AltoCentimetros = 10 });
+            DestinatarioNombre = "Recipient", DestinatarioEmail = "destinatario@example.test", Direccion = "Address 123", Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "DENIED", PesoGramos = 100, LargoCentimetros = 10, AnchoCentimetros = 10, AltoCentimetros = 10  } }});
         using var forbidden = await client.SendAsync(forbiddenRequest);
         Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
         Assert.Equal(3, await db.Envios.CountAsync());

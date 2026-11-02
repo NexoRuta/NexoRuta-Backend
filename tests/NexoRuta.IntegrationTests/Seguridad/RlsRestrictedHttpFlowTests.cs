@@ -56,11 +56,7 @@ public sealed class RlsRestrictedHttpFlowTests(PostgresFixture postgres) : IClas
             OperadorId = operatorId,
             DestinatarioNombre = "Ada Lovelace", DestinatarioEmail = "destinatario@example.test",
             Direccion = "18 de Julio 123",
-            CodigoBulto = "RLS-1",
-            PesoGramos = 500m,
-            LargoCentimetros = 20m,
-            AnchoCentimetros = 10m,
-            AltoCentimetros = 5m
+            Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "RLS-1", PesoGramos = 500m, LargoCentimetros = 20m, AnchoCentimetros = 10m, AltoCentimetros = 5m } }
         });
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         var createdBody = await created.Content.ReadFromJsonAsync<JsonElement>();
@@ -71,11 +67,7 @@ public sealed class RlsRestrictedHttpFlowTests(PostgresFixture postgres) : IClas
             OperadorId = operatorId,
             DestinatarioNombre = "Grace Hopper", DestinatarioEmail = "grace@example.test",
             Direccion = "18 de Julio 456",
-            CodigoBulto = "RLS-2",
-            PesoGramos = 700m,
-            LargoCentimetros = 25m,
-            AnchoCentimetros = 12m,
-            AltoCentimetros = 6m
+            Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "RLS-2", PesoGramos = 700m, LargoCentimetros = 25m, AnchoCentimetros = 12m, AltoCentimetros = 6m } }
         });
         Assert.Equal(HttpStatusCode.Created, importedCreated.StatusCode);
         var importedShipmentId = (await importedCreated.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
@@ -277,11 +269,7 @@ public sealed class RlsRestrictedHttpFlowTests(PostgresFixture postgres) : IClas
             DestinatarioNombre = "History recipient",
             DestinatarioEmail = "history-recipient@example.test",
             Direccion = "18 de Julio 123",
-            CodigoBulto = code,
-            PesoGramos = 500m,
-            LargoCentimetros = 20m,
-            AnchoCentimetros = 10m,
-            AltoCentimetros = 5m
+            Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = code, PesoGramos = 500m, LargoCentimetros = 20m, AnchoCentimetros = 10m, AltoCentimetros = 5m } }
         });
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
@@ -319,11 +307,7 @@ public sealed class RlsRestrictedHttpFlowTests(PostgresFixture postgres) : IClas
             OperadorId = operatorId,
             DestinatarioNombre = "Ada Lovelace", DestinatarioEmail = "destinatario@example.test",
             Direccion = "18 de Julio 123",
-            CodigoBulto = "RLS-DENY-1",
-            PesoGramos = 500m,
-            LargoCentimetros = 20m,
-            AnchoCentimetros = 10m,
-            AltoCentimetros = 5m
+            Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "RLS-DENY-1", PesoGramos = 500m, LargoCentimetros = 20m, AnchoCentimetros = 10m, AltoCentimetros = 5m } }
         });
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);

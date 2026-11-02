@@ -17,8 +17,14 @@ public sealed class CrearEnvioRequest
     [Required, StringLength(240)]
     public string Direccion { get; set; } = "";
 
+    [Required, MinLength(1)]
+    public List<BultoDeclaradoRequest> Bultos { get; set; } = [];
+}
+
+public sealed class BultoDeclaradoRequest
+{
     [Required, StringLength(80)]
-    public string CodigoBulto { get; set; } = "";
+    public string Codigo { get; set; } = "";
 
     [Required, Range(typeof(decimal), "0.01", "999999999", ParseLimitsInInvariantCulture = true)]
     [DosDecimales] public decimal PesoGramos { get; set; }

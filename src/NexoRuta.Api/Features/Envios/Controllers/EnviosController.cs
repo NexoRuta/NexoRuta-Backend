@@ -44,11 +44,8 @@ public sealed class EnviosController(
                     DestinatarioNombre: request.DestinatarioNombre,
                     DestinatarioEmail: request.DestinatarioEmail,
                     Direccion: request.Direccion,
-                    CodigoBulto: request.CodigoBulto,
-                    PesoGramos: request.PesoGramos,
-                    LargoCentimetros: request.LargoCentimetros,
-                    AnchoCentimetros: request.AnchoCentimetros,
-                    AltoCentimetros: request.AltoCentimetros),
+                    Bultos: request.Bultos.Select(b => new BultoDeclarado(b.Codigo, b.PesoGramos,
+                        b.LargoCentimetros, b.AnchoCentimetros, b.AltoCentimetros)).ToArray()),
                 cancellationToken);
 
             return Created("/api/envios", EnvioCreado.Desde(created));

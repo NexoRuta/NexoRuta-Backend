@@ -20,11 +20,14 @@ public static class HuellaSolicitudEnvio
         Escribir(solicitud.DestinatarioNombre);
         Escribir(solicitud.DestinatarioEmail);
         Escribir(solicitud.Direccion);
-        Escribir(solicitud.CodigoBulto);
-        Escribir(solicitud.PesoGramos.ToString("G29", CultureInfo.InvariantCulture));
-        Escribir(solicitud.LargoCentimetros.ToString("G29", CultureInfo.InvariantCulture));
-        Escribir(solicitud.AnchoCentimetros.ToString("G29", CultureInfo.InvariantCulture));
-        Escribir(solicitud.AltoCentimetros.ToString("G29", CultureInfo.InvariantCulture));
+        foreach (var bulto in solicitud.Bultos.OrderBy(b => b.Codigo, StringComparer.Ordinal))
+        {
+            Escribir(bulto.Codigo);
+            Escribir(bulto.PesoGramos.ToString("G29", CultureInfo.InvariantCulture));
+            Escribir(bulto.LargoCentimetros.ToString("G29", CultureInfo.InvariantCulture));
+            Escribir(bulto.AnchoCentimetros.ToString("G29", CultureInfo.InvariantCulture));
+            Escribir(bulto.AltoCentimetros.ToString("G29", CultureInfo.InvariantCulture));
+        }
         return SHA256.HashData(canonical.GetBuffer().AsSpan(0, checked((int)canonical.Length)));
 
         void Escribir(string value)

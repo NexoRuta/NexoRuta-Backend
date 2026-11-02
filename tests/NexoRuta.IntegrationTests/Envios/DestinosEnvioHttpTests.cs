@@ -33,7 +33,7 @@ public sealed class DestinosEnvioHttpTests(PostgresFixture postgres) : IClassFix
         await client.SetBearerForAccessAsync(data, comercio.Id);
         using var alta = await client.PostAsJsonAsync("/api/envios", new { OperadorId = op.OperadorId,
             DestinatarioNombre = "Persona", DestinatarioEmail = "persona@example.test", Direccion = "Dirección de prueba 123",
-            CodigoBulto = "DESTINO-1", PesoGramos = 100, LargoCentimetros = 10, AnchoCentimetros = 10, AltoCentimetros = 10 });
+            Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "DESTINO-1", PesoGramos = 100, LargoCentimetros = 10, AnchoCentimetros = 10, AltoCentimetros = 10  } }});
         Assert.Equal(HttpStatusCode.Created, alta.StatusCode);
         var envio = await db.Envios.SingleAsync(); var url = $"/api/envios/{envio.Id}/destino";
         var actual = await client.GetFromJsonAsync<DestinoEnvioDatos>(url);
@@ -75,7 +75,7 @@ public sealed class DestinosEnvioHttpTests(PostgresFixture postgres) : IClassFix
         await client.SetBearerForAccessAsync(data, comercio.Id);
         using var alta = await client.PostAsJsonAsync("/api/envios", new { OperadorId = operador.OperadorId,
             DestinatarioNombre = "Persona", DestinatarioEmail = "persona@example.test", Direccion = "Av. de prueba 123",
-            CodigoBulto = "DESTINO-EN-DEPOSITO", PesoGramos = 100, LargoCentimetros = 10, AnchoCentimetros = 10, AltoCentimetros = 10 });
+            Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "DESTINO-EN-DEPOSITO", PesoGramos = 100, LargoCentimetros = 10, AnchoCentimetros = 10, AltoCentimetros = 10  } }});
         Assert.Equal(HttpStatusCode.Created, alta.StatusCode);
         var envio = await db.Envios.SingleAsync();
         var url = $"/api/envios/{envio.Id}/destino";

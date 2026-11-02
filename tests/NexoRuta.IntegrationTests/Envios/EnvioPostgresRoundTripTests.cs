@@ -77,7 +77,7 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         var address = new Direccion(operatorId, "Test address");
         var shipment = new Envio(operatorId, commerceId, userId, recipient.Id, address.Id, operatorId);
         var parcel = new Bulto(operatorId, shipment.Id, "RACE-1", 100m, 10m, 10m, 10m);
-        var save = new EfEnviosRepository(shipmentDb).GuardarAsync(shipment, recipient, address, parcel);
+        var save = new EfEnviosRepository(shipmentDb).GuardarAsync(shipment, recipient, address, [parcel]);
         await lockObserver.LockStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.False(save.IsCompleted);
 
@@ -646,7 +646,7 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         await using var transaction = await db.Database.BeginTransactionAsync();
         await db.ApplyAsync(RlsActorContext.From(context));
         var error = await Assert.ThrowsAsync<ArgumentException>(() =>
-            new EfEnviosRepository(db).GuardarAsync(envio, destinatario, direccion, bulto));
+            new EfEnviosRepository(db).GuardarAsync(envio, destinatario, direccion, [bulto]));
         Assert.Contains("tenant keys", error.Message, StringComparison.OrdinalIgnoreCase);
 
         await using var consulta = new NexoRutaDbContext(options);
@@ -724,11 +724,7 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
                 DestinatarioNombre: "Destinatario de prueba",
                 DestinatarioEmail: "destinatario@example.test",
                 Direccion: "Av. Rivera 123",
-                CodigoBulto: codigo,
-                PesoGramos: 1750m,
-                LargoCentimetros: 32m,
-                AnchoCentimetros: 21m,
-                AltoCentimetros: 11m));
+                Bultos: [new BultoDeclarado(codigo, 1750m, 32m, 21m, 11m)]));
         await transaction.CommitAsync();
         return created;
     }

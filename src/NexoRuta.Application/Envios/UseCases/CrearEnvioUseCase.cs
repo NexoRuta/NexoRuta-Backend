@@ -19,7 +19,7 @@ public sealed class CrearEnvioUseCase(IEnviosRepository repository, IUsuarioActu
     {
         var admission = await ObtenerAdmisionAsync(command.OperadorId, cancellationToken);
         var prepared = CrearAgregado(admission, command);
-        await repository.GuardarAsync(prepared.Envio, prepared.Destinatario, prepared.Direccion, prepared.Bulto, cancellationToken);
+        await repository.GuardarAsync(prepared.Envio, prepared.Destinatario, prepared.Direccion, prepared.Bultos, cancellationToken);
         return Resultado(prepared);
     }
 
@@ -41,7 +41,7 @@ public sealed class CrearEnvioUseCase(IEnviosRepository repository, IUsuarioActu
         }).ToArray();
 
         await repository.GuardarImportadosAsync(prepared.Select(x => new EnvioImportadoParaPersistir(
-            x.Aggregate.Envio, x.Aggregate.Destinatario, x.Aggregate.Direccion, x.Aggregate.Bulto,
+            x.Aggregate.Envio, x.Aggregate.Destinatario, x.Aggregate.Direccion, x.Aggregate.Bultos,
             x.Solicitud.ReferenciaExterna, x.Solicitud.VersionHuella, x.Solicitud.Huella)).ToArray(), cancellationToken);
         return prepared.Select(x => Resultado(x.Aggregate)).ToArray();
     }
@@ -70,15 +70,13 @@ public sealed class CrearEnvioUseCase(IEnviosRepository repository, IUsuarioActu
             destinatarioId: destinatario.Id,
             direccionId: direccion.Id,
             versionReglasId: admission.VersionReglas);
-        var bulto = new Bulto(
-            operadorId: admission.Operador.OperadorId,
-            envioId: envio.Id,
-            codigo: command.CodigoBulto,
-            pesoGramos: command.PesoGramos,
-            largoCentimetros: command.LargoCentimetros,
-            anchoCentimetros: command.AnchoCentimetros,
-            altoCentimetros: command.AltoCentimetros);
-        return new PreparedShipment(envio, destinatario, direccion, bulto, admission);
+        if (command.Bultos is null || command.Bultos.Count == 0 || command.Bultos.Any(b => b is null))
+            throw new ArgumentException("El envío requiere al menos un bulto.");
+        var bultos = command.Bultos.Select(b => new Bulto(admission.Operador.OperadorId, envio.Id,
+            b.Codigo, b.PesoGramos, b.LargoCentimetros, b.AnchoCentimetros, b.AltoCentimetros)).ToArray();
+        if (bultos.Select(b => b.Codigo).Distinct(StringComparer.Ordinal).Count() != bultos.Length)
+            throw new ArgumentException("Los códigos de bulto no pueden repetirse dentro del envío.");
+        return new PreparedShipment(envio, destinatario, direccion, bultos, admission);
     }
 
     private static EnvioCreado Resultado(PreparedShipment prepared)
@@ -91,15 +89,9 @@ public sealed class CrearEnvioUseCase(IEnviosRepository repository, IUsuarioActu
                 UsuarioEmail: prepared.Admission.Contexto.UsuarioEmail,
                 OperadorNombre: prepared.Admission.Operador.Nombre,
                 ComercioNombre: prepared.Admission.Comercio.Nombre),
-            Bulto: new BultoDetalle(
-                Codigo: prepared.Bulto.Codigo,
-                PesoGramos: prepared.Bulto.PesoGramos,
-                LargoCentimetros: prepared.Bulto.LargoCentimetros,
-                AnchoCentimetros: prepared.Bulto.AnchoCentimetros,
-                AltoCentimetros: prepared.Bulto.AltoCentimetros)
-            {
-                Custodia = prepared.Bulto.Custodia.ToString()
-            },
+            Bultos: prepared.Bultos.Select(b => new BultoDetalle(b.Codigo, b.PesoGramos,
+                b.LargoCentimetros, b.AnchoCentimetros, b.AltoCentimetros)
+                { Custodia = b.Custodia.ToString() }).ToArray(),
             CreadoEnUtc: prepared.Envio.CreadoEnUtc);
 
     private sealed record Admission(
@@ -112,6 +104,6 @@ public sealed class CrearEnvioUseCase(IEnviosRepository repository, IUsuarioActu
         Envio Envio,
         Destinatario Destinatario,
         Direccion Direccion,
-        Bulto Bulto,
+        IReadOnlyList<Bulto> Bultos,
         Admission Admission);
 }

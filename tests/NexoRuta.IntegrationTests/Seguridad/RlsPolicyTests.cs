@@ -523,27 +523,23 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
         await SetContextAsync(connection, transaction, "actor_kind", "comercio");
         await SetContextAsync(connection, transaction, "org_id", rows.CommerceA.ToString("D"));
         await SetContextAsync(connection, transaction, "user_id", rows.UserA.ToString("D"));
+        await SetContextAsync(connection, transaction, "access_id", rows.AccessA.ToString("D"));
         await SetContextAsync(connection, transaction, "selected_operator_id", rows.OperatorB.ToString("D"));
         await SetContextAsync(connection, transaction, "shipment_id", shipmentId.ToString("D"));
 
         await using (var create = new NpgsqlCommand("""
             SELECT nexoruta_app.create_shipment(
-                @shipment, @recipient, @address_id, @parcel, @recipient_name, @recipient_email, @address, @code,
-                @weight, @length, @width, @height, @rules_version)
+                @shipment, @recipient, @address_id, @recipient_name, @recipient_email, @address, @parcels::jsonb, @rules_version)
             """, connection, transaction))
         {
             create.Parameters.AddWithValue("shipment", shipmentId);
             create.Parameters.AddWithValue("recipient", recipientId);
             create.Parameters.AddWithValue("address_id", addressId);
-            create.Parameters.AddWithValue("parcel", parcelId);
             create.Parameters.AddWithValue("recipient_name", "New recipient");
             create.Parameters.AddWithValue("recipient_email", "destinatario@example.test");
             create.Parameters.AddWithValue("address", "New address");
-            create.Parameters.AddWithValue("code", "NEW-1");
-            create.Parameters.AddWithValue("weight", 100m);
-            create.Parameters.AddWithValue("length", 10m);
-            create.Parameters.AddWithValue("width", 10m);
-            create.Parameters.AddWithValue("height", 10m);
+            create.Parameters.AddWithValue("parcels", System.Text.Json.JsonSerializer.Serialize(new[] {
+                new { Id = parcelId, Codigo = "NEW-1", PesoGramos = 100m, LargoCentimetros = 10m, AnchoCentimetros = 10m, AltoCentimetros = 10m } }));
             create.Parameters.AddWithValue("rules_version", rows.OperatorB);
             Assert.Equal(shipmentId, (Guid)(await create.ExecuteScalarAsync())!);
         }

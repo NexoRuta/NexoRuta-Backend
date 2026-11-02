@@ -365,8 +365,7 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
         {
             using var response = await client.PostAsJsonAsync("/api/envios", new
             {
-                OperadorId = op, DestinatarioNombre = "Recipient", DestinatarioEmail = "destinatario@example.test", Direccion = "Delivery address", CodigoBulto = "BOX",
-                PesoGramos = 100, LargoCentimetros = 10, AnchoCentimetros = 10, AltoCentimetros = 10
+                OperadorId = op, DestinatarioNombre = "Recipient", DestinatarioEmail = "destinatario@example.test", Direccion = "Delivery address", Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "BOX", PesoGramos = 100, LargoCentimetros = 10, AnchoCentimetros = 10, AltoCentimetros = 10 } }
             });
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         }

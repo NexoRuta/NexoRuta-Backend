@@ -29,11 +29,10 @@ public sealed class CrearEnvioRequestTests
             var request = new CrearEnvioRequest
             {
                 OperadorId = Guid.CreateVersion7(), DestinatarioNombre = "Ana", DestinatarioEmail = "destinatario@example.test",
-                Direccion = "Rivera 123", CodigoBulto = "B-001",
-                PesoGramos = number, LargoCentimetros = number, AnchoCentimetros = number, AltoCentimetros = number
+                Direccion = "Rivera 123", Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "B-001", PesoGramos = number, LargoCentimetros = number, AnchoCentimetros = number, AltoCentimetros = number } }
             };
             var errors = new List<ValidationResult>();
-            Assert.Equal(expected, Validator.TryValidateObject(request, new ValidationContext(request), errors, true));
+            Assert.Equal(expected, Validator.TryValidateObject(request.Bultos[0], new ValidationContext(request.Bultos[0]), errors, true));
             Assert.Equal(expected ? 0 : 4, errors.SelectMany(e => e.MemberNames).Distinct().Count());
         }
         finally

@@ -31,6 +31,24 @@ public sealed class ImportarEnviosUseCase(
         var context = await usuarioActual.ObtenerAsync(cancellationToken);
         var commerce = context.RequerirComercio();
         var rows = records.Select(record => Validar(record, commerce.Id, operadorId)).ToArray();
+        // A CSV row declares one parcel. Rows sharing a reference and recipient form
+        // one shipment; exact repeated rows remain idempotent duplicates.
+        foreach (var group in rows.Where(r => r.Candidate is not null).GroupBy(r => r.Reference, StringComparer.Ordinal))
+        {
+            var declarations = group.Select(r => r.Candidate!.Datos).ToArray();
+            var first = declarations[0];
+            if (declarations.Any(d => d.DestinatarioNombre != first.DestinatarioNombre
+                || d.DestinatarioEmail != first.DestinatarioEmail || d.Direccion != first.Direccion)) continue;
+            var parcels = declarations.SelectMany(d => d.Bultos).Distinct().OrderBy(b => b.Codigo, StringComparer.Ordinal).ToArray();
+            if (parcels.Select(b => b.Codigo).Distinct(StringComparer.Ordinal).Count() != parcels.Length) continue;
+            var combined = first with { Bultos = parcels };
+            var hash = HuellaSolicitudEnvio.Calcular(commerce.Id, operadorId, combined);
+            foreach (var row in group)
+            {
+                var index = Array.IndexOf(rows, row);
+                rows[index] = row with { Candidate = row.Candidate! with { Datos = combined, Huella = hash } };
+            }
+        }
         var output = new Dictionary<int, FilaImportacionEnvio>();
         foreach (var row in rows.Where(x => x.Errors.Count != 0))
             output[row.Record] = new(row.Record, row.Reference, EstadoFilaImportacionEnvio.Invalido, null, null, row.Errors);
@@ -213,8 +231,8 @@ public sealed class ImportarEnviosUseCase(
             || weight is null || length is null || width is null || height is null)
             return new(record.Record, reference, null, errors);
 
-        var command = new CrearEnvioCommand(operatorId, name, email, address, parcelCode,
-            weight.Value, length.Value, width.Value, height.Value);
+        var command = new CrearEnvioCommand(operatorId, name, email, address, [new BultoDeclarado(parcelCode,
+            weight.Value, length.Value, width.Value, height.Value)]);
         var candidate = new SolicitudEnvioImportado(record.Record, reference, command,
             HuellaSolicitudEnvio.VersionActual, HuellaSolicitudEnvio.Calcular(commerceId, operatorId, command));
         return new(record.Record, reference, candidate, errors);

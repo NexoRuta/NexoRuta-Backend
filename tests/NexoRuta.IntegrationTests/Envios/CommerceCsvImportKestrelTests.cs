@@ -118,11 +118,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
                 DestinatarioNombre = "Individual Kestrel recipient",
                 DestinatarioEmail = "individual-kestrel@example.test",
                 Direccion = "18 de Julio 123",
-                CodigoBulto = "INDIVIDUAL-KST",
-                PesoGramos = 500m,
-                LargoCentimetros = 20m,
-                AnchoCentimetros = 15m,
-                AltoCentimetros = 10m
+                Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "INDIVIDUAL-KST", PesoGramos = 500m, LargoCentimetros = 20m, AnchoCentimetros = 15m, AltoCentimetros = 10m } }
             }))
                 Assert.Equal(HttpStatusCode.Created, individual.StatusCode);
             Assert.Equal((beforeIndividual.Shipments + 1, beforeIndividual.Outbox + 2), await CountsAsync(database));
@@ -372,11 +368,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
                 DestinatarioNombre = "DEC04 browser recipient",
                 DestinatarioEmail = "dec04-recipient@example.test",
                 Direccion = "18 de Julio 123",
-                CodigoBulto = "DEC04-BROWSER",
-                PesoGramos = 500m,
-                LargoCentimetros = 20m,
-                AnchoCentimetros = 15m,
-                AltoCentimetros = 10m
+                Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "DEC04-BROWSER", PesoGramos = 500m, LargoCentimetros = 20m, AnchoCentimetros = 15m, AltoCentimetros = 10m } }
             });
             Assert.Equal(HttpStatusCode.Created, shipmentResponse.StatusCode);
             using var shipmentJson = JsonDocument.Parse(await shipmentResponse.Content.ReadAsStringAsync());
@@ -598,11 +590,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
                 DestinatarioNombre = "DEC07 browser reassignment recipient",
                 DestinatarioEmail = "dec07-recipient@example.test",
                 Direccion = "18 de Julio 123",
-                CodigoBulto = "DEC07-BROWSER-REASSIGN",
-                PesoGramos = 500m,
-                LargoCentimetros = 20m,
-                AnchoCentimetros = 15m,
-                AltoCentimetros = 10m
+                Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "DEC07-BROWSER-REASSIGN", PesoGramos = 500m, LargoCentimetros = 20m, AnchoCentimetros = 15m, AltoCentimetros = 10m } }
             });
             Assert.Equal(HttpStatusCode.Created, created.StatusCode);
             using var createdJson = JsonDocument.Parse(await created.Content.ReadAsStringAsync());
@@ -613,11 +601,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
                 DestinatarioNombre = "DEC07 browser first receipt",
                 DestinatarioEmail = "dec07-receipt@example.test",
                 Direccion = "18 de Julio 456",
-                CodigoBulto = "DEC07-BROWSER-RECEIPT",
-                PesoGramos = 750m,
-                LargoCentimetros = 21m,
-                AnchoCentimetros = 16m,
-                AltoCentimetros = 11m
+                Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "DEC07-BROWSER-RECEIPT", PesoGramos = 750m, LargoCentimetros = 21m, AnchoCentimetros = 16m, AltoCentimetros = 11m } }
             });
             Assert.Equal(HttpStatusCode.Created, receiptCreated.StatusCode);
             using var receiptCreatedJson = JsonDocument.Parse(await receiptCreated.Content.ReadAsStringAsync());
@@ -628,11 +612,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
                 DestinatarioNombre = "ZZZ DEC07 optional planning candidate",
                 DestinatarioEmail = "dec07-candidate@example.test",
                 Direccion = "18 de Julio 789",
-                CodigoBulto = "DEC07-BROWSER-CANDIDATE",
-                PesoGramos = 250m,
-                LargoCentimetros = 12m,
-                AnchoCentimetros = 10m,
-                AltoCentimetros = 8m
+                Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "DEC07-BROWSER-CANDIDATE", PesoGramos = 250m, LargoCentimetros = 12m, AnchoCentimetros = 10m, AltoCentimetros = 8m } }
             });
             Assert.Equal(HttpStatusCode.Created, planningCandidate.StatusCode);
             using var planningCandidateJson = JsonDocument.Parse(await planningCandidate.Content.ReadAsStringAsync());
@@ -1131,8 +1111,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             {
                 OperadorId = operatorId, DestinatarioNombre = "DEC05 browser recipient",
                 DestinatarioEmail = "dec05-recipient@example.test", Direccion = "18 de Julio 123",
-                CodigoBulto = "DEC05-BROWSER", PesoGramos = 500m, LargoCentimetros = 20m,
-                AnchoCentimetros = 15m, AltoCentimetros = 10m
+                Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "DEC05-BROWSER", PesoGramos = 500m, LargoCentimetros = 20m, AnchoCentimetros = 15m, AltoCentimetros = 10m } }
             });
             Assert.Equal(HttpStatusCode.Created, shipmentResponse.StatusCode);
             using var shipmentJson = JsonDocument.Parse(await shipmentResponse.Content.ReadAsStringAsync());

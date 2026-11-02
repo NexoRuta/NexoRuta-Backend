@@ -46,8 +46,7 @@ public sealed class GeocodificacionFullStackBrowserTests(PostgresFixture postgre
         using var created = await api.PostAsJsonAsync("/api/envios", new
         {
             OperadorId = op.Id, DestinatarioNombre = "Synthetic geocoding recipient", DestinatarioEmail = "geo@example.test",
-            Direccion = "Geocoding synthetic 123", CodigoBulto = "GEO-FULLSTACK", PesoGramos = 100,
-            LargoCentimetros = 10, AnchoCentimetros = 10, AltoCentimetros = 10
+            Direccion = "Geocoding synthetic 123", Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "GEO-FULLSTACK", PesoGramos = 100, LargoCentimetros = 10, AnchoCentimetros = 10, AltoCentimetros = 10 } }
         });
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         var shipment = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();

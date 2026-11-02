@@ -175,8 +175,7 @@ public sealed partial class PushOutboxTests
         {
             OperadorId = p.Aviso.OperadorId, DestinatarioNombre = "Otro destino",
             DestinatarioEmail = "destinatario@example.test", Direccion = "Otra dirección de prueba",
-            CodigoBulto = Guid.NewGuid().ToString("N"), PesoGramos = 100m,
-            LargoCentimetros = 1m, AnchoCentimetros = 1m, AltoCentimetros = 1m
+            Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = Guid.NewGuid().ToString("N"), PesoGramos = 100m, LargoCentimetros = 1m, AnchoCentimetros = 1m, AltoCentimetros = 1m } }
         });
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         var shipmentId = (await created.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>()).GetProperty("id").GetGuid();

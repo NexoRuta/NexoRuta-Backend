@@ -95,11 +95,7 @@ public sealed class EnvioEventsHttpTests(PostgresFixture postgres) : IClassFixtu
         DestinatarioNombre = "Ada Lovelace",
         DestinatarioEmail = "recipient@example.test",
         Direccion = "18 de Julio 123",
-        CodigoBulto = code,
-        PesoGramos = 500m,
-        LargoCentimetros = 20m,
-        AnchoCentimetros = 10m,
-        AltoCentimetros = 5m
+        Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = code, PesoGramos = 500m, LargoCentimetros = 20m, AnchoCentimetros = 10m, AltoCentimetros = 5m } }
     };
 
     private static async Task<string> LoginAsync(HttpClient client, string email)

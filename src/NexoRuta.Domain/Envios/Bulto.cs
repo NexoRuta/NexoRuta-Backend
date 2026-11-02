@@ -28,8 +28,8 @@ public sealed class Bulto
             throw new ArgumentException("El operador es obligatorio.", nameof(operadorId));
         if (envioId == Guid.Empty)
             throw new ArgumentException("El envío es obligatorio.", nameof(envioId));
-        if (string.IsNullOrWhiteSpace(codigo))
-            throw new ArgumentException("El código es obligatorio.", nameof(codigo));
+        if (string.IsNullOrWhiteSpace(codigo) || codigo.Trim().Length > 80)
+            throw new ArgumentException("El código es obligatorio y admite hasta 80 caracteres.", nameof(codigo));
         if (pesoGramos <= 0)
             throw new ArgumentOutOfRangeException(nameof(pesoGramos), "El peso debe ser positivo.");
         if (largoCentimetros <= 0)

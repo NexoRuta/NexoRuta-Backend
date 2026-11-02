@@ -17,7 +17,7 @@ public interface IEnviosRepository
         Envio envio,
         Destinatario destinatario,
         Direccion direccion,
-        Bulto bulto,
+        IReadOnlyList<Bulto> bultos,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<EnvioDetalle>> ListarAsync(

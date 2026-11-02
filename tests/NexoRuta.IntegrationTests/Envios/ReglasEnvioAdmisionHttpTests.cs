@@ -26,7 +26,7 @@ public sealed class ReglasEnvioAdmisionHttpTests(PostgresFixture postgres) : ICl
         var comercio = await db.AccesosUsuario.SingleAsync(a => a.ComercioId != null);
         await client.SetBearerForAccessAsync(database, comercio.Id);
         object Alta(string codigo) => new { OperadorId = operador.OperadorId, DestinatarioNombre = "Destinatario", DestinatarioEmail = "destinatario@example.test",
-            Direccion = "Dirección de prueba", CodigoBulto = codigo, PesoGramos = 1000, LargoCentimetros = 10, AnchoCentimetros = 10, AltoCentimetros = 10 };
+            Direccion = "Dirección de prueba", Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = codigo, PesoGramos = 1000, LargoCentimetros = 10, AnchoCentimetros = 10, AltoCentimetros = 10  } }};
         using var sinReglas = await client.PostAsJsonAsync("/api/envios", Alta("SIN-REGLAS"));
         Assert.Equal(HttpStatusCode.Conflict, sinReglas.StatusCode);
         Assert.Contains("publicar", await sinReglas.Content.ReadAsStringAsync());

@@ -131,8 +131,7 @@ public sealed class OperadoresDisponiblesHttpTests(PostgresFixture postgres) : I
         {
             Content = JsonContent.Create(new
             {
-                OperadorId = suspendedId, DestinatarioNombre = "Ana", DestinatarioEmail = "destinatario@example.test", Direccion = "Rivera 123", CodigoBulto = "B-001",
-                PesoGramos = 100m, LargoCentimetros = 10m, AnchoCentimetros = 10m, AltoCentimetros = 10m
+                OperadorId = suspendedId, DestinatarioNombre = "Ana", DestinatarioEmail = "destinatario@example.test", Direccion = "Rivera 123", Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "B-001", PesoGramos = 100m, LargoCentimetros = 10m, AnchoCentimetros = 10m, AltoCentimetros = 10m } }
             })
         };
         createRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", commerceToken);
