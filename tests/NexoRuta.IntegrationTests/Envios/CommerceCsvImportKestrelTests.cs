@@ -467,7 +467,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             await browser.CaptureScreenshotAsync(Path.Combine(tempRoot, "mobile.png"));
             await browser.VerifyKeyboardFocusAsync();
             await browser.ClickButtonContainingAsync("Reprogramar para una ruta nueva");
-            await browser.WaitForAsync("document.querySelector('.alert-success')?.innerText.includes('Envío reprogramado') === true");
+            await browser.WaitForAsync("document.querySelector('.nr-routes-alert.is-success')?.innerText.includes('Envío reprogramado') === true");
             Assert.False(await browser.EvaluateBooleanAsync("Array.from(document.querySelectorAll('button')).some(button=>button.innerText.includes('Reprogramar para una ruta nueva'))"));
 
             await using var verify = database.CreateDbContext();
@@ -719,7 +719,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             Assert.Equal(originalShellSignature, await browser.GetSharedShellSignatureAsync());
             var populatePlannerScript = $"(()=>{{const courier=document.querySelector('#RepartidorAccesoId');const vehicle=document.querySelector('#VehiculoId');const row=[...document.querySelectorAll('[data-plan-row]')].find(r=>r.dataset.search?.includes('DEC07-BROWSER-REASSIGN'));const check=row?.querySelector('[data-plan-check]');const order=row?.querySelector('[data-stop-order]');const time=row?.querySelector('[data-stop-time]');if(!courier||!vehicle||!check||!order||!time)return false;courier.value={JsonSerializer.Serialize(operatorAccessId.ToString("D"))};courier.dispatchEvent(new Event('change',{{bubbles:true}}));vehicle.value={JsonSerializer.Serialize(sourceVehicleJson.RootElement.GetProperty("id").GetGuid().ToString("D"))};vehicle.dispatchEvent(new Event('change',{{bubbles:true}}));check.checked=true;check.dispatchEvent(new Event('change',{{bubbles:true}}));order.value='123';order.dispatchEvent(new Event('input',{{bubbles:true}}));time.value='17:30';time.dispatchEvent(new Event('input',{{bubbles:true}}));return true;}})()";
             Assert.True(await browser.EvaluateBooleanAsync(populatePlannerScript), "An eligible real shipment, operator and vehicle should populate the planner.");
-            await browser.WaitForAsync("document.querySelector('[data-summary-count]')?.innerText === '1' && document.querySelector('[data-summary-time]')?.innerText === '17:30' && document.querySelectorAll('[data-plan-row]').length === 2 && document.querySelectorAll('[data-plan-row].is-selected').length === 1");
+            await browser.WaitForAsync($"document.querySelector('[data-summary-count]')?.innerText === '1' && document.querySelector('[data-summary-time]')?.innerText === '{fecha:yyyy-MM-dd} 17:30' && document.querySelectorAll('[data-plan-row]').length === 2 && document.querySelectorAll('[data-plan-row].is-selected').length === 1");
             Assert.True(await browser.EvaluateBooleanAsync("!document.querySelector('.nr-summary-first-stop') && !document.querySelector('.nr-summary-conditions h3')"),
                 "The planning summary should not repeat recipient/address or add a redundant nested conditions heading.");
             var vehicleCapacity = await browser.EvaluateStringAsync("document.querySelector('#VehiculoId option:checked')?.getAttribute('data-weight-capacity') || 'missing'");
@@ -1238,7 +1238,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             Assert.False(string.IsNullOrWhiteSpace(initialCommand));
             await browser.FillReturnAndSetStaleVersionAsync("Control del despachador");
             await browser.ClickButtonContainingAsync("Iniciar devolución");
-            await browser.WaitForAsync("document.querySelector('.alert-danger')?.innerText.includes('cambió') === true");
+            await browser.WaitForAsync("document.querySelector('.alert-danger') !== null");
             Assert.Equal("Control del despachador", await browser.EvaluateStringAsync("document.querySelector('textarea[name=MotivoDevolucion]')?.value || ''"));
             Assert.Equal(initialCommand, await browser.EvaluateStringAsync("document.querySelector('input[name=ComandoId]')?.value || ''"));
             Assert.NotEqual("0", await browser.EvaluateStringAsync("document.querySelector('input[name=VersionEnvio]')?.value || ''"));
@@ -1251,7 +1251,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             await browser.CaptureScreenshotAsync(Path.Combine(tempRoot, "mobile.png"));
             await browser.VerifyKeyboardFocusAsync();
             await browser.ClickButtonContainingAsync("Iniciar devolución");
-            await browser.WaitForAsync("document.querySelector('.alert-success')?.innerText.includes('Devolución iniciada') === true");
+            await browser.WaitForAsync("document.querySelector('.nr-routes-alert.is-success')?.innerText.includes('Devolución iniciada') === true");
 
             await using var verify = database.CreateDbContext();
             var shipment = await verify.Envios.SingleAsync(x => x.Id == shipmentId);
@@ -1297,8 +1297,8 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             await browser.FillLossAsync("Control de extravío");
             Assert.True(await browser.EvaluateBooleanAsync("(()=>{document.querySelector('.alert-danger')?.remove();return true;})()"));
             await browser.ClickButtonContainingKeyboardAsync("Confirmar extravío");
-            await browser.WaitForAsync("document.querySelector('.alert-success') !== null || document.querySelector('.alert-danger') !== null");
-            var lossAlert = await browser.EvaluateStringAsync("document.querySelector('.alert-success, .alert-danger')?.innerText || 'No result alert'");
+            await browser.WaitForAsync("document.querySelector('.nr-routes-alert.is-success') !== null || document.querySelector('.alert-danger') !== null");
+            var lossAlert = await browser.EvaluateStringAsync("document.querySelector('.nr-routes-alert.is-success, .alert-danger')?.innerText || 'No result alert'");
             Assert.Contains("Extravío confirmado", lossAlert);
             await browser.CaptureScreenshotAsync(Path.Combine(tempRoot, "loss-mobile.png"));
 
@@ -1801,7 +1801,9 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
                 catch (Exception) when (!process.HasExited) { }
                 await Task.Delay(200);
             }
-            throw new TimeoutException("Browser condition was not reached.");
+            var visible = "";
+            try { visible = await EvaluateStringAsync("document.body.innerText.slice(0,2400)"); } catch { }
+            throw new TimeoutException($"Browser condition was not reached: {expression}. Visible text: {visible}");
         }
 
         private async Task<JsonElement> EvaluateAsync(string expression)

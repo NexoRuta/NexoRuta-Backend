@@ -64,6 +64,7 @@ public sealed partial class PushOutboxTests
         Assert.True(await worker.ProcesarSiguienteAsync(default));
         Assert.Equal(p.Fids, Assert.Single(transporte.Enviados).Fids);
 
+        Assert.Equal("Aplicada", (await Operar(p.Client, origen, 2, "FinJornada")).Resultado);
         using (var occupied = await p.Client.PostAsJsonAsync($"/api/rutas/{nueva.Id}/despacho", new { nueva.Version }))
             Assert.Equal(HttpStatusCode.Conflict, occupied.StatusCode);
         var fleet = Assert.Single((await p.Client.GetFromJsonAsync<VehiculoFlotaResponse[]>("/api/reparto/flota"))!);

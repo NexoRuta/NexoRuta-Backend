@@ -837,7 +837,7 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
             await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Operadores\" (\"Id\",\"Nombre\") VALUES ({rows.OperatorA},'Legacy operator')");
             await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Comercios\" (\"Id\",\"Nombre\") VALUES ({rows.CommerceA},'Legacy commerce')");
             await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Roles\" (\"Id\",\"Codigo\",\"Nombre\",\"TipoOrganizacion\",\"ComercioId\") VALUES ({role},'legacy-rls','Legacy role','Comercio',{rows.CommerceA})");
-            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"AccesosUsuario\" (\"Id\",\"UsuarioId\",\"ComercioId\",\"RolId\",\"TipoOrganizacion\") VALUES ({rows.AccessA},{rows.UserA},{rows.CommerceA},{role},'Comercio')");
+            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"AccesosUsuario\" (\"Id\",\"UsuarioId\",\"ComercioId\",\"RolId\") VALUES ({rows.AccessA},{rows.UserA},{rows.CommerceA},{role})");
             await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Destinatarios\" (\"Id\",\"OperadorId\",\"Nombre\") VALUES ({rows.RecipientA1},{rows.OperatorA},'Legacy recipient')");
             await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Direcciones\" (\"Id\",\"OperadorId\",\"Descripcion\") VALUES ({rows.AddressA1},{rows.OperatorA},'Legacy address')");
             await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Envios\" (\"Id\",\"OperadorId\",\"ComercioId\",\"CreadoPorUsuarioId\",\"DestinatarioId\",\"DireccionId\",\"Estado\") VALUES ({rows.ShipmentA1},{rows.OperatorA},{rows.CommerceA},{rows.UserA},{rows.RecipientA1},{rows.AddressA1},'Admitido')");

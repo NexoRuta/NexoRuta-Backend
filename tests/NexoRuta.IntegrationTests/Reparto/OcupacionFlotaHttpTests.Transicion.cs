@@ -75,13 +75,23 @@ public sealed partial class OcupacionFlotaHttpTests
             $"GRANT nexoruta_schema_owner TO {role} WITH INHERIT TRUE, SET TRUE; " +
             $"GRANT USAGE,CREATE ON SCHEMA public TO {role}; " +
             $"GRANT SELECT,INSERT,UPDATE,DELETE ON public.\"__EFMigrationsHistory\" TO {role};");
-        var cs=new NpgsqlConnectionStringBuilder(db.Database.GetConnectionString()) { Username=role,Password=password,Pooling=false };
-        await using var migration=new NexoRutaDbContext(new DbContextOptionsBuilder<NexoRutaDbContext>()
-            .UseNexoRutaPostgres(cs.ConnectionString).Options);
-        Assert.False(await migration.Database.SqlQueryRaw<bool>(
-            "SELECT rolsuper OR rolbypassrls AS \"Value\" FROM pg_roles WHERE rolname=current_user").SingleAsync());
-        await migration.Database.ExecuteSqlRawAsync(script);
-        Assert.Equal(0,await db.Database.SqlQueryRaw<int>(
-            "SELECT count(*)::int AS \"Value\" FROM pg_policies WHERE policyname LIKE 'migration_fleet_%'").SingleAsync());
+        var ownerHadCreate=await db.Database.SqlQueryRaw<bool>(
+            "SELECT has_schema_privilege('nexoruta_schema_owner','public','CREATE') AS \"Value\"").SingleAsync();
+        if(!ownerHadCreate) await db.Database.ExecuteSqlRawAsync("GRANT CREATE ON SCHEMA public TO nexoruta_schema_owner");
+        try
+        {
+            var cs=new NpgsqlConnectionStringBuilder(db.Database.GetConnectionString()) { Username=role,Password=password,Pooling=false };
+            await using var migration=new NexoRutaDbContext(new DbContextOptionsBuilder<NexoRutaDbContext>()
+                .UseNexoRutaPostgres(cs.ConnectionString).Options);
+            Assert.False(await migration.Database.SqlQueryRaw<bool>(
+                "SELECT rolsuper OR rolbypassrls AS \"Value\" FROM pg_roles WHERE rolname=current_user").SingleAsync());
+            await migration.Database.ExecuteSqlRawAsync(script);
+            Assert.Equal(0,await db.Database.SqlQueryRaw<int>(
+                "SELECT count(*)::int AS \"Value\" FROM pg_policies WHERE policyname LIKE 'migration_fleet_%'").SingleAsync());
+        }
+        finally
+        {
+            if(!ownerHadCreate) await db.Database.ExecuteSqlRawAsync("REVOKE CREATE ON SCHEMA public FROM nexoruta_schema_owner");
+        }
     }
 }
