@@ -728,7 +728,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             var capacitySummary = await browser.EvaluateStringAsync("JSON.stringify({weight:document.querySelector('#VehiculoId option:checked')?.dataset.weightCapacity,label:document.querySelector('[data-capacity-label]')?.innerText})");
             Assert.True(await browser.EvaluateBooleanAsync("document.querySelector('[data-capacity-label]')?.innerText.includes('kg de capacidad') && document.querySelector('[data-capacity-label]')?.innerText.includes('m³') && !document.querySelector('[data-capacity-label]')?.innerText.includes('cm³')"),
                 $"Vehicle capacity should use the readable units shown in the approved reference: {capacitySummary}");
-            Assert.Equal("Fecha de salida", await browser.EvaluateStringAsync("document.querySelector('label[for=Fecha]')?.innerText.trim() || ''"));
+            Assert.Equal("Fecha operativa", await browser.EvaluateStringAsync("document.querySelector('label[for=Fecha]')?.innerText.trim() || ''"));
             var culturaResumen = CultureInfo.GetCultureInfo("es-UY");
             var fechaResumenEsperada = fecha.ToDateTime(TimeOnly.MinValue).ToString("dddd d 'de' MMMM", culturaResumen);
             fechaResumenEsperada = char.ToUpper(fechaResumenEsperada[0], culturaResumen) + fechaResumenEsperada[1..];
@@ -792,7 +792,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
                 "A reservation conflict must preserve the selected date, resources, shipment, order and arrival time.");
             await browser.CaptureScreenshotAsync(ScreenshotPath("planificacion-conflicto-reserva-fecha-original.png"));
             var previousSummaryDate = await browser.EvaluateStringAsync("document.querySelector('[data-summary-date]')?.innerText.trim() || ''");
-            Assert.True(await browser.EvaluateBooleanAsync($"(()=>{{const d=document.querySelector('#Fecha');if(!d)return false;d.value='{fechaSeleccionada:yyyy-MM-dd}';d.dispatchEvent(new Event('input',{{bubbles:true}}));d.dispatchEvent(new Event('change',{{bubbles:true}}));return d.value==='{fechaSeleccionada:yyyy-MM-dd}';}})()"),
+            Assert.True(await browser.EvaluateBooleanAsync($"(()=>{{const d=document.querySelector('#Fecha');if(!d)return false;d.value='{fechaSeleccionada:yyyy-MM-dd}';d.dispatchEvent(new Event('input',{{bubbles:true}}));d.dispatchEvent(new Event('change',{{bubbles:true}}));const stopDate=document.querySelector('[data-plan-row].is-selected [data-stop-date]');if(stopDate){{stopDate.value=d.value;stopDate.dispatchEvent(new Event('input',{{bubbles:true}}));}}return d.value==='{fechaSeleccionada:yyyy-MM-dd}';}})()"),
                 "The edited departure date should be a real input value before retrying the same plan.");
             var selectedSummaryDate = await browser.EvaluateStringAsync("document.querySelector('[data-summary-date]')?.innerText.trim() || ''");
             Assert.NotEqual(previousSummaryDate, selectedSummaryDate);
@@ -800,12 +800,12 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             Assert.Contains(fechaSeleccionada.ToString("MMMM", CultureInfo.GetCultureInfo("es-UY")), selectedSummaryDate, StringComparison.OrdinalIgnoreCase);
             await browser.CaptureScreenshotAsync(ScreenshotPath("planificacion-fecha-editada-y-resumen-actualizado.png"), fullPage: true);
             var fechaCambioMes = new DateOnly(fecha.Year, fecha.Month, DateTime.DaysInMonth(fecha.Year, fecha.Month)).AddDays(1);
-            Assert.True(await browser.EvaluateBooleanAsync($"(()=>{{const d=document.querySelector('#Fecha');d.value='{fechaCambioMes:yyyy-MM-dd}';d.dispatchEvent(new Event('input',{{bubbles:true}}));d.dispatchEvent(new Event('change',{{bubbles:true}}));return d.value==='{fechaCambioMes:yyyy-MM-dd}';}})()"),
+            Assert.True(await browser.EvaluateBooleanAsync($"(()=>{{const d=document.querySelector('#Fecha');d.value='{fechaCambioMes:yyyy-MM-dd}';d.dispatchEvent(new Event('input',{{bubbles:true}}));d.dispatchEvent(new Event('change',{{bubbles:true}}));const stopDate=document.querySelector('[data-plan-row].is-selected [data-stop-date]');if(stopDate){{stopDate.value=d.value;stopDate.dispatchEvent(new Event('input',{{bubbles:true}}));}}return d.value==='{fechaCambioMes:yyyy-MM-dd}';}})()"),
                 "The date control should accept a selection across a month boundary.");
             var summaryAfterMonthChange = await browser.EvaluateStringAsync("document.querySelector('[data-summary-date]')?.innerText.trim() || ''");
             Assert.Contains(fechaCambioMes.Day.ToString(CultureInfo.InvariantCulture), summaryAfterMonthChange, StringComparison.Ordinal);
             Assert.Contains(fechaCambioMes.ToString("MMMM", CultureInfo.GetCultureInfo("es-UY")), summaryAfterMonthChange, StringComparison.OrdinalIgnoreCase);
-            Assert.True(await browser.EvaluateBooleanAsync($"(()=>{{const d=document.querySelector('#Fecha');d.value='{fechaSeleccionada:yyyy-MM-dd}';d.dispatchEvent(new Event('input',{{bubbles:true}}));d.dispatchEvent(new Event('change',{{bubbles:true}}));return d.value==='{fechaSeleccionada:yyyy-MM-dd}';}})()"),
+            Assert.True(await browser.EvaluateBooleanAsync($"(()=>{{const d=document.querySelector('#Fecha');d.value='{fechaSeleccionada:yyyy-MM-dd}';d.dispatchEvent(new Event('input',{{bubbles:true}}));d.dispatchEvent(new Event('change',{{bubbles:true}}));const stopDate=document.querySelector('[data-plan-row].is-selected [data-stop-date]');if(stopDate){{stopDate.value=d.value;stopDate.dispatchEvent(new Event('input',{{bubbles:true}}));}}return d.value==='{fechaSeleccionada:yyyy-MM-dd}';}})()"),
                 "Restore the requested 30/10 selection after the month-boundary summary check.");
             Assert.Equal(selectedSummaryDate, await browser.EvaluateStringAsync("document.querySelector('[data-summary-date]')?.innerText.trim() || ''"));
             await browser.ClickButtonContainingKeyboardAsync("Guardar planificación");
