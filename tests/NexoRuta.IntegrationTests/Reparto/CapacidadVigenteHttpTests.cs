@@ -15,7 +15,7 @@ public sealed class CapacidadVigenteHttpTests(PostgresFixture postgres) : IClass
     public async Task LiveVehicleChecksCannotReadOrMutateAnotherOperatorsVehicle()
     {
         var data = await postgres.CreateDatabaseAsync();
-        using var factory = data.CreateApiFactory(); using var client = factory.CreateHttpClient();
+        using var factory = data.CreateShippingApiFactory(); using var client = factory.CreateHttpClient();
         var p = await Preparar(data, client);
         var other = new NexoRuta.Domain.Administracion.Operador("Other test operator");
         var vehicle = new NexoRuta.Domain.Reparto.Vehiculo(other.Id, "SAB1234", 3000, 2000);
@@ -56,7 +56,7 @@ public sealed class CapacidadVigenteHttpTests(PostgresFixture postgres) : IClass
     public async Task PlanValidatesEveryPackageAndBothLimits(decimal weight, decimal volume, int status, string reason)
     {
         var data = await postgres.CreateDatabaseAsync();
-        using var factory = data.CreateApiFactory(); using var client = factory.CreateHttpClient();
+        using var factory = data.CreateShippingApiFactory(); using var client = factory.CreateHttpClient();
         var p = await PreparePackages(data, client);
         await Edit(client, p.VehiculoId, weight, volume);
         var before = await OperationalState(data);
@@ -77,7 +77,7 @@ public sealed class CapacidadVigenteHttpTests(PostgresFixture postgres) : IClass
     public async Task DispatchUsesCurrentCapacityWithoutRewritingSnapshot(decimal weight, decimal volume, int status)
     {
         var data = await postgres.CreateDatabaseAsync();
-        using var factory = data.CreateApiFactory(); using var client = factory.CreateHttpClient();
+        using var factory = data.CreateShippingApiFactory(); using var client = factory.CreateHttpClient();
         var p = await PreparePackages(data, client); await Edit(client, p.VehiculoId, 3000, 2000);
         using var plan = await client.PostAsJsonAsync("/api/rutas", Solicitud(p));
         var route = (await plan.Content.ReadFromJsonAsync<HojaRutaResponse>())!;
@@ -97,7 +97,7 @@ public sealed class CapacidadVigenteHttpTests(PostgresFixture postgres) : IClass
     public async Task ExitRejectsReducedOrInactiveVehicleAtomicallyIncludingPartialPhysicalLoad(bool active, bool complete)
     {
         var data = await postgres.CreateDatabaseAsync();
-        using var factory = data.CreateApiFactory(); using var client = factory.CreateHttpClient();
+        using var factory = data.CreateShippingApiFactory(); using var client = factory.CreateHttpClient();
         var p = await PreparePackages(data, client, blockDiscrepancies: false);
         using var plan = await client.PostAsJsonAsync("/api/rutas", Solicitud(p));
         var route = (await plan.Content.ReadFromJsonAsync<HojaRutaResponse>())!;
@@ -123,7 +123,7 @@ public sealed class CapacidadVigenteHttpTests(PostgresFixture postgres) : IClass
     public async Task ReassignmentUsesLiveCapacityAndPreservesBothRoutesOnRejection()
     {
         var data = await postgres.CreateDatabaseAsync();
-        using var factory = data.CreateApiFactory(); using var client = factory.CreateHttpClient();
+        using var factory = data.CreateShippingApiFactory(); using var client = factory.CreateHttpClient();
         var p = await PreparePackages(data, client); await Edit(client, p.VehiculoId, 3000, 2000);
         using var source = await client.PostAsJsonAsync("/api/rutas", Solicitud(p));
         Assert.Equal(HttpStatusCode.OK, source.StatusCode);
@@ -146,7 +146,7 @@ public sealed class CapacidadVigenteHttpTests(PostgresFixture postgres) : IClass
     public async Task ExtremeVolumeIsAControlledConflictWithoutPersistingAssignments()
     {
         var data = await postgres.CreateDatabaseAsync();
-        using var factory = data.CreateApiFactory(); using var client = factory.CreateHttpClient();
+        using var factory = data.CreateShippingApiFactory(); using var client = factory.CreateHttpClient();
         var p = await Preparar(data, client);
         await using (var db = data.CreateDbContext())
         {
@@ -172,7 +172,7 @@ public sealed class CapacidadVigenteHttpTests(PostgresFixture postgres) : IClass
     public async Task VehicleScaleRejectsSignificantDigitsAndRoundTripsExactly(string text, bool accepted)
     {
         var data = await postgres.CreateDatabaseAsync();
-        using var factory = data.CreateApiFactory(); using var client = factory.CreateHttpClient();
+        using var factory = data.CreateShippingApiFactory(); using var client = factory.CreateHttpClient();
         var p = await Preparar(data, client);
         var original = (await client.GetFromJsonAsync<VehiculoContract[]>("/api/reparto/vehiculos"))!.Single();
         var number = decimal.Parse(text, System.Globalization.CultureInfo.InvariantCulture);

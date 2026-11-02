@@ -28,7 +28,7 @@ public sealed class CrearEnvioRequestTests
             var number = decimal.Parse(value, CultureInfo.InvariantCulture);
             var request = new CrearEnvioRequest
             {
-                OperadorId = Guid.CreateVersion7(), DestinatarioNombre = "Ana", DestinatarioEmail = "destinatario@example.test",
+                OperadorId = Guid.CreateVersion7(), Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(Guid.CreateVersion7()), DestinatarioNombre = "Ana", DestinatarioEmail = "destinatario@example.test",
                 Direccion = "Rivera 123", Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "B-001", PesoGramos = number, LargoCentimetros = number, AnchoCentimetros = number, AltoCentimetros = number } }
             };
             var errors = new List<ValidationResult>();

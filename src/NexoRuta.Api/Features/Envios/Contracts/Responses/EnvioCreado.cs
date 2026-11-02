@@ -10,7 +10,7 @@ public sealed record EnvioCreado(
     string OperadorNombre,
     string ComercioNombre,
     IReadOnlyList<BultoDetalle> Bultos,
-    DateTimeOffset CreadoEnUtc)
+    DateTimeOffset CreadoEnUtc, TarifaEnvioResponse Tarifa)
 {
 
     public static EnvioCreado Desde(Application.Envios.Results.EnvioCreado envio) => new(
@@ -23,5 +23,5 @@ public sealed record EnvioCreado(
         ComercioNombre: envio.Origen.ComercioNombre,
         Bultos: envio.Bultos.Select(b => new BultoDetalle(b.Codigo, b.PesoGramos,
             b.LargoCentimetros, b.AnchoCentimetros, b.AltoCentimetros) { Custodia = b.Custodia }).ToArray(),
-        CreadoEnUtc: envio.CreadoEnUtc);
+        CreadoEnUtc: envio.CreadoEnUtc, Tarifa: TarifaEnvioResponse.Desde(envio.Tarifa));
 }

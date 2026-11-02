@@ -40,6 +40,17 @@ public sealed class DestinosEnvioController([FromKeyedServices("destino-mapbox-t
         catch (GeocodificacionNoDisponibleException ex) { return Problem(ex.Message, statusCode: 503); }
         catch (GeocodificacionLimiteException ex) { return Limite(ex); }
     }
+    [HttpPost("/api/envios/destino/busqueda"), EnableRateLimiting("geocodificacion")]
+    [ProducesResponseType<PropuestasDestinoDatos>(200), ProducesResponseType(400), ProducesResponseType(401), ProducesResponseType(403), ProducesResponseType(429), ProducesResponseType(503)]
+    public async Task<IActionResult> BuscarParaAlta(BuscarDestinoRequest request, CancellationToken ct)
+    {
+        Response.Headers.CacheControl = "no-store";
+        if (request.Consulta.Trim().Length < 3) return BadRequest();
+        try { return Ok(await casos.BuscarParaAltaAsync(request.Consulta.Trim(), ct)); }
+        catch (GeocodificacionNoDisponibleException ex) { return Problem(ex.Message, statusCode: 503); }
+        catch (GeocodificacionLimiteException ex) { return Limite(ex); }
+    }
+
     private ObjectResult Limite(GeocodificacionLimiteException ex)
     {
         Response.Headers.RetryAfter = ex.CuotaAgotada ? "86400" : "1";

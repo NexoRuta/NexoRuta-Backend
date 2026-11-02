@@ -19,7 +19,7 @@ public sealed class DestinosEnvioHttpTests(PostgresFixture postgres) : IClassFix
     [Fact]
     public async Task PropuestasNoConfirmanYComercioConfirmaConRolSqlRestringido()
     {
-        var data = await postgres.CreateDatabaseAsync(); using var seed = data.CreateApiFactory(); using (seed.CreateHttpClient()) { }
+        var data = await postgres.CreateDatabaseAsync(); using var seed = data.CreateShippingApiFactory(); using (seed.CreateHttpClient()) { }
         var runtime = await RlsRestrictedHttpFlowTests.RestrictApiAsync(data);
         using var factory = new IntegrationApiFactory(runtime, settings: RlsRestrictedHttpFlowTests.ApiSettings());
         var geo = new GeocodificadorPrueba();
@@ -31,25 +31,25 @@ public sealed class DestinosEnvioHttpTests(PostgresFixture postgres) : IClassFix
         var comercio = await db.AccesosUsuario.SingleAsync(x => x.ComercioId != null);
         var op = await db.AccesosUsuario.SingleAsync(x => x.OperadorId != null);
         await client.SetBearerForAccessAsync(data, comercio.Id);
-        using var alta = await client.PostAsJsonAsync("/api/envios", new { OperadorId = op.OperadorId,
+        using var alta = await client.PostAsJsonAsync("/api/envios", new { OperadorId = op.OperadorId, Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(op.OperadorId),
             DestinatarioNombre = "Persona", DestinatarioEmail = "persona@example.test", Direccion = "Dirección de prueba 123",
             Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "DESTINO-1", PesoGramos = 100, LargoCentimetros = 10, AnchoCentimetros = 10, AltoCentimetros = 10  } }});
         Assert.Equal(HttpStatusCode.Created, alta.StatusCode);
         var envio = await db.Envios.SingleAsync(); var url = $"/api/envios/{envio.Id}/destino";
         var actual = await client.GetFromJsonAsync<DestinoEnvioDatos>(url);
-        Assert.Equal("Persona", actual!.DestinatarioNombre); Assert.Null(actual.Latitud); Assert.Null(actual.ConfirmadaEnUtc); Assert.Equal(0, actual.Version);
+        Assert.Equal("Persona", actual!.DestinatarioNombre); Assert.Equal(-34.901, actual.Latitud); Assert.NotNull(actual.ConfirmadaEnUtc); Assert.Equal(1, actual.Version);
         using var propuesta = await client.PostAsync(url + "/propuestas", null); Assert.Equal(HttpStatusCode.OK, propuesta.StatusCode);
         var candidatas = (await propuesta.Content.ReadFromJsonAsync<PropuestasDestinoDatos>())!;
         Assert.Equal(2, candidatas.Propuestas.Count); Assert.Equal("Dirección de prueba 123", Assert.Single(geo.Consultas));
-        Assert.Null((await db.Direcciones.AsNoTracking().SingleAsync()).ConfirmadaEnUtc);
+        Assert.Equal(actual.ConfirmadaEnUtc, (await db.Direcciones.AsNoTracking().SingleAsync()).ConfirmadaEnUtc);
         using var confirmar = await client.PutAsJsonAsync(url, new { actual.Version, Latitud = -34.901, Longitud = -56.201, Direccion = "  Seleccionada 123  " });
         Assert.Equal(HttpStatusCode.NoContent, confirmar.StatusCode);
         var confirmada = (await client.GetFromJsonAsync<DestinoEnvioDatos>(url))!;
         Assert.Equal("Seleccionada 123", confirmada.Direccion);
-        Assert.Equal(1, confirmada.Version); Assert.Equal(-34.901, confirmada.Latitud); Assert.NotNull(confirmada.ConfirmadaEnUtc);
+        Assert.Equal(2, confirmada.Version); Assert.Equal(-34.901, confirmada.Latitud); Assert.NotNull(confirmada.ConfirmadaEnUtc);
         using var repetir = await client.PutAsJsonAsync(url, new { Version = 0, Latitud = -34.1, Longitud = -56.1, Direccion = "No debe guardarse" }); Assert.Equal(HttpStatusCode.Conflict, repetir.StatusCode);
         var direccion = await db.Direcciones.AsNoTracking().SingleAsync(); Assert.Equal(comercio.UsuarioId, direccion.ConfirmadaPorUsuarioId);
-        Assert.Equal("Seleccionada 123", direccion.Descripcion); Assert.Equal(-34.901, direccion.Latitud); Assert.Equal(-56.201, direccion.Longitud); Assert.Equal(1, direccion.Version);
+        Assert.Equal("Seleccionada 123", direccion.Descripcion); Assert.Equal(-34.901, direccion.Latitud); Assert.Equal(-56.201, direccion.Longitud); Assert.Equal(2, direccion.Version);
         await client.SetBearerForAccessAsync(data, op.Id);
         using var recepcion = await client.PostAsJsonAsync($"/api/deposito/envios/{envio.Id}/recepcion", new { Version = 0 }); Assert.Equal(HttpStatusCode.NoContent, recepcion.StatusCode);
         await client.SetBearerForAccessAsync(data, comercio.Id);
@@ -61,7 +61,7 @@ public sealed class DestinosEnvioHttpTests(PostgresFixture postgres) : IClassFix
     [Fact]
     public async Task ComercioPuedeCompletarDestinoPendienteDespuesDeRecepcionSinPermitirEditarUnoConfirmado()
     {
-        var data = await postgres.CreateDatabaseAsync(); using var seed = data.CreateApiFactory(); using (seed.CreateHttpClient()) { }
+        var data = await postgres.CreateDatabaseAsync(); using var seed = data.CreateShippingApiFactory(); using (seed.CreateHttpClient()) { }
         var runtime = await RlsRestrictedHttpFlowTests.RestrictApiAsync(data);
         using var factory = new IntegrationApiFactory(runtime, settings: RlsRestrictedHttpFlowTests.ApiSettings());
         var geo = new GeocodificadorPrueba();
@@ -73,12 +73,15 @@ public sealed class DestinosEnvioHttpTests(PostgresFixture postgres) : IClassFix
         var comercio = await db.AccesosUsuario.SingleAsync(x => x.ComercioId != null);
         var operador = await db.AccesosUsuario.SingleAsync(x => x.OperadorId != null);
         await client.SetBearerForAccessAsync(data, comercio.Id);
-        using var alta = await client.PostAsJsonAsync("/api/envios", new { OperadorId = operador.OperadorId,
+        using var alta = await client.PostAsJsonAsync("/api/envios", new { OperadorId = operador.OperadorId, Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(operador.OperadorId),
             DestinatarioNombre = "Persona", DestinatarioEmail = "persona@example.test", Direccion = "Av. de prueba 123",
             Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "DESTINO-EN-DEPOSITO", PesoGramos = 100, LargoCentimetros = 10, AnchoCentimetros = 10, AltoCentimetros = 10  } }});
         Assert.Equal(HttpStatusCode.Created, alta.StatusCode);
         var envio = await db.Envios.SingleAsync();
         var url = $"/api/envios/{envio.Id}/destino";
+        // Explicit pre-existing pending-destination fixture: retain its applied charge while
+        // verifying the supported receipt-before-location flow. New public admissions confirm immediately.
+        await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE public.\"Direcciones\" SET \"Latitud\"=NULL,\"Longitud\"=NULL,\"ConfirmadaEnUtc\"=NULL,\"ConfirmadaPorUsuarioId\"=NULL,\"Version\"=0 WHERE \"Id\"={envio.DireccionId}");
 
         await client.SetBearerForAccessAsync(data, operador.Id);
         using var recepcion = await client.PostAsJsonAsync($"/api/deposito/envios/{envio.Id}/recepcion", new { Version = 0 });
@@ -123,7 +126,7 @@ public sealed class DestinosEnvioHttpTests(PostgresFixture postgres) : IClassFix
     [Fact]
     public async Task OtraCuentaOUnOperadorNoConsultanNiConfirmanDestinoDelComercio()
     {
-        var data = await postgres.CreateDatabaseAsync(); using var seed = data.CreateApiFactory(); using (seed.CreateHttpClient()) { }
+        var data = await postgres.CreateDatabaseAsync(); using var seed = data.CreateShippingApiFactory(); using (seed.CreateHttpClient()) { }
         await using var db = data.CreateDbContext(); var extranjero = await SeguimientoTestData.CreateEnvioAsync(db);
         var runtime = await RlsRestrictedHttpFlowTests.RestrictApiAsync(data);
         using var factory = new IntegrationApiFactory(runtime, settings: RlsRestrictedHttpFlowTests.ApiSettings()); using var client = factory.CreateHttpClient();
@@ -140,7 +143,7 @@ public sealed class DestinosEnvioHttpTests(PostgresFixture postgres) : IClassFix
     [Fact]
     public async Task FaltaProveedorNoInventaCoordenadasYContratoRechazaCamposOmitidos()
     {
-        var data = await postgres.CreateDatabaseAsync(); using var factory = data.CreateApiFactory(); using var client = factory.CreateHttpClient();
+        var data = await postgres.CreateDatabaseAsync(); using var factory = data.CreateShippingApiFactory(); using var client = factory.CreateHttpClient();
         await using var db = data.CreateDbContext();
         var comercio = await db.AccesosUsuario.SingleAsync(x => x.ComercioId != null);
         var op = await db.Operadores.SingleAsync();
@@ -159,18 +162,19 @@ public sealed class DestinosEnvioHttpTests(PostgresFixture postgres) : IClassFix
     [Fact]
     public async Task DosConfirmacionesSimultaneasNoSobrescribenElPuntoConLaMismaVersion()
     {
-        var data = await postgres.CreateDatabaseAsync(); using var seed = data.CreateApiFactory(); using (seed.CreateHttpClient()) { }
+        var data = await postgres.CreateDatabaseAsync(); using var seed = data.CreateShippingApiFactory(); using (seed.CreateHttpClient()) { }
         var runtime = await RlsRestrictedHttpFlowTests.RestrictApiAsync(data);
         using var factory = new IntegrationApiFactory(runtime, settings: RlsRestrictedHttpFlowTests.ApiSettings()); using var client = factory.CreateHttpClient();
         await using var db = data.CreateDbContext(); var comercio = await db.AccesosUsuario.SingleAsync(x => x.ComercioId != null); var op = await db.Operadores.SingleAsync();
-        var persona = new Destinatario(op.Id, "Persona", "persona@example.test"); var dir = new Direccion(op.Id, "Dirección de prueba");
-        var envio = new Envio(op.Id, comercio.ComercioId!.Value, comercio.UsuarioId, persona.Id, dir.Id, op.Id); db.AddRange(persona, dir, envio); await db.SaveChangesAsync();
         await client.SetBearerForAccessAsync(data, comercio.Id);
-        var respuestas = await Task.WhenAll(client.PutAsJsonAsync($"/api/envios/{envio.Id}/destino", new { Version = 0, Latitud = -34.9, Longitud = -56.2 }),
-            client.PutAsJsonAsync($"/api/envios/{envio.Id}/destino", new { Version = 0, Latitud = -34.8, Longitud = -56.1 }));
+        using var alta=await client.PostAsJsonAsync("/api/envios",new { OperadorId=op.Id, Servicio=ServiciosEnvioTestData.Declarar(op.Id), DestinatarioNombre="Persona",DestinatarioEmail="persona@example.test",Direccion="Dirección de prueba",
+            Bultos=new[]{new{Codigo="CONCURRENTE",PesoGramos=100m,LargoCentimetros=10m,AnchoCentimetros=10m,AltoCentimetros=10m}}});
+        Assert.Equal(HttpStatusCode.Created,alta.StatusCode);var envio=await db.Envios.SingleAsync();
+        var respuestas = await Task.WhenAll(client.PutAsJsonAsync($"/api/envios/{envio.Id}/destino", new { Version = 1, Latitud = -34.9, Longitud = -56.2 }),
+            client.PutAsJsonAsync($"/api/envios/{envio.Id}/destino", new { Version = 1, Latitud = -34.8, Longitud = -56.1 }));
         Assert.Equal(new[] { HttpStatusCode.NoContent, HttpStatusCode.Conflict }, respuestas.Select(x => x.StatusCode).Order());
         foreach (var respuesta in respuestas) respuesta.Dispose();
-        Assert.Equal(1, (await db.Direcciones.AsNoTracking().SingleAsync()).Version);
+        Assert.Equal(2, (await db.Direcciones.AsNoTracking().SingleAsync()).Version);
     }
 
     private sealed class GeocodificadorPrueba : IGeocodificador

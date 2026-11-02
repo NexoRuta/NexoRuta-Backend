@@ -21,8 +21,61 @@ namespace NexoRuta.Api.Features.Envios.Controllers;
 public sealed class EnviosController(
     CrearEnvioUseCase crearEnvio,
     ListarEnviosUseCase listarEnvios,
-    ImportarEnviosUseCase importarEnvios) : ControllerBase
+    ImportarEnviosUseCase importarEnvios,
+    NexoRuta.Application.Envios.Repositories.IServiciosEnvioRepository servicios) : ControllerBase
 {
+    [HttpGet("operadores/{id:guid}/servicios-envio")]
+    [Authorize(Policy = "envios.crear")]
+    [Authorize(Policy = nameof(TipoAccesoUsuario.Comercio))]
+    [ProducesResponseType<IReadOnlyList<NexoRuta.Application.Envios.Repositories.ServicioEnvioDisponible>>(200)]
+    public async Task<IActionResult> Servicios(Guid id, [FromQuery, System.ComponentModel.DataAnnotations.Required] double? latitud, [FromQuery, System.ComponentModel.DataAnnotations.Required] double? longitud, CancellationToken ct)
+    {
+        Response.Headers.CacheControl = "no-store";
+        try { return Ok(await servicios.ListarAsync(id, latitud!.Value, longitud!.Value, ct)); }
+        catch (ArgumentException error) { return BadRequest(new { message = error.Message }); }
+    }
+
+    [HttpPost("envios/cotizacion")]
+    [Authorize(Policy = "envios.crear")]
+    [Authorize(Policy = nameof(TipoAccesoUsuario.Comercio))]
+    [ProducesResponseType<TarifaEnvioResponse>(200)]
+    [ProducesResponseType(400), ProducesResponseType(409)]
+    public async Task<IActionResult> Cotizar(CrearEnvioRequest request, CancellationToken ct)
+    {
+        var datos = Comando(request);
+        try { return Ok(TarifaEnvioResponse.Desde(await servicios.CotizarAsync(datos.OperadorId, datos.Servicio, datos.Bultos, ct))); }
+        catch (ArgumentException error) { return BadRequest(new { message = error.Message }); }
+        catch (ConflictoRepartoException error) { return Conflict(new { message = error.Message }); }
+    }
+
+    private static CrearEnvioCommand Comando(CrearEnvioRequest request) => new(
+        request.OperadorId!.Value, request.DestinatarioNombre, request.DestinatarioEmail, request.Direccion,
+        request.Bultos.Select(b => new BultoDeclarado(b.Codigo, b.PesoGramos, b.LargoCentimetros, b.AnchoCentimetros, b.AltoCentimetros)).ToArray(),
+        new ServicioEnvioDeclarado(request.Servicio.ZonaId!.Value, request.Servicio.Latitud!.Value,
+            request.Servicio.Longitud!.Value, request.Servicio.Modalidad) { VersionTarifarioEsperada = request.Servicio.VersionTarifarioEsperada });
+
+    [HttpGet("envios/{id:guid}/tarifa")]
+    [Authorize(Policy = "envios.consultar")]
+    [ProducesResponseType<TarifaEnvioResponse>(200)]
+    public async Task<IActionResult> Tarifa(Guid id, CancellationToken ct)
+    {
+        Response.Headers.CacheControl = "no-store";
+        var result = await servicios.ObtenerCargoAsync(id, ct);
+        return result is null ? NotFound() : Ok(TarifaEnvioResponse.Desde(result));
+    }
+
+    [HttpGet("envios/{id:guid}/tarifa/historial")]
+    [Authorize(Policy = "envios.consultar")]
+    [ProducesResponseType<IReadOnlyList<TarifaEnvioHistorialResponse>>(200)]
+    public async Task<IActionResult> HistorialTarifa(Guid id, CancellationToken ct)
+    {
+        Response.Headers.CacheControl = "no-store";
+        var rows = await servicios.HistorialAsync(id, ct);
+        if (rows.Count == 0) return NotFound();
+        return Ok(rows.Select(r => new TarifaEnvioHistorialResponse(r.Id, r.AplicadoEnUtc,
+            TarifaEnvioResponse.Desde(r.Calculo), r.Servicio.Latitud, r.Servicio.Longitud, r.VersionZona, r.RevisionZona)).ToArray());
+    }
+
     [HttpPost("envios")]
     [Authorize(Policy = "envios.crear")]
     [Authorize(Policy = nameof(TipoAccesoUsuario.Comercio))]
@@ -39,13 +92,7 @@ public sealed class EnviosController(
         try
         {
             var created = await crearEnvio.EjecutarAsync(
-                new CrearEnvioCommand(
-                    OperadorId: request.OperadorId!.Value,
-                    DestinatarioNombre: request.DestinatarioNombre,
-                    DestinatarioEmail: request.DestinatarioEmail,
-                    Direccion: request.Direccion,
-                    Bultos: request.Bultos.Select(b => new BultoDeclarado(b.Codigo, b.PesoGramos,
-                        b.LargoCentimetros, b.AnchoCentimetros, b.AltoCentimetros)).ToArray()),
+                Comando(request),
                 cancellationToken);
 
             return Created("/api/envios", EnvioCreado.Desde(created));

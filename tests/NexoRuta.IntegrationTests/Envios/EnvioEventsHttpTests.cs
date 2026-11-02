@@ -91,7 +91,7 @@ public sealed class EnvioEventsHttpTests(PostgresFixture postgres) : IClassFixtu
 
     private static object Alta(Guid operatorId, string code) => new
     {
-        OperadorId = operatorId,
+        OperadorId = operatorId, Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(operatorId),
         DestinatarioNombre = "Ada Lovelace",
         DestinatarioEmail = "recipient@example.test",
         Direccion = "18 de Julio 123",

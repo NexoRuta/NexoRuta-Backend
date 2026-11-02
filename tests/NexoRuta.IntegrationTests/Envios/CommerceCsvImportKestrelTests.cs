@@ -23,7 +23,7 @@ namespace NexoRuta.IntegrationTests.Envios;
 public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xunit.Abstractions.ITestOutputHelper output) : IClassFixture<PostgresFixture>
 {
     private const long MaximumFileBytes = 5 * 1024 * 1024;
-    private const string Header = "referenciaExterna,nombreDestinatario,emailDestinatario,direccion,codigoBulto,pesoGramos,largoCentimetros,anchoCentimetros,altoCentimetros";
+    private const string Header = "referenciaExterna,nombreDestinatario,emailDestinatario,direccion,codigoBulto,pesoGramos,largoCentimetros,anchoCentimetros,altoCentimetros,zonaId,latitud,longitud,modalidad";
 
     [Fact]
     public async Task KestrelAndCommerceBrowserUseIsolatedPostgresForImportAndReimport()
@@ -114,7 +114,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             var beforeIndividual = await CountsAsync(database);
             using (var individual = await http.PostAsJsonAsync("/api/envios", new
             {
-                OperadorId = operatorId,
+                OperadorId = operatorId, Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(operatorId),
                 DestinatarioNombre = "Individual Kestrel recipient",
                 DestinatarioEmail = "individual-kestrel@example.test",
                 Direccion = "18 de Julio 123",
@@ -364,7 +364,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             api.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", commerceToken);
             using var shipmentResponse = await api.PostAsJsonAsync("/api/envios", new
             {
-                OperadorId = operatorId,
+                OperadorId = operatorId, Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(operatorId),
                 DestinatarioNombre = "DEC04 browser recipient",
                 DestinatarioEmail = "dec04-recipient@example.test",
                 Direccion = "18 de Julio 123",
@@ -586,7 +586,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             api.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", commerceToken);
             using var created = await api.PostAsJsonAsync("/api/envios", new
             {
-                OperadorId = operatorId,
+                OperadorId = operatorId, Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(operatorId),
                 DestinatarioNombre = "DEC07 browser reassignment recipient",
                 DestinatarioEmail = "dec07-recipient@example.test",
                 Direccion = "18 de Julio 123",
@@ -597,7 +597,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             var shipmentId = createdJson.RootElement.GetProperty("id").GetGuid();
             using var receiptCreated = await api.PostAsJsonAsync("/api/envios", new
             {
-                OperadorId = operatorId,
+                OperadorId = operatorId, Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(operatorId),
                 DestinatarioNombre = "DEC07 browser first receipt",
                 DestinatarioEmail = "dec07-receipt@example.test",
                 Direccion = "18 de Julio 456",
@@ -608,7 +608,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             var receiptShipmentId = receiptCreatedJson.RootElement.GetProperty("id").GetGuid();
             using var planningCandidate = await api.PostAsJsonAsync("/api/envios", new
             {
-                OperadorId = operatorId,
+                OperadorId = operatorId, Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(operatorId),
                 DestinatarioNombre = "ZZZ DEC07 optional planning candidate",
                 DestinatarioEmail = "dec07-candidate@example.test",
                 Direccion = "18 de Julio 789",
@@ -1109,7 +1109,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             api.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", commerceToken);
             using var shipmentResponse = await api.PostAsJsonAsync("/api/envios", new
             {
-                OperadorId = operatorId, DestinatarioNombre = "DEC05 browser recipient",
+                OperadorId = operatorId, Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(operatorId), DestinatarioNombre = "DEC05 browser recipient",
                 DestinatarioEmail = "dec05-recipient@example.test", Direccion = "18 de Julio 123",
                 Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "DEC05-BROWSER", PesoGramos = 500m, LargoCentimetros = 20m, AnchoCentimetros = 15m, AltoCentimetros = 10m } }
             });
@@ -1387,7 +1387,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
 
     private static string Csv(params string[] rows) => Header + "\r\n" + string.Join("\r\n", rows);
     private static string Row(string reference, string name = "Ada Lovelace", string weight = "500")
-        => $"{reference},{name},ada@example.test,\"18 de Julio 123\",BOX-1,{weight},20,15,10";
+        => $"{reference},{name},ada@example.test,\"18 de Julio 123\",BOX-1,{weight},20,15,10,,-34.901,-56.201,Estandar";
 
     private static string FindWorkspaceRoot()
     {

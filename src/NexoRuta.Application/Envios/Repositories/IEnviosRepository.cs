@@ -10,14 +10,15 @@ public interface IEnviosRepository
     Task BloquearReferenciasImportacionAsync(IReadOnlyCollection<string> referencias, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<IdentidadEnvioImportadoEncontrada>> BuscarIdentidadesImportacionAsync(
         IReadOnlyCollection<string> referencias, CancellationToken cancellationToken = default);
-    Task GuardarImportadosAsync(
+    Task<IReadOnlyList<NexoRuta.Domain.Tarifas.ResultadoCalculoTarifa>> GuardarImportadosAsync(
         IReadOnlyList<EnvioImportadoParaPersistir> envios, CancellationToken cancellationToken = default);
     Task<Guid?> ObtenerVersionReglasParaAdmisionAsync(Guid operadorId, CancellationToken cancellationToken = default);
-    Task GuardarAsync(
+    Task<NexoRuta.Domain.Tarifas.ResultadoCalculoTarifa> GuardarAsync(
         Envio envio,
         Destinatario destinatario,
         Direccion direccion,
         IReadOnlyList<Bulto> bultos,
+        NexoRuta.Application.Envios.Commands.ServicioEnvioDeclarado servicio,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<EnvioDetalle>> ListarAsync(

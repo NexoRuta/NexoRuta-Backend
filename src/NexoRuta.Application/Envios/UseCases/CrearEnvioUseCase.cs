@@ -19,8 +19,8 @@ public sealed class CrearEnvioUseCase(IEnviosRepository repository, IUsuarioActu
     {
         var admission = await ObtenerAdmisionAsync(command.OperadorId, cancellationToken);
         var prepared = CrearAgregado(admission, command);
-        await repository.GuardarAsync(prepared.Envio, prepared.Destinatario, prepared.Direccion, prepared.Bultos, cancellationToken);
-        return Resultado(prepared);
+        var tarifa = await repository.GuardarAsync(prepared.Envio, prepared.Destinatario, prepared.Direccion, prepared.Bultos, command.Servicio, cancellationToken);
+        return Resultado(prepared, tarifa);
     }
 
     public async Task<IReadOnlyList<EnvioCreado>> EjecutarImportadosAsync(
@@ -40,10 +40,10 @@ public sealed class CrearEnvioUseCase(IEnviosRepository repository, IUsuarioActu
             return (Solicitud: solicitud, Aggregate: aggregate);
         }).ToArray();
 
-        await repository.GuardarImportadosAsync(prepared.Select(x => new EnvioImportadoParaPersistir(
-            x.Aggregate.Envio, x.Aggregate.Destinatario, x.Aggregate.Direccion, x.Aggregate.Bultos,
+        var tarifas = await repository.GuardarImportadosAsync(prepared.Select(x => new EnvioImportadoParaPersistir(
+            x.Aggregate.Envio, x.Aggregate.Destinatario, x.Aggregate.Direccion, x.Aggregate.Bultos, x.Solicitud.Datos.Servicio,
             x.Solicitud.ReferenciaExterna, x.Solicitud.VersionHuella, x.Solicitud.Huella)).ToArray(), cancellationToken);
-        return prepared.Select(x => Resultado(x.Aggregate)).ToArray();
+        return prepared.Select((x, i) => Resultado(x.Aggregate, tarifas[i])).ToArray();
     }
 
     private async Task<Admission> ObtenerAdmisionAsync(Guid operadorId, CancellationToken cancellationToken)
@@ -79,7 +79,7 @@ public sealed class CrearEnvioUseCase(IEnviosRepository repository, IUsuarioActu
         return new PreparedShipment(envio, destinatario, direccion, bultos, admission);
     }
 
-    private static EnvioCreado Resultado(PreparedShipment prepared)
+    private static EnvioCreado Resultado(PreparedShipment prepared, NexoRuta.Domain.Tarifas.ResultadoCalculoTarifa tarifa)
         => new(
             Id: prepared.Envio.Id,
             Origen: new OrigenEnvio(
@@ -92,7 +92,7 @@ public sealed class CrearEnvioUseCase(IEnviosRepository repository, IUsuarioActu
             Bultos: prepared.Bultos.Select(b => new BultoDetalle(b.Codigo, b.PesoGramos,
                 b.LargoCentimetros, b.AnchoCentimetros, b.AltoCentimetros)
                 { Custodia = b.Custodia.ToString() }).ToArray(),
-            CreadoEnUtc: prepared.Envio.CreadoEnUtc);
+            CreadoEnUtc: prepared.Envio.CreadoEnUtc, Tarifa: tarifa);
 
     private sealed record Admission(
         NexoRuta.Application.Administracion.Context.ContextoUsuario Contexto,

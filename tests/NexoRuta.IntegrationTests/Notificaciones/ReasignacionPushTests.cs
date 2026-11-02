@@ -173,7 +173,7 @@ public sealed partial class PushOutboxTests
         await p.Client.SetBearerForAccessAsync(p.Data, comercio.Id);
         using var created = await p.Client.PostAsJsonAsync("/api/envios", new
         {
-            OperadorId = p.Aviso.OperadorId, DestinatarioNombre = "Otro destino",
+            OperadorId = p.Aviso.OperadorId, Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(p.Aviso.OperadorId), DestinatarioNombre = "Otro destino",
             DestinatarioEmail = "destinatario@example.test", Direccion = "Otra dirección de prueba",
             Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = Guid.NewGuid().ToString("N"), PesoGramos = 100m, LargoCentimetros = 1m, AnchoCentimetros = 1m, AltoCentimetros = 1m } }
         });

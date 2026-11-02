@@ -11,6 +11,7 @@ public sealed record EnvioDetalle(
     IReadOnlyList<BultoDetalle> Bultos,
     DateTimeOffset CreadoEnUtc)
 {
+    public NexoRuta.Domain.Tarifas.ResultadoCalculoTarifa? Tarifa { get; init; }
     public bool DestinoConfirmado { get; init; }
     public string? ReferenciaExterna { get; init; }
     public string DestinatarioEmail { get; init; } = string.Empty;

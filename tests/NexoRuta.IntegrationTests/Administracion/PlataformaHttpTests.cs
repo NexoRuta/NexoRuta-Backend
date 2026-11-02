@@ -55,7 +55,7 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
     public async Task AdministrativeEndpointsRequireAuthentication()
     {
         var database = await postgres.CreateDatabaseAsync();
-        using var factory = database.CreateApiFactory();
+        using var factory = database.CreateShippingApiFactory();
         using var client = factory.CreateHttpClient();
         foreach (var kind in new[] { "operadores", "comercios" })
         {
@@ -191,7 +191,7 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
     public async Task OrganizationAdministratorsCannotUsePlatformOrGrantPlatformPermissions(bool commerce)
     {
         var database = await postgres.CreateDatabaseAsync();
-        using var factory = database.CreateApiFactory();
+        using var factory = database.CreateShippingApiFactory();
         using var client = factory.CreateHttpClient();
         await using var db = database.CreateDbContext();
         var access = await db.AccesosUsuario.SingleAsync(x => commerce ? x.ComercioId != null : x.OperadorId != null);
@@ -306,7 +306,7 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
     public async Task TokenScopeCannotBeReinterpretedEvenWithAnOtherwiseValidSignature()
     {
         var database = await postgres.CreateDatabaseAsync();
-        using var factory = database.CreateApiFactory();
+        using var factory = database.CreateShippingApiFactory();
         using var client = factory.CreateHttpClient();
         await Initialize(database);
         await using var db = database.CreateDbContext();
@@ -365,7 +365,7 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
         {
             using var response = await client.PostAsJsonAsync("/api/envios", new
             {
-                OperadorId = op, DestinatarioNombre = "Recipient", DestinatarioEmail = "destinatario@example.test", Direccion = "Delivery address", Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "BOX", PesoGramos = 100, LargoCentimetros = 10, AnchoCentimetros = 10, AltoCentimetros = 10 } }
+                OperadorId = op, Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(op), DestinatarioNombre = "Recipient", DestinatarioEmail = "destinatario@example.test", Direccion = "Delivery address", Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "BOX", PesoGramos = 100, LargoCentimetros = 10, AnchoCentimetros = 10, AltoCentimetros = 10 } }
             });
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         }

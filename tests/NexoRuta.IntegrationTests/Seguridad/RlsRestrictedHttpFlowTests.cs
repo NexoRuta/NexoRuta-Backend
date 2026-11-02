@@ -53,7 +53,7 @@ public sealed class RlsRestrictedHttpFlowTests(PostgresFixture postgres) : IClas
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", await LoginAsync(client, commerceEmail));
         using var created = await client.PostAsJsonAsync("/api/envios", new
         {
-            OperadorId = operatorId,
+            OperadorId = operatorId, Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(operatorId),
             DestinatarioNombre = "Ada Lovelace", DestinatarioEmail = "destinatario@example.test",
             Direccion = "18 de Julio 123",
             Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "RLS-1", PesoGramos = 500m, LargoCentimetros = 20m, AnchoCentimetros = 10m, AltoCentimetros = 5m } }
@@ -64,7 +64,7 @@ public sealed class RlsRestrictedHttpFlowTests(PostgresFixture postgres) : IClas
 
         using var importedCreated = await client.PostAsJsonAsync("/api/envios", new
         {
-            OperadorId = operatorId,
+            OperadorId = operatorId, Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(operatorId),
             DestinatarioNombre = "Grace Hopper", DestinatarioEmail = "grace@example.test",
             Direccion = "18 de Julio 456",
             Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "RLS-2", PesoGramos = 700m, LargoCentimetros = 25m, AnchoCentimetros = 12m, AltoCentimetros = 6m } }
@@ -265,7 +265,7 @@ public sealed class RlsRestrictedHttpFlowTests(PostgresFixture postgres) : IClas
     {
         using var response = await client.PostAsJsonAsync("/api/envios", new
         {
-            OperadorId = operatorId,
+            OperadorId = operatorId, Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(operatorId),
             DestinatarioNombre = "History recipient",
             DestinatarioEmail = "history-recipient@example.test",
             Direccion = "18 de Julio 123",
@@ -304,7 +304,7 @@ public sealed class RlsRestrictedHttpFlowTests(PostgresFixture postgres) : IClas
 
         using var response = await client.PostAsJsonAsync("/api/envios", new
         {
-            OperadorId = operatorId,
+            OperadorId = operatorId, Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(operatorId),
             DestinatarioNombre = "Ada Lovelace", DestinatarioEmail = "destinatario@example.test",
             Direccion = "18 de Julio 123",
             Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "RLS-DENY-1", PesoGramos = 500m, LargoCentimetros = 20m, AnchoCentimetros = 10m, AltoCentimetros = 5m } }

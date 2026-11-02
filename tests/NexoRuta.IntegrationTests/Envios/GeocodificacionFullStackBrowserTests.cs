@@ -17,10 +17,15 @@ namespace NexoRuta.IntegrationTests.Envios;
 public sealed class GeocodificacionFullStackBrowserTests(PostgresFixture postgres) : IClassFixture<PostgresFixture>
 {
     [FullStackFact]
-    public async Task CommerceAuthenticatedApiAndRestrictedPostgresUseControlledProviderOnly()
+    public Task CommerceAuthenticatedApiAndRestrictedPostgresUseControlledProviderOnly() => EjecutarAsync(false);
+
+    [FullStackFact]
+    public Task AdmissionSelectsAdjustsQuotesSavesAndReopensBeforeShipping() => EjecutarAsync(true);
+
+    private async Task EjecutarAsync(bool alta)
     {
         var data = await postgres.CreateDatabaseAsync();
-        using (var seed = data.CreateApiFactory()) using (seed.CreateHttpClient()) { }
+        using (var seed = data.CreateShippingApiFactory()) using (seed.CreateHttpClient()) { }
         var runtime = await RlsRestrictedHttpFlowTests.RestrictApiAsync(data);
         var settings = RlsRestrictedHttpFlowTests.ApiSettings();
         // Only this isolated fixture traverses the adapter; its transport cannot reach any network.
@@ -43,13 +48,17 @@ public sealed class GeocodificacionFullStackBrowserTests(PostgresFixture postgre
         using (var anonymous = await api.PostAsJsonAsync($"/api/envios/{Guid.NewGuid()}/destino/busqueda", new { Consulta = "Primera" }))
             Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
         await api.SetBearerForAccessAsync(data, commerce.Id);
-        using var created = await api.PostAsJsonAsync("/api/envios", new
+        var shipment = Guid.Empty;
+        if (!alta)
         {
-            OperadorId = op.Id, DestinatarioNombre = "Synthetic geocoding recipient", DestinatarioEmail = "geo@example.test",
+            using var created = await api.PostAsJsonAsync("/api/envios", new
+        {
+            OperadorId = op.Id, Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(op.Id), DestinatarioNombre = "Synthetic geocoding recipient", DestinatarioEmail = "geo@example.test",
             Direccion = "Geocoding synthetic 123", Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "GEO-FULLSTACK", PesoGramos = 100, LargoCentimetros = 10, AnchoCentimetros = 10, AltoCentimetros = 10 } }
         });
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
-        var shipment = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+            shipment = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        }
         var workspace = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../.."));
         var contentRoot = Path.Combine(workspace, "frontend/src/NexoRuta.Commerce");
         var dll = Path.Combine(contentRoot, "bin/Debug/net10.0/NexoRuta.Commerce.dll");
@@ -82,11 +91,12 @@ public sealed class GeocodificacionFullStackBrowserTests(PostgresFixture postgre
             }
             Assert.True(ready, "Isolated Commerce failed readiness.");
             var nodeStart = new ProcessStartInfo("node") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
-            nodeStart.ArgumentList.Add(Path.Combine(workspace, "frontend/tests/browser/destination-geocoding.cjs"));
+            nodeStart.ArgumentList.Add(Path.Combine(workspace, alta ? "frontend/tests/browser/admission.cjs" : "frontend/tests/browser/destination-geocoding.cjs"));
             nodeStart.Environment["DESTINATION_BASE_URL"] = address;
             nodeStart.Environment["DESTINATION_EMAIL"] = email;
             nodeStart.Environment["DESTINATION_PASSWORD"] = AuthenticationTestData.Password;
             nodeStart.Environment["DESTINATION_SHIPMENT"] = shipment.ToString();
+            nodeStart.Environment["ADMISSION_OPERATOR"] = op.Id.ToString();
             nodeStart.Environment["DESTINATION_FULLSTACK"] = "true";
             nodeStart.Environment["NEXORUTA_DESTINATION_BROWSER_DIR"] = outputDirectory;
             File.Delete(Path.Combine(outputDirectory,"conflict.ready"));File.Delete(Path.Combine(outputDirectory,"conflict.applied"));
@@ -94,21 +104,39 @@ public sealed class GeocodificacionFullStackBrowserTests(PostgresFixture postgre
             var output = node.StandardOutput.ReadToEndAsync(); var error = node.StandardError.ReadToEndAsync();
             using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
             try {
+                if (!alta)
+                {
                 while(!File.Exists(Path.Combine(outputDirectory,"conflict.ready"))) {
                     Assert.False(node.HasExited,"Browser exited before concurrency checkpoint");
                     await Task.Delay(50,timeout.Token);
                 }
                 using var concurrent=await api.PutAsJsonAsync($"/api/envios/{shipment}/destino",new {
-                    Version=2,Latitud=-34.7,Longitud=-56.0,Direccion="Concurrente 123"},timeout.Token);
+                    Version=3,Latitud=-34.7,Longitud=-56.0,Direccion="Concurrente 123"},timeout.Token);
                 Assert.Equal(HttpStatusCode.NoContent,concurrent.StatusCode);
                 await File.WriteAllTextAsync(Path.Combine(outputDirectory,"conflict.applied"),"applied",timeout.Token);
+                }
                 await node.WaitForExitAsync(timeout.Token);
             }
             catch (OperationCanceledException) { node.Kill(true); throw; }
             Assert.True(node.ExitCode == 0, await output + await error);
             db.ChangeTracker.Clear();
+            if (alta)
+            {
+                Assert.Single(await db.Envios.ToArrayAsync());
+                Assert.Equal(2, await db.Bultos.CountAsync());
+                var saved = await db.Direcciones.SingleAsync();
+                Assert.Equal("Primera 123", saved.Descripcion); Assert.Equal(-34.91, saved.Latitud); Assert.Equal(-56.21, saved.Longitud);
+                Assert.NotNull(saved.ConfirmadaEnUtc);
+                Assert.Equal(new[] { "Primera" }, provider.Queries.ToArray());
+                Assert.Contains(queries, q => q.Path == "/api/envios/destino/busqueda" && q.Status == 200 && q.Authenticated);
+                Assert.Contains(queries, q => q.Path == "/api/envios/cotizacion" && q.Status == 200 && q.Authenticated);
+                Assert.Contains(queries, q => q.Path == "/api/envios" && q.Method == "POST" && q.Status == 201 && q.Authenticated);
+                Assert.Equal(2, await db.Database.SqlQuery<int>($"SELECT count(*)::int AS \"Value\" FROM public.\"TarifasEnvio\"").SingleAsync());
+            }
+            else
+            {
             var saved = await db.Direcciones.SingleAsync();
-            Assert.Equal(5, saved.Version); Assert.Equal(-34.91, saved.Latitud); Assert.Equal(-56.21, saved.Longitud);
+            Assert.Equal(6, saved.Version); Assert.Equal(-34.91, saved.Latitud); Assert.Equal(-56.21, saved.Longitud);
             Assert.Equal("Cambio 123", saved.Descripcion); Assert.Equal(commerce.UsuarioId, saved.ConfirmadaPorUsuarioId);
             Assert.Equal(3, await db.Database.SqlQuery<int>($"SELECT count(*)::integer AS \"Value\" FROM public.\"UsoGeocodificacion\"").SingleAsync());
             Assert.Equal(new[] { "Primera", "Cambio", "Fallo" }, provider.Queries.ToArray());
@@ -116,6 +144,7 @@ public sealed class GeocodificacionFullStackBrowserTests(PostgresFixture postgre
             Assert.Contains(queries, x => x.Path.EndsWith("/busqueda") && x.Status == 503 && x.Authenticated);
             Assert.Equal(5, queries.Count(x => x.Method == "PUT" && x.Status == 204 && x.Authenticated));
             Assert.Single(queries.Where(x=>x.Method=="PUT"&&x.Status==409&&x.Authenticated));
+            }
         }
         finally
         {
@@ -138,7 +167,7 @@ public sealed class GeocodificacionFullStackBrowserTests(PostgresFixture postgre
             app.Use(async (ctx, continuation) =>
             {
                 await continuation(); var path = ctx.Request.Path.Value ?? "";
-                if (path.Contains("/destino")) queries.Enqueue(new(ctx.Request.Method, path, ctx.Response.StatusCode, ctx.User.Identity?.IsAuthenticated == true));
+                if (path.StartsWith("/api/envios", StringComparison.Ordinal)) queries.Enqueue(new(ctx.Request.Method, path, ctx.Response.StatusCode, ctx.User.Identity?.IsAuthenticated == true));
             }); next(app);
         };
     }

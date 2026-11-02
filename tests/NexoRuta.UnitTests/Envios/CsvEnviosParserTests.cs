@@ -5,7 +5,7 @@ namespace NexoRuta.UnitTests.Envios;
 
 public sealed class CsvEnviosParserTests
 {
-    private const string Header = "referenciaExterna,nombreDestinatario,emailDestinatario,direccion,codigoBulto,pesoGramos,largoCentimetros,anchoCentimetros,altoCentimetros";
+    private const string Header = "referenciaExterna,nombreDestinatario,emailDestinatario,direccion,codigoBulto,pesoGramos,largoCentimetros,anchoCentimetros,altoCentimetros,zonaId,latitud,longitud,modalidad";
     private const string Row = "REF-1,María,maria@example.test,Dirección,BX-1,1200.50,30,20,10";
 
     [Fact]

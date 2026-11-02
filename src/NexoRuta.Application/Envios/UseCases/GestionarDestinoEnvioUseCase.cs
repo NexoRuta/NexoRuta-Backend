@@ -8,6 +8,13 @@ namespace NexoRuta.Application.Envios.UseCases;
 
 public sealed class GestionarDestinoEnvioUseCase(IUsuarioActual usuario, IDestinosEnvioRepository destinos, IGeocodificador geocodificador)
 {
+    public async Task<PropuestasDestinoDatos> BuscarParaAltaAsync(string consulta, CancellationToken ct)
+    {
+        (await usuario.ObtenerAsync(ct)).RequerirComercio();
+        var propuestas = await geocodificador.BuscarAsync(consulta, ct, autocompletar: true);
+        return new(Guid.Empty, consulta, 0, geocodificador.Atribucion, propuestas);
+    }
+
     public async Task<DestinoEnvioDatos?> ObtenerAsync(Guid envioId, CancellationToken ct)
     {
         var actor = await usuario.ObtenerAsync(ct);

@@ -1,8 +1,10 @@
+using System.Text.Json.Serialization;
 using System.ComponentModel.DataAnnotations;
 using NexoRuta.Api.Validation;
 
 namespace NexoRuta.Api.Features.Envios.Contracts.Requests;
 
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed class CrearEnvioRequest
 {
     [Required(ErrorMessage = "Seleccioná un operador para el envío.")]
@@ -17,10 +19,14 @@ public sealed class CrearEnvioRequest
     [Required, StringLength(240)]
     public string Direccion { get; set; } = "";
 
+    [Required]
+    public ServicioEnvioRequest Servicio { get; set; } = new();
+
     [Required, MinLength(1)]
     public List<BultoDeclaradoRequest> Bultos { get; set; } = [];
 }
 
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed class BultoDeclaradoRequest
 {
     [Required, StringLength(80)]
@@ -37,4 +43,15 @@ public sealed class BultoDeclaradoRequest
 
     [Required, Range(typeof(decimal), "0.01", "999999999", ParseLimitsInInvariantCulture = true)]
     [DosDecimales] public decimal AltoCentimetros { get; set; }
+}
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed class ServicioEnvioRequest
+{
+    public Guid? VersionTarifarioEsperada { get; set; }
+    [Required] public Guid? ZonaId { get; set; }
+    [Required, Range(-90d, 90d)] public double? Latitud { get; set; }
+    [Required, Range(-180d, 180d)] public double? Longitud { get; set; }
+    [Required, RegularExpression("^(Estandar|Urgente)$")]
+    public string Modalidad { get; set; } = "Estandar";
 }

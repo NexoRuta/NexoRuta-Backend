@@ -172,6 +172,9 @@ public sealed class IntegrationDatabase
         return new(optionsWithInterceptors);
     }
 
+    public IntegrationApiFactory CreateShippingApiFactory(params IInterceptor[] interceptors) =>
+        new(this, interceptors: interceptors, seedShippingServices: true);
+
     public IntegrationApiFactory CreateApiFactory(params IInterceptor[] interceptors) =>
         new(this, interceptors: interceptors);
 }

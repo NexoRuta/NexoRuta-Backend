@@ -28,7 +28,8 @@ public static class CsvEnviosParser
     private static readonly string[] RequiredHeader =
     [
         "referenciaExterna", "nombreDestinatario", "emailDestinatario", "direccion", "codigoBulto",
-        "pesoGramos", "largoCentimetros", "anchoCentimetros", "altoCentimetros"
+        "pesoGramos", "largoCentimetros", "anchoCentimetros", "altoCentimetros",
+        "zonaId", "latitud", "longitud", "modalidad"
     ];
 
     public static IReadOnlyList<CsvEnviosRecord> Parse(ReadOnlyMemory<byte> content)
@@ -70,7 +71,7 @@ public static class CsvEnviosParser
             throw new CsvEnviosFileException(CsvEnviosFileErrorCode.InvalidCsv, "El encabezado CSV está malformado.", error);
         }
         if (header is null || !header.SequenceEqual(RequiredHeader, StringComparer.Ordinal))
-            throw new CsvEnviosFileException(CsvEnviosFileErrorCode.InvalidHeader, "El encabezado CSV no coincide con la plantilla requerida.");
+            throw new CsvEnviosFileException(CsvEnviosFileErrorCode.InvalidHeader, "El encabezado no corresponde a la plantilla CSV versión 2 (incluye zonaId, latitud, longitud y modalidad). Descargá la plantilla vigente.");
 
         var rows = new List<CsvEnviosRecord>();
         var record = 0;

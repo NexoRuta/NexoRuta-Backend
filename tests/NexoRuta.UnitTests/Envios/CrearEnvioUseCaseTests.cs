@@ -186,7 +186,7 @@ public sealed class CrearEnvioUseCaseTests
     private static CrearEnvioCommand Comando(Guid operadorId)
         => new(OperadorId: operadorId, DestinatarioNombre: "Ana",
                 DestinatarioEmail: "destinatario@example.test", Direccion: "18 de Julio 123",
-            Bultos: [new BultoDeclarado("B-001", 1250m, 30m, 20m, 10m)]);
+            Bultos: [new BultoDeclarado("B-001", 1250m, 30m, 20m, 10m)], Servicio: new(operadorId, -34.901, -56.201, "Estandar"));
 
     private sealed class UsuarioActual(ContextoUsuario cuenta) : IUsuarioActual
     {
@@ -229,15 +229,17 @@ public sealed class CrearEnvioUseCaseTests
             IReadOnlyCollection<string> referencias, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 
-        public Task GuardarImportadosAsync(IReadOnlyList<NexoRuta.Application.Envios.Importacion.EnvioImportadoParaPersistir> envios,
+        public Task<IReadOnlyList<NexoRuta.Domain.Tarifas.ResultadoCalculoTarifa>> GuardarImportadosAsync(IReadOnlyList<NexoRuta.Application.Envios.Importacion.EnvioImportadoParaPersistir> envios,
             CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 
-        public Task GuardarAsync(Envio envio, Destinatario destinatario, Direccion direccion, IReadOnlyList<Bulto> bultos,
+        public Task<NexoRuta.Domain.Tarifas.ResultadoCalculoTarifa> GuardarAsync(Envio envio, Destinatario destinatario, Direccion direccion, IReadOnlyList<Bulto> bultos, ServicioEnvioDeclarado servicio,
             CancellationToken cancellationToken = default)
         {
             Guardado = (envio, destinatario, direccion, bultos);
-            return Task.CompletedTask;
+            return Task.FromResult(NexoRuta.Domain.Tarifas.CalculadoraTarifas.Calcular(
+                new(servicio.ZonaId,NexoRuta.Domain.Tarifas.ModalidadTarifaria.Estandar,100m,10m,200m,[]),
+                bultos.Select(b=>new NexoRuta.Domain.Tarifas.BultoCalculo(b.PesoGramos,b.LargoCentimetros,b.AnchoCentimetros,b.AltoCentimetros)).ToArray()));
         }
 
         public Task<IReadOnlyList<EnvioDetalle>> ListarAsync(Guid? operadorId, Guid? comercioId, CancellationToken cancellationToken = default)

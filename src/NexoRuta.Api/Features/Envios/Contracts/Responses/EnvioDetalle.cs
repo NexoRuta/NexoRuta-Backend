@@ -15,6 +15,7 @@ public sealed record EnvioDetalle(
     IReadOnlyList<BultoDetalle> Bultos,
     DateTimeOffset CreadoEnUtc)
 {
+    public TarifaEnvioResponse? Tarifa { get; init; }
     public bool DestinoConfirmado { get; init; }
     public string? ReferenciaExterna { get; init; }
     public string DestinatarioEmail { get; init; } = string.Empty;
@@ -39,6 +40,7 @@ public sealed record EnvioDetalle(
             AnchoCentimetros: bulto.AnchoCentimetros,
             AltoCentimetros: bulto.AltoCentimetros) { Custodia = bulto.Custodia }).ToArray())
     {
+        Tarifa = envio.Tarifa is null ? null : TarifaEnvioResponse.Desde(envio.Tarifa),
         DestinoConfirmado = envio.DestinoConfirmado,
         ReferenciaExterna = envio.ReferenciaExterna,
         DestinatarioEmail = envio.DestinatarioEmail
