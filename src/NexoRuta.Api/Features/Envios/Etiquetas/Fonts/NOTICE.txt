@@ -1,0 +1,4 @@
+﻿OpenSans-Regular.ttf is reused from mobile/src/NexoRuta.Mobile/Resources/Fonts.
+Digitized data copyright (c) 2010-2011, Google Corporation.
+The embedded font metadata declares Apache License, Version 2.0.
+Full license: LICENSE-Apache-2.0.txt.

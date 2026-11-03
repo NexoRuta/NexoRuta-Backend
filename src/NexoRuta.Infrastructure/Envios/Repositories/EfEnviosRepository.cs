@@ -255,7 +255,7 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
             {
                 x.EnvioId,
                 Detail = new BultoDetalle(
-                Codigo: x.Codigo, PesoGramos: x.PesoGramos, LargoCentimetros: x.LargoCentimetros,
+                Id: x.Id, Codigo: x.Codigo, PesoGramos: x.PesoGramos, LargoCentimetros: x.LargoCentimetros,
                 AnchoCentimetros: x.AnchoCentimetros, AltoCentimetros: x.AltoCentimetros)
                 { Custodia = x.Custodia.ToString() }
             })

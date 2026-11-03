@@ -30,7 +30,7 @@ internal static class ServiciosEnvioTestData
         return reglas;
     }
     public static async Task<Guid> PublicarServicioAsync(NexoRutaDbContext db, Guid operador, Guid usuario,
-        decimal importeBase = 100m, decimal porKg = 10m, decimal porM3 = 200m)
+        decimal importeBase = 100m, decimal porKg = 10m, decimal porM3 = 200m, bool incluirUrgente = false)
     {
         await using var tx = await db.BeginOrJoinAsync();
         var root = await db.TarifariosOperador.SingleOrDefaultAsync(t => t.OperadorId == operador);
@@ -47,7 +47,8 @@ internal static class ServiciosEnvioTestData
         if (root is null) { root=TarifarioOperador.Crear(operador); db.TarifariosOperador.Add(root); await db.SaveChangesAsync(); }
         var version = VersionTarifario.CrearBorrador(operador,usuario);
         db.VersionesTarifario.Add(version); await db.SaveChangesAsync();
-        version.ReemplazarConfiguracion(0,[new(operador,ModalidadTarifaria.Estandar,importeBase,porKg,porM3,[])]);
+        ModalidadTarifaria[] modalidades = incluirUrgente ? [ModalidadTarifaria.Estandar, ModalidadTarifaria.Urgente] : [ModalidadTarifaria.Estandar];
+        version.ReemplazarConfiguracion(0, modalidades.Select(modalidad => new TarifaZonaModalidadConfiguracion(operador, modalidad, importeBase, porKg, porM3, [])));
         await db.SaveChangesAsync(); version.Publicar(version.VersionConcurrencia,root.UltimoNumeroPublicacion+1,usuario,new HashSet<Guid>{operador});
         await db.SaveChangesAsync(); root.Publicar(version); await db.SaveChangesAsync(); await tx.CommitAsync(); return version.Id;
     }

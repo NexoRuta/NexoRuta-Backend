@@ -22,19 +22,41 @@ public sealed class EnviosController(
     CrearEnvioUseCase crearEnvio,
     ListarEnviosUseCase listarEnvios,
     ImportarEnviosUseCase importarEnvios,
-    NexoRuta.Application.Envios.Repositories.IServiciosEnvioRepository servicios) : ControllerBase
+    NexoRuta.Application.Envios.Repositories.IServiciosEnvioRepository servicios,
+    NexoRuta.Application.Envios.Repositories.IEnviosRepository admision) : ControllerBase
 {
     [HttpGet("operadores/{id:guid}/servicios-envio")]
     [Authorize(Policy = "envios.crear")]
     [Authorize(Policy = nameof(TipoAccesoUsuario.Comercio))]
     [ProducesResponseType<IReadOnlyList<ServicioEnvioDisponibleResponse>>(200)]
+    [ProducesResponseType(409)]
     public async Task<IActionResult> Servicios(Guid id, [FromQuery, System.ComponentModel.DataAnnotations.Required] double? latitud, [FromQuery, System.ComponentModel.DataAnnotations.Required] double? longitud, CancellationToken ct)
     {
         Response.Headers.CacheControl = "no-store";
         try
         {
+            if (await admision.ObtenerVersionReglasParaAdmisionAsync(id, ct) is null)
+                throw new ReglasEnvioNoDisponiblesException();
             var disponibles = await servicios.ListarAsync(id, latitud!.Value, longitud!.Value, ct);
             return Ok(disponibles.Select(s => new ServicioEnvioDisponibleResponse(s.ZonaId, s.ZonaNombre, s.Modalidad)).ToArray());
+        }
+        catch (ArgumentException error) { return BadRequest(new { message = error.Message }); }
+        catch (ReglasEnvioNoDisponiblesException error) { return Conflict(new { message = error.Message }); }
+        catch (OrganizacionSuspendidaException error) { return BadRequest(new { message = error.Message }); }
+    }
+
+    [HttpGet("operadores/{id:guid}/cobertura-envios")]
+    [Authorize(Policy = "envios.crear")]
+    [Authorize(Policy = nameof(TipoAccesoUsuario.Comercio))]
+    [ProducesResponseType<IReadOnlyList<CoberturaEnvioResponse>>(200)]
+    public async Task<IActionResult> Cobertura(Guid id, CancellationToken ct)
+    {
+        Response.Headers.CacheControl = "no-store";
+        try
+        {
+            var zonas = await servicios.CoberturaAsync(id, ct);
+            return Ok(zonas.Select(z => new CoberturaEnvioResponse(z.ZonaId, z.Nombre,
+                System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(z.Geometria))).ToArray());
         }
         catch (ArgumentException error) { return BadRequest(new { message = error.Message }); }
     }
@@ -47,9 +69,16 @@ public sealed class EnviosController(
     public async Task<IActionResult> Cotizar(CrearEnvioRequest request, CancellationToken ct)
     {
         var datos = Comando(request);
-        try { return Ok(TarifaEnvioResponse.Desde(await servicios.CotizarAsync(datos.OperadorId, datos.Servicio, datos.Bultos, ct))); }
+        try
+        {
+            if (await admision.ObtenerVersionReglasParaAdmisionAsync(datos.OperadorId, ct) is null)
+                throw new ReglasEnvioNoDisponiblesException();
+            return Ok(TarifaEnvioResponse.Desde(await servicios.CotizarAsync(datos.OperadorId, datos.Servicio, datos.Bultos, ct)));
+        }
         catch (ArgumentException error) { return BadRequest(new { message = error.Message }); }
-        catch (ConflictoRepartoException error) { return Conflict(new { message = error.Message }); }
+        catch (OrganizacionSuspendidaException error) { return BadRequest(new { message = error.Message }); }
+        catch (Exception error) when (error is ConflictoRepartoException or ReglasEnvioNoDisponiblesException)
+        { return Conflict(new { message = error.Message }); }
     }
 
     private static CrearEnvioCommand Comando(CrearEnvioRequest request) => new(
@@ -185,6 +214,25 @@ public sealed class EnviosController(
         {
             return BadRequest(new ErrorImportacionEnviosResponse("Validacion", "InvalidRequest", error.Message));
         }
+    }
+
+    [HttpGet("envios/{id:guid}/etiquetas")]
+    [Authorize(Policy = "envios.consultar")]
+    [Produces("application/pdf")]
+    [ProducesResponseType(200), ProducesResponseType(404), ProducesResponseType(422)]
+    public async Task<IActionResult> Etiquetas(Guid id, CancellationToken ct)
+    {
+        Response.Headers.CacheControl = "no-store";
+        try
+        {
+            // ponytail: reuse the scoped read/RLS; a dedicated filtered read can replace this O(n) owner listing at larger volumes.
+            var envio = (await listarEnvios.EjecutarAsync(ct)).SingleOrDefault(e => e.Id == id);
+            if (envio is null) return NotFound();
+            return File(NexoRuta.Api.Features.Envios.Etiquetas.EtiquetasEnvioPdf.Generar(envio),
+                "application/pdf", $"etiquetas-{id:D}.pdf");
+        }
+        catch (AccesoActualNoDisponibleException error) { return Problem(error.Message, statusCode: 503); }
+        catch (InvalidDataException error) { return Problem(error.Message, statusCode: 422); }
     }
 
     [HttpGet("envios")]

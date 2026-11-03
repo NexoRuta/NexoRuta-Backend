@@ -7,6 +7,17 @@ using NexoRuta.Infrastructure.Persistence;
 namespace NexoRuta.Infrastructure.Envios.Repositories;
 public sealed class EfServiciosEnvioRepository(NexoRutaDbContext db, IUsuarioActual usuario) : IServiciosEnvioRepository
 {
+    public async Task<IReadOnlyList<CoberturaEnvioDisponible>> CoberturaAsync(Guid operador, CancellationToken ct)
+    {
+        (await usuario.ObtenerAsync(ct)).RequerirComercio();
+        try
+        {
+            var json = await db.Database.SqlQuery<string>($"SELECT nexoruta_app.shipment_coverage({operador}) AS \"Value\"").SingleAsync(ct);
+            return JsonSerializer.Deserialize<CoberturaEnvioDisponible[]>(json, TarifasAdmision.Json) ?? [];
+        }
+        catch (Npgsql.PostgresException error) when (error.SqlState == "NXR01")
+        { throw new ArgumentException("El operador elegido no est\u00e1 disponible."); }
+    }
     public async Task<IReadOnlyList<ServicioEnvioDisponible>> ListarAsync(Guid operador, double latitud, double longitud, CancellationToken ct)
     {
         (await usuario.ObtenerAsync(ct)).RequerirComercio();

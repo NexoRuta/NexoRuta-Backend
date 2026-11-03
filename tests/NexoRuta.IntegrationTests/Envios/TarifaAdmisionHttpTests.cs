@@ -19,6 +19,29 @@ public sealed class TarifaAdmisionHttpTests(PostgresFixture postgres) : IClassFi
     };
 
     [Fact]
+    public async Task CommerceCoverageUsesSelectedOperatorAndRestrictedRuntime()
+    {
+        var data = await postgres.CreateDatabaseAsync();
+        using (var seed = data.CreateShippingApiFactory()) using (seed.CreateHttpClient()) { }
+        var runtime = await RlsRestrictedHttpFlowTests.RestrictApiAsync(data);
+        using var factory = new IntegrationApiFactory(runtime, settings: RlsRestrictedHttpFlowTests.ApiSettings());
+        using var client = factory.CreateHttpClient();
+        await using var db = data.CreateDbContext();
+        var operador = await db.Operadores.Select(o => o.Id).SingleAsync();
+        var path = $"/api/operadores/{operador}/cobertura-envios";
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync(path)).StatusCode);
+        await client.SetBearerForAccessAsync(data, await db.AccesosUsuario.Where(a => a.ComercioId != null).Select(a => a.Id).SingleAsync());
+        using var response = await client.GetAsync(path);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var zones = await response.Content.ReadFromJsonAsync<JsonElement[]>();
+        var zone = Assert.Single(zones!);
+        Assert.Equal(operador, zone.GetProperty("zonaId").GetGuid());
+        Assert.Equal("MultiPolygon", zone.GetProperty("geometria").GetProperty("type").GetString());
+        Assert.False(zone.TryGetProperty("tarifas", out _));
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync($"/api/operadores/{Guid.NewGuid()}/cobertura-envios")).StatusCode);
+    }
+
+    [Fact]
     public async Task AltaCalculaTodosLosBultosYGuardaCargoPuntoYProcedenciaConRolRestringido()
     {
         var data=await postgres.CreateDatabaseAsync();
