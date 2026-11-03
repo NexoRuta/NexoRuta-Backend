@@ -43,8 +43,7 @@ internal static class RepartoHttpData
         }
         if (recibir)
         {
-            using var recepcion = await client.PostAsJsonAsync($"/api/deposito/envios/{envio.Id}/recepcion", new { Version = 0 });
-            Assert.Equal(HttpStatusCode.NoContent, recepcion.StatusCode);
+            await RecepcionTestData.RecibirInicialAsync(data, client, envio.Id);
         }
         return new(operador.Id, idVehiculo, envio.Id);
     }

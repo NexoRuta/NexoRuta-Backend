@@ -165,6 +165,8 @@ public sealed partial class EfRutasRepository(NexoRutaDbContext db, TimeProvider
         var envio = await db.Envios.SingleOrDefaultAsync(x => x.OperadorId == operadorId && x.Id == envioId, ct);
         if (envio is null) return false;
         if (envio.Version != version) throw new ConflictoRepartoException("El envío cambió antes de recibirlo.");
+        if (envio.Estado == EstadoEnvio.Admitido)
+            throw new ConflictoRepartoException("La primera recepción requiere escanear y cotejar cada bulto en Depósito.");
         var bultos = await db.Bultos.Where(x => x.OperadorId == operadorId && x.EnvioId == envioId).ToArrayAsync(ct);
         var pendientes = bultos.Where(b => b.Custodia == EstadoCustodiaBulto.Repartidor).ToArray();
         var cierres = await (from o in db.OperacionesJornada.AsNoTracking()

@@ -79,8 +79,7 @@ public sealed partial class OcupacionFlotaHttpTests(PostgresFixture postgres) : 
         var second = new Envio(first.OperadorId, first.ComercioId, first.CreadoPorUsuarioId, first.DestinatarioId, first.DireccionId, first.VersionReglasId);
         db.Envios.Add(second); db.Bultos.Add(new Bulto(first.OperadorId, second.Id, "SECOND", 1000, 10, 10, 10)); await db.SaveChangesAsync();
         await ServiciosEnvioTestData.AdjuntarCargoAsync(db, second, await db.Bultos.Where(b => b.EnvioId == second.Id).ToArrayAsync());
-        using var receive = await client.PostAsJsonAsync($"/api/deposito/envios/{second.Id}/recepcion", new { Version = 0 });
-        Assert.Equal(HttpStatusCode.NoContent, receive.StatusCode);
+        await RecepcionTestData.RecibirInicialAsync(data, client, second.Id);
         return new(p.AccesoId, p.VehiculoId, second.Id);
     }
 

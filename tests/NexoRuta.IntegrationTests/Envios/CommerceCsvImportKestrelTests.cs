@@ -401,9 +401,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             using var vehicleJson = JsonDocument.Parse(await vehicleResponse.Content.ReadAsStringAsync());
             var vehicleId = vehicleJson.RootElement.GetProperty("id").GetGuid();
             await VerifyVehicleAsync(api, vehicleId);
-            using var received = await api.PostAsJsonAsync($"/api/deposito/envios/{shipmentId}/recepcion", new { Version = 0 });
-            Assert.True(received.StatusCode == HttpStatusCode.NoContent,
-                $"Deposit receipt failed: {(int)received.StatusCode} {await received.Content.ReadAsStringAsync()}");
+            await RecepcionTestData.RecibirInicialAsync(database, api, shipmentId);
 
             var fecha = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow,
                 TimeZoneInfo.FindSystemTimeZoneById("America/Montevideo")).DateTime);
@@ -666,10 +664,8 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             Assert.Equal(HttpStatusCode.OK, targetVehicleResponse.StatusCode);
             using var targetVehicleJson = JsonDocument.Parse(await targetVehicleResponse.Content.ReadAsStringAsync());
 
-            using var received = await api.PostAsJsonAsync($"/api/deposito/envios/{shipmentId}/recepcion", new { Version = 0 });
-            Assert.Equal(HttpStatusCode.NoContent, received.StatusCode);
-            using var receivedCandidate = await api.PostAsJsonAsync($"/api/deposito/envios/{planningCandidateId}/recepcion", new { Version = 0 });
-            Assert.Equal(HttpStatusCode.NoContent, receivedCandidate.StatusCode);
+            await RecepcionTestData.RecibirInicialAsync(database, api, shipmentId);
+            await RecepcionTestData.RecibirInicialAsync(database, api, planningCandidateId);
             var fecha = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow,
                 TimeZoneInfo.FindSystemTimeZoneById("America/Montevideo")).DateTime).AddDays(-1);
             var fechaSeleccionada = fecha.AddDays(1);
@@ -1155,8 +1151,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             using var vehicleJson = JsonDocument.Parse(await vehicleResponse.Content.ReadAsStringAsync());
             var vehicleId = vehicleJson.RootElement.GetProperty("id").GetGuid();
             await VerifyVehicleAsync(api, vehicleId);
-            using var received = await api.PostAsJsonAsync($"/api/deposito/envios/{shipmentId}/recepcion", new { Version = 0 });
-            Assert.Equal(HttpStatusCode.NoContent, received.StatusCode);
+            await RecepcionTestData.RecibirInicialAsync(database, api, shipmentId);
 
             var date = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow,
                 TimeZoneInfo.FindSystemTimeZoneById("America/Montevideo")).DateTime);

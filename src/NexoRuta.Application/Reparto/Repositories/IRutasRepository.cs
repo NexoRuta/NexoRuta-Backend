@@ -20,6 +20,8 @@ public interface IRutasRepository
     Task<ResultadoFlotaDatos?> ConfirmarFlotaAsync(ContextoUsuario actor, Guid vehiculoId,
         string accion, ComandoFlotaDatos datos, CancellationToken ct);
     Task<HojaRutaDatos?> CancelarAsync(Guid operadorId, Guid rutaId, long version, CancellationToken ct);
+    Task<ConsultaRecepcionDatos?> ConsultarRecepcionAsync(Guid op, string codigo, CancellationToken ct);
+    Task<ResultadoRecepcionDatos?> CotejarBultoAsync(ContextoUsuario actor, Guid id, CotejoBultoDatos datos, CancellationToken ct);
     Task<bool> RecibirAsync(Guid operadorId, Guid envioId, long version, CancellationToken ct);
 
     Task<IReadOnlyList<PerfilVialDatos>> PerfilesVialesAsync(Guid op,CancellationToken ct);

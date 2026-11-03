@@ -335,8 +335,7 @@ public sealed class RutasHttpTests(PostgresFixture postgres) : IClassFixture<Pos
             new { Version = 0, Latitud = -34.9, Longitud = -56.2 });
         Assert.Equal(HttpStatusCode.NoContent, destinoSegundo.StatusCode);
         await client.SetBearerForAccessAsync(data, original.AccesoId);
-        using var recepcionSegunda = await client.PostAsJsonAsync($"/api/deposito/envios/{segundoEnvio.Id}/recepcion", new { Version = 0 });
-        Assert.Equal(HttpStatusCode.NoContent, recepcionSegunda.StatusCode);
+        await RecepcionTestData.RecibirInicialAsync(data, client, segundoEnvio.Id);
         var otroRepartidor = await CrearRepartidorAlternativo(data, original.AccesoId);
         var rutaVaciada = (await client.GetFromJsonAsync<HojaRutaResponse[]>($"/api/rutas?fecha={FechaOperacion:yyyy-MM-dd}"))!
             .Single(x => x.Id == rutaOriginal.Id);
@@ -513,8 +512,7 @@ public sealed class RutasHttpTests(PostgresFixture postgres) : IClassFixture<Pos
             await ServiciosEnvioTestData.AdjuntarCargoAsync(db,second,await db.Bultos.Where(b => b.EnvioId == second.Id).ToArrayAsync());
             secondId = second.Id;
         }
-        using var receive = await client.PostAsJsonAsync($"/api/deposito/envios/{secondId}/recepcion",new {Version=0});
-        Assert.Equal(HttpStatusCode.NoContent, receive.StatusCode);
+        await RecepcionTestData.RecibirInicialAsync(data, client, secondId);
         using var plan = await client.PostAsJsonAsync("/api/rutas", new
         { RepartidorAccesoId = p.AccesoId,p.VehiculoId,Fecha=FechaOperacion,
             Paradas = new[] { new {EnvioId=secondId,LlegadaEstimadaUtc=LlegadaEstimada},new {p.EnvioId,LlegadaEstimadaUtc=LlegadaEstimada} } });

@@ -187,8 +187,7 @@ public sealed partial class PushOutboxTests
             new { Version = currentDestination.GetProperty("version").GetInt64(), Latitud = -34.9, Longitud = -56.2 });
         Assert.Equal(HttpStatusCode.NoContent, destinationAddress.StatusCode);
         await p.Client.SetBearerForAccessAsync(p.Data, actual.Id);
-        using var received = await p.Client.PostAsJsonAsync($"/api/deposito/envios/{shipmentId}/recepcion", new { Version = 0 });
-        Assert.Equal(HttpStatusCode.NoContent, received.StatusCode);
+        await RecepcionTestData.RecibirInicialAsync(p.Data, p.Client, shipmentId);
         var vehiculo = await db.Vehiculos.SingleAsync();
         using var plan = await p.Client.PostAsJsonAsync("/api/rutas", new
         {
