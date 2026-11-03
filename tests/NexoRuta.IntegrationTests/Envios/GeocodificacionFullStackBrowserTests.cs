@@ -107,7 +107,7 @@ public sealed class GeocodificacionFullStackBrowserTests(PostgresFixture postgre
                 if (!alta)
                 {
                 while(!File.Exists(Path.Combine(outputDirectory,"conflict.ready"))) {
-                    Assert.False(node.HasExited,"Browser exited before concurrency checkpoint");
+                    if (node.HasExited) Assert.Fail("Browser exited before concurrency checkpoint: " + await output + await error);
                     await Task.Delay(50,timeout.Token);
                 }
                 using var concurrent=await api.PutAsJsonAsync($"/api/envios/{shipment}/destino",new {
