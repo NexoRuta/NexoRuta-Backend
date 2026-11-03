@@ -148,3 +148,51 @@ public static class CacheTelemetry
         yield return new Measurement<double>(total == 0 ? 0 : hitCount / (double)total);
     }
 }
+
+public static class DistributedCacheTelemetry
+{
+    public const string OperatorBranding = "operator_branding";
+    public const string PublishedTariff = "published_tariff";
+
+    private static readonly Meter Meter = new("NexoRuta.Hosting");
+    private static readonly Counter<long> Requests = Meter.CreateCounter<long>(
+        "nexoruta.cache.distributed.requests", "{request}", "Distributed cache lookup result by business cache.");
+    private static readonly Counter<long> Operations = Meter.CreateCounter<long>(
+        "nexoruta.cache.distributed.operations", "{operation}", "Distributed cache backend operations.");
+    private static readonly Histogram<double> OperationDuration = Meter.CreateHistogram<double>(
+        "nexoruta.cache.distributed.operation.duration", "s", "Distributed cache backend operation duration.");
+
+    static DistributedCacheTelemetry()
+    {
+        foreach (var cache in new[] { OperatorBranding, PublishedTariff })
+        foreach (var result in new[] { "hit", "miss", "error", "bypass", "cancelled" })
+            Requests.Add(0, new KeyValuePair<string, object?>("cache", cache),
+                new KeyValuePair<string, object?>("result", result));
+        foreach (var cache in new[] { OperatorBranding, PublishedTariff })
+        foreach (var operation in new[] { "get", "set", "remove" })
+        foreach (var result in new[] { "success", "error" })
+            Operations.Add(0, new KeyValuePair<string, object?>("cache", cache),
+                new KeyValuePair<string, object?>("operation", operation),
+                new KeyValuePair<string, object?>("result", result));
+    }
+
+    public static void Request(string cache, string result)
+        => Requests.Add(1, new KeyValuePair<string, object?>("cache", cache),
+            new KeyValuePair<string, object?>("result", result));
+
+    public static void Operation(string cache, string operation, bool succeeded, double elapsedSeconds)
+    {
+        var tags = new TagList
+        {
+            { "cache", cache },
+            { "operation", operation },
+            { "result", succeeded ? "success" : "error" }
+        };
+        Operations.Add(1, tags);
+        OperationDuration.Record(elapsedSeconds, new TagList
+        {
+            { "cache", cache },
+            { "operation", operation }
+        });
+    }
+}

@@ -29,6 +29,11 @@ using NexoRuta.Infrastructure.Tarifas;
 using NexoRuta.Application.ReglasOperativas.Repositories;
 using NexoRuta.Application.ReglasOperativas.UseCases;
 using NexoRuta.Infrastructure.ReglasOperativas;
+using NexoRuta.Infrastructure.Caching;
+using Microsoft.Extensions.Caching.StackExchangeRedis;
+using StackExchange.Redis;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
 namespace NexoRuta.Infrastructure.Persistence;
 
 public static class DependencyInjection
@@ -43,6 +48,33 @@ public static class DependencyInjection
 
         services.AddDbContext<NexoRutaDbContext>(options => options.UseNexoRutaPostgres(connectionString));
         services.AddMemoryCache();
+        var cacheSettings = DistributedCacheSettings.Read(configuration);
+        services.AddSingleton(cacheSettings);
+        if (cacheSettings.Enabled)
+        {
+            var redisConnection = ConfigurationOptions.Parse(configuration.GetConnectionString("Redis")!);
+            redisConnection.Password = cacheSettings.RedisPassword;
+            redisConnection.AbortOnConnectFail = false;
+            redisConnection.ConnectRetry = 1;
+            redisConnection.ConnectTimeout = cacheSettings.OperationTimeoutMilliseconds;
+            redisConnection.SyncTimeout = cacheSettings.OperationTimeoutMilliseconds;
+            redisConnection.AsyncTimeout = cacheSettings.OperationTimeoutMilliseconds;
+            redisConnection.KeepAlive = 30;
+            redisConnection.AllowAdmin = false;
+            if (cacheSettings.RedisTls)
+            {
+                redisConnection.Ssl = true;
+                var trustedCertificates = cacheSettings.LoadTrustedCertificates();
+                redisConnection.CertificateValidation += (_, certificate, _, errors) =>
+                    ValidarCertificadoRedis(certificate, errors, trustedCertificates);
+            }
+            services.AddStackExchangeRedisCache(options => options.ConfigurationOptions = redisConnection);
+        }
+        services.AddSingleton(provider => new DistributedCacheAccess(
+            provider.GetService<Microsoft.Extensions.Caching.Distributed.IDistributedCache>(),
+            cacheSettings,
+            provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<DistributedCacheAccess>>()));
+        services.AddScoped<IConsultaIdentidadVisualOperador, EfConsultaIdentidadVisualOperador>();
         services.AddSingleton(NexoRuta.Infrastructure.Reparto.GeoapifyRoutingOptions.Leer(configuration));
         services.AddHttpClient(NexoRuta.Infrastructure.Reparto.GeoapifyRouting.ClienteHttp,h=>h.Timeout=Timeout.InfiniteTimeSpan)
             .ConfigurePrimaryHttpMessageHandler(()=>new SocketsHttpHandler{AllowAutoRedirect=false,MaxConnectionsPerServer=2})
@@ -204,6 +236,21 @@ public static class DependencyInjection
 
 
         return services;
+
+        static bool ValidarCertificadoRedis(X509Certificate? certificate, SslPolicyErrors errors,
+            IReadOnlyList<X509Certificate2> trustedCertificates)
+        {
+            if (certificate is null || (errors & (SslPolicyErrors.RemoteCertificateNameMismatch
+                    | SslPolicyErrors.RemoteCertificateNotAvailable)) != 0)
+                return false;
+            using var candidate = X509CertificateLoader.LoadCertificate(certificate.GetRawCertData());
+            using var chain = new X509Chain();
+            chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
+            chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+            foreach (var trusted in trustedCertificates)
+                chain.ChainPolicy.CustomTrustStore.Add(trusted);
+            return chain.Build(candidate);
+        }
 
         string Value(string key) => !string.IsNullOrWhiteSpace(configuration[$"AccesoInicial:{key}"])
             ? configuration[$"AccesoInicial:{key}"]!.Trim()

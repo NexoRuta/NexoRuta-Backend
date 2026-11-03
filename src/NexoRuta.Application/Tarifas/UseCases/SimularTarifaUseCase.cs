@@ -31,6 +31,6 @@ public sealed class SimularTarifaUseCase(
                 "La zona está inactiva y no se puede ofrecer como servicio.");
         if (selection.Tarifa is null)
             throw new TarifaNoConfiguradaException(solicitud.ZonaId, solicitud.Modalidad);
-        return CalculadoraTarifas.Calcular(selection.Tarifa.ACalculo(selection.Version), solicitud.Bultos);
+        return CalculadoraTarifas.Calcular(selection.Tarifa, solicitud.Bultos);
     }
 }

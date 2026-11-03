@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "shard_count": 3,
-  "duration_source": "Local TRX run 2026-10-28; 456 integration test cases; each class duration is the sum of test case durations.",
+  "duration_source": "Local TRX baseline 2026-10-28 (456 cases); case counts include cache integration coverage. Identity class updated to 7 cases and about 51s for its slow-reader race; Redis TTL plus forced-eviction tests estimated at 76s; the expanded tariff cache test is estimated at 38s. Fresh full-suite TRX measurements are still pending; other historical weights are unchanged.",
   "classes": {
     "NexoRuta.IntegrationTests.Administracion.AltaPropiaHttpTests": {
       "duration_ms": 61777,
@@ -10,6 +10,10 @@
     "NexoRuta.IntegrationTests.Administracion.BootstrapTests": {
       "duration_ms": 23917,
       "test_cases": 8
+    },
+    "NexoRuta.IntegrationTests.Caching.DistributedCacheRedisTests": {
+      "duration_ms": 76000,
+      "test_cases": 2
     },
     "NexoRuta.IntegrationTests.Administracion.Cu01MigrationTests": {
       "duration_ms": 20433,
@@ -20,8 +24,8 @@
       "test_cases": 3
     },
     "NexoRuta.IntegrationTests.Administracion.IdentidadVisualOperadorHttpTests": {
-      "duration_ms": 12991,
-      "test_cases": 3
+      "duration_ms": 51000,
+      "test_cases": 7
     },
     "NexoRuta.IntegrationTests.Administracion.IdentityAccountStoreTests": {
       "duration_ms": 13020,
@@ -224,8 +228,8 @@
       "test_cases": 6
     },
     "NexoRuta.IntegrationTests.Tarifas.TarifarioHttpTests": {
-      "duration_ms": 25813,
-      "test_cases": 5
+      "duration_ms": 38000,
+      "test_cases": 6
     },
     "NexoRuta.IntegrationTests.Tarifas.TarifarioPersistenceTests": {
       "duration_ms": 15946,

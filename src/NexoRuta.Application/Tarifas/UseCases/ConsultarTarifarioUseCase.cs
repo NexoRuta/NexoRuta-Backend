@@ -28,7 +28,7 @@ public sealed class ConsultarTarifarioUseCase(
             cancellationToken);
     }
 
-    public async Task<VersionTarifario?> ObtenerPublicacionAsync(Guid versionId,
+    public async Task<TarifarioPublicacionSnapshot?> ObtenerPublicacionAsync(Guid versionId,
         CancellationToken cancellationToken = default)
     {
         var actor = await requerirOperador.EjecutarAsync(cancellationToken);

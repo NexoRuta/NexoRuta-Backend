@@ -42,7 +42,7 @@ public sealed class TarifarioUseCaseTests
         var rate = TarifaZonaModalidad.Crear(actor.OperadorId.Value, version.Id, Guid.NewGuid(),
             ModalidadTarifaria.Estandar, 100m, 10m, 0m);
         version.ReemplazarTarifas(0, [rate]);
-        repository.SimulationData = new(version, rate, true);
+        repository.SimulationData = new(rate.ACalculo(version), true);
 
         var result = await new SimularTarifaUseCase(Guard(actor, userPermissions), repository).EjecutarAsync(
             new(version.Id, rate.ZonaId, rate.Modalidad, [new(1000m, 10m, 10m, 10m)]));
@@ -59,13 +59,13 @@ public sealed class TarifarioUseCaseTests
     {
         var actor = CreateActor(TipoAccesoUsuario.Operador);
         var version = VersionTarifario.CrearBorrador(actor.OperadorId!.Value, actor.UsuarioId);
-        var repository = new Tarifarios { SimulationData = new(version, null, true) };
+        var repository = new Tarifarios { SimulationData = new(null, true) };
         var useCase = new SimularTarifaUseCase(Guard(actor, new Permissions(true)), repository);
         var request = new SolicitudSimulacionTarifario(version.Id, Guid.NewGuid(), ModalidadTarifaria.Urgente,
             [new(1m, 1m, 1m, 1m)]);
 
         await Assert.ThrowsAsync<TarifaNoConfiguradaException>(() => useCase.EjecutarAsync(request));
-        repository.SimulationData = new(version, null, false);
+        repository.SimulationData = new(null, false);
         var inactive = await Assert.ThrowsAsync<ConflictoTarifarioException>(() => useCase.EjecutarAsync(request));
         Assert.Equal(ReglasTarifario.Errors.ZoneInactive, inactive.Code);
     }
@@ -120,8 +120,8 @@ public sealed class TarifarioUseCaseTests
             Guid operadorId, int pagina, int tamanoPagina, CancellationToken cancellationToken = default)
             => Task.FromResult<(IReadOnlyList<VersionTarifario> Items, int Total)>(([], 0));
 
-        public Task<VersionTarifario?> ObtenerPublicacionAsync(Guid operadorId, Guid versionId,
-            CancellationToken cancellationToken = default) => Task.FromResult<VersionTarifario?>(null);
+        public Task<TarifarioPublicacionSnapshot?> ObtenerPublicacionAsync(Guid operadorId, Guid versionId,
+            CancellationToken cancellationToken = default) => Task.FromResult<TarifarioPublicacionSnapshot?>(null);
 
         public Task<VersionTarifario> CrearBorradorAsync(Guid operadorId, Guid usuarioId,
             CancellationToken cancellationToken = default) => Mutate();
