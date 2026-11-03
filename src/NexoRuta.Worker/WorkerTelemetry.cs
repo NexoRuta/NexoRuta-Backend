@@ -15,6 +15,7 @@ public static class WorkerTelemetry
         new("Kafka"),
         new("Push")
     ];
+    private static TransportProgress activeTransport = Transports[0];
 
     private static readonly Counter<long> Publications = Meter.CreateCounter<long>(
         "nexoruta.worker.published", "{message}", "Messages successfully handed to their transport.");
@@ -27,6 +28,9 @@ public static class WorkerTelemetry
     private static readonly ObservableGauge<double> SqlContactAge = Meter.CreateObservableGauge(
         "nexoruta.worker.sql_contact.age", ObserveSqlContactAge, "s",
         "Seconds since a successful SQL reservation query; -1 until the first query completes.");
+
+    public static void UseTransport(string transport)
+        => Volatile.Write(ref activeTransport, GetTransport(transport));
 
     public static void SqlContact(string transport)
     {
@@ -103,12 +107,10 @@ public static class WorkerTelemetry
 
     private static IEnumerable<Measurement<double>> ObserveSqlContactAge()
     {
-        foreach (var progress in Transports)
-        {
-            var lastContact = Interlocked.Read(ref progress.LastSqlContact);
-            var age = lastContact == 0 ? -1 : Stopwatch.GetElapsedTime(lastContact).TotalSeconds;
-            yield return new Measurement<double>(age, new KeyValuePair<string, object?>("transport", progress.Name));
-        }
+        var progress = Volatile.Read(ref activeTransport);
+        var lastContact = Interlocked.Read(ref progress.LastSqlContact);
+        var age = lastContact == 0 ? -1 : Stopwatch.GetElapsedTime(lastContact).TotalSeconds;
+        yield return new Measurement<double>(age, new KeyValuePair<string, object?>("transport", progress.Name));
     }
 
     private static TransportProgress GetTransport(string transport) => transport switch

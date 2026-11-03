@@ -60,6 +60,12 @@ public static class NexoRutaLogging
 
             logEvent.AddPropertyIfAbsent(propertyFactory.CreateProperty("trace_id", activity.TraceId.ToHexString()));
             logEvent.AddPropertyIfAbsent(propertyFactory.CreateProperty("span_id", activity.SpanId.ToHexString()));
+            logEvent.AddPropertyIfAbsent(propertyFactory.CreateProperty("correlation_id", CorrelationId(activity.TraceId)));
         }
+
+        private static string CorrelationId(ActivityTraceId traceId)
+            => Guid.TryParseExact(traceId.ToHexString(), "N", out var id)
+                ? id.ToString("D")
+                : traceId.ToHexString();
     }
 }

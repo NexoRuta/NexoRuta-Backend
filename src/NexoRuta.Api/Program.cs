@@ -256,6 +256,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseRouting();
 app.Use(ApiTelemetry.MeasureRequestAsync);
+app.UseNexoRutaRequestLogging();
 if (fleetStageOnly)
     app.Use(async (context, next) =>
     {
