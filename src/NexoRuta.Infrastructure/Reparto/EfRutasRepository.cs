@@ -184,9 +184,8 @@ public sealed partial class EfRutasRepository(NexoRutaDbContext db, TimeProvider
             if (bulto.Custodia == EstadoCustodiaBulto.Repartidor)
                 bulto.RecibirTrasIncidenciaDeCierre(bulto.AccesoCustodioId!.Value, bulto.RutaCustodiaId!.Value);
             else bulto.RecibirEnDeposito();
-        var cambiaEstado = envio.Estado is EstadoEnvio.Admitido or EstadoEnvio.EnDevolucion;
-        if (envio.Estado == EstadoEnvio.Admitido) envio.CambiarEstado(EstadoEnvio.EnDeposito, version);
-        else if (envio.Estado == EstadoEnvio.EnDevolucion) envio.CambiarEstado(EstadoEnvio.Devuelto, version);
+        var cambiaEstado = envio.Estado == EstadoEnvio.EnDevolucion;
+        if (cambiaEstado) envio.CambiarEstado(EstadoEnvio.Devuelto, version);
         else if (envio.Estado is not (EstadoEnvio.Reprogramado or EstadoEnvio.Cancelado or EstadoEnvio.AsignadoRuta
             or EstadoEnvio.EnDeposito or EstadoEnvio.NoEntregado or EstadoEnvio.EnTransito))
             throw new ConflictoRepartoException("El estado del envío no admite recepción.");

@@ -11,7 +11,7 @@ using NexoRuta.Infrastructure.Administracion;
 using Npgsql;
 using static NexoRuta.IntegrationTests.Fixtures.RepartoHttpData;
 namespace NexoRuta.IntegrationTests.Reparto;
-public sealed class RecepcionDepositoHttpTests(PostgresFixture postgres) : IClassFixture<PostgresFixture>
+public sealed partial class RecepcionDepositoHttpTests(PostgresFixture postgres) : IClassFixture<PostgresFixture>
 {
     [Fact]
     public async Task MultiParcelReceiptIsIncompleteUntilAllAreComparedAndDoesNotRewriteDeclarationsOrTariff()
