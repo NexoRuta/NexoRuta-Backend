@@ -33,7 +33,7 @@ public sealed class RegistroErrorHttpTests
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
         builder.Services.AddControllers().AddApplicationPart(typeof(AuthController).Assembly).AddControllersAsServices();
-        builder.Services.AddSingleton(new AuthController(null!, null!, repository, new PasswordRecoveryStub()));
+        builder.Services.AddSingleton(new AuthController(null!, null!, repository, new PasswordRecoveryStub(), Microsoft.Extensions.Logging.Abstractions.NullLogger<AuthController>.Instance));
         builder.Services.AddAuthorization();
         builder.Services.AddRateLimiter(options => options.AddFixedWindowLimiter("auth-register", limiter =>
         {

@@ -10,8 +10,34 @@ namespace NexoRuta.Api.Core.Security;
 
 public sealed class JwtValidacionEventos(
     IAccesosUsuarioRepository accesos, IPlataformaRepository plataforma, IRegistroRepository identidades,
-    UserManager<Usuario> users, ISesionesMovilesRepository sesiones, TimeProvider reloj) : JwtBearerEvents
+    UserManager<Usuario> users, ISesionesMovilesRepository sesiones, TimeProvider reloj, ILogger<JwtValidacionEventos> logger) : JwtBearerEvents
 {
+    private static void Fail(TokenValidatedContext context,string reason,string message)
+    { context.HttpContext.Items[AuthDiagnostics.ReasonItem]=reason;context.Fail(message); }
+    private static string FailureReason(Exception? error)=>error switch
+    {
+        Microsoft.IdentityModel.Tokens.SecurityTokenExpiredException => "token_expired",
+        Microsoft.IdentityModel.Tokens.SecurityTokenNotYetValidException => "token_not_yet_valid",
+        Microsoft.IdentityModel.Tokens.SecurityTokenSignatureKeyNotFoundException => "signature_key_unavailable",
+        Microsoft.IdentityModel.Tokens.SecurityTokenInvalidSignatureException => "invalid_signature",
+        Microsoft.IdentityModel.Tokens.SecurityTokenInvalidIssuerException => "invalid_issuer",
+        Microsoft.IdentityModel.Tokens.SecurityTokenInvalidAudienceException => "invalid_audience",
+        _ => "invalid_token"
+    };
+    public override Task AuthenticationFailed(AuthenticationFailedContext context)
+    { context.HttpContext.Items[AuthDiagnostics.ReasonItem]=FailureReason(context.Exception);return Task.CompletedTask; }
+    public override Task Challenge(JwtBearerChallengeContext context)
+    {
+        var reason=context.HttpContext.Items[AuthDiagnostics.ReasonItem] as string
+            ?? (context.HttpContext.User.Identity?.IsAuthenticated==true ? "access_context_changed"
+                : context.AuthenticateFailure is {} error ? FailureReason(error)
+                : context.Request.Headers.Authorization.Count==0 ? "missing_bearer" : "invalid_bearer");
+        AuthDiagnostics.Rejected(context.HttpContext,logger,401,reason);
+        return Task.CompletedTask;
+    }
+    public override Task Forbidden(ForbiddenContext context)
+    {AuthDiagnostics.Rejected(context.HttpContext,logger,403,"permission_denied");return Task.CompletedTask;}
+
     public override async Task TokenValidated(
         TokenValidatedContext context)
     {
@@ -23,7 +49,7 @@ public sealed class JwtValidacionEventos(
 
         if (!Guid.TryParse(usuarioClaim, out var usuarioId) || usuarioId == Guid.Empty)
         {
-            context.Fail("Identidad inválida.");
+            Fail(context,"invalid_subject","Identidad inválida.");
             return;
         }
 
@@ -34,14 +60,14 @@ public sealed class JwtValidacionEventos(
                 CultureInfo.InvariantCulture,
                 out var credentialVersion))
         {
-            context.Fail("Credential session version is invalid.");
+            Fail(context,"invalid_credential_version","Credential session version is invalid.");
             return;
         }
 
         var account = await users.FindByIdAsync(usuarioId.ToString());
         if (account is null || account.VersionCredencial != credentialVersion)
         {
-            context.Fail("The credential session is no longer available.");
+            Fail(context,"credential_revoked","The credential session is no longer available.");
             return;
         }
 
@@ -54,7 +80,7 @@ public sealed class JwtValidacionEventos(
                 CultureInfo.InvariantCulture,
                 out var versionToken))
         {
-            context.Fail("Versión de sesión inválida.");
+            Fail(context,"invalid_access_version","Versión de sesión inválida.");
             return;
         }
 
@@ -66,7 +92,7 @@ public sealed class JwtValidacionEventos(
             || !await sesiones.EstaVigenteAsync(sesionId, usuarioId, accesoMovilId, versionToken,
                 reloj.GetUtcNow(), context.HttpContext.RequestAborted)))
         {
-            context.Fail("La sesión móvil ya no está disponible.");
+            Fail(context,"mobile_session_unavailable","La sesión móvil ya no está disponible.");
             return;
         }
         if (ambito == "identidad")
@@ -75,14 +101,14 @@ public sealed class JwtValidacionEventos(
                 ? await identidades.ObtenerSinOrganizacionAsync(usuarioId, context.HttpContext.RequestAborted)
                 : null;
             if (unassignedIdentity is null)
-                context.Fail("La sesión sin organización ya no está disponible. Ingresá nuevamente.");
+                Fail(context,"identity_context_changed","La sesión sin organización ya no está disponible. Ingresá nuevamente.");
             else
                 context.HttpContext.Items[typeof(IdentidadSinOrganizacion)] = unassignedIdentity;
             return;
         }
         if (!Guid.TryParse(accesoClaim, out var accesoId))
         {
-            context.Fail("Acceso inválido.");
+            Fail(context,"invalid_access","Acceso inválido.");
             return;
         }
         if (ambito == "plataforma")
@@ -90,7 +116,7 @@ public sealed class JwtValidacionEventos(
             var platformAccess = await plataforma.ObtenerAccesoAsync(accesoId, context.HttpContext.RequestAborted);
             if (platformAccess is null || platformAccess.UsuarioId != usuarioId || platformAccess.VersionSesion != versionToken)
             {
-                context.Fail("The platform session is no longer available.");
+                Fail(context,"platform_context_changed","The platform session is no longer available.");
                 return;
             }
             context.HttpContext.Items[typeof(ContextoPlataforma)] = platformAccess;
@@ -98,7 +124,7 @@ public sealed class JwtValidacionEventos(
         }
         if (ambito is not null && ambito != AccesoSeleccionado.ClaimSesionSuspendida)
         {
-            context.Fail("Invalid authentication scope.");
+            Fail(context,"invalid_scope","Invalid authentication scope.");
             return;
         }
 
@@ -111,7 +137,7 @@ public sealed class JwtValidacionEventos(
             acceso.UsuarioId != usuarioId ||
             acceso.VersionSesion != versionToken)
         {
-            context.Fail("La sesión ya no está disponible.");
+            Fail(context,"access_context_changed","La sesión ya no está disponible.");
             return;
         }
 
@@ -119,13 +145,13 @@ public sealed class JwtValidacionEventos(
         {
             if (acceso.Estado != NexoRuta.Domain.Administracion.EstadoOrganizacion.Suspendida)
             {
-                context.Fail("La organización ya no está suspendida. Ingresá nuevamente.");
+                Fail(context,"suspension_context_changed","La organización ya no está suspendida. Ingresá nuevamente.");
                 return;
             }
             var organizationId = acceso.OperadorId ?? acceso.ComercioId;
             if (organizationId is null)
             {
-                context.Fail("Restricted organization context is invalid.");
+                Fail(context,"invalid_organization_context","Restricted organization context is invalid.");
                 return;
             }
             context.HttpContext.Items[typeof(ContextoOrganizacionSuspendida)] = new ContextoOrganizacionSuspendida(
@@ -136,7 +162,7 @@ public sealed class JwtValidacionEventos(
 
         if (acceso.Estado == NexoRuta.Domain.Administracion.EstadoOrganizacion.Suspendida)
         {
-            context.Fail("La organización está suspendida.");
+            Fail(context,"organization_suspended","La organización está suspendida.");
             return;
         }
 
