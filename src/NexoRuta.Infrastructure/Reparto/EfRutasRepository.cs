@@ -91,6 +91,7 @@ public sealed partial class EfRutasRepository(NexoRutaDbContext db, TimeProvider
             if (DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(parada.LlegadaEstimadaUtc, zona).DateTime) < datos.Fecha
                 || datos.SalidaPlanificadaEnUtc is { } salidaPrevista && parada.LlegadaEstimadaUtc < salidaPrevista)
                 throw new ArgumentException("Las llegadas manuales no pueden preceder la fecha operativa ni la salida planificada.");
+            await RestriccionesTemporales.ValidarAsync(db, operadorId, parada.EnvioId, parada.LlegadaEstimadaUtc, parada.ServicioMinutos ?? baseActual?.ServicioPredeterminadoMinutos, ct);
             hoja.AgregarParada(parada.EnvioId, parada.LlegadaEstimadaUtc, parada.ServicioMinutos ?? baseActual?.ServicioPredeterminadoMinutos);
             var envio = envios.Single(x => x.Id == parada.EnvioId);
             envio.CambiarEstado(EstadoEnvio.AsignadoRuta, envio.Version);
@@ -129,6 +130,9 @@ public sealed partial class EfRutasRepository(NexoRutaDbContext db, TimeProvider
             throw new ConflictoRepartoException("El vehículo requiere verificar su disponibilidad inicial en el panel de flota antes de despachar.");
         var bultos = await db.Bultos.Where(x => x.OperadorId == operadorId && ids.Contains(x.EnvioId)).ToArrayAsync(ct);
         if (CapacidadCarga.Exceso(vehiculo, bultos) is { } exceso) throw new ConflictoRepartoException(exceso);
+        if (ids.Length > politica.MaximoParadas) throw new ConflictoRepartoException("La ruta supera el máximo de paradas configurado.");
+        foreach (var parada in hoja.Paradas.Where(p => p.Activa))
+            await RestriccionesTemporales.ValidarAsync(db, operadorId, parada.EnvioId, parada.LlegadaEstimadaUtc, parada.ServicioMinutos, ct);
         hoja.Despachar(version);
         var ocupacion = new OcupacionRuta(hoja, actor.AccesoId, reloj.GetUtcNow());
         db.OcupacionesRuta.Add(ocupacion);
@@ -178,12 +182,13 @@ public sealed partial class EfRutasRepository(NexoRutaDbContext db, TimeProvider
             if (bulto.Custodia == EstadoCustodiaBulto.Repartidor)
                 bulto.RecibirTrasIncidenciaDeCierre(bulto.AccesoCustodioId!.Value, bulto.RutaCustodiaId!.Value);
             else bulto.RecibirEnDeposito();
+        var cambiaEstado = envio.Estado is EstadoEnvio.Admitido or EstadoEnvio.EnDevolucion;
         if (envio.Estado == EstadoEnvio.Admitido) envio.CambiarEstado(EstadoEnvio.EnDeposito, version);
         else if (envio.Estado == EstadoEnvio.EnDevolucion) envio.CambiarEstado(EstadoEnvio.Devuelto, version);
         else if (envio.Estado is not (EstadoEnvio.Reprogramado or EstadoEnvio.Cancelado or EstadoEnvio.AsignadoRuta
             or EstadoEnvio.EnDeposito or EstadoEnvio.NoEntregado or EstadoEnvio.EnTransito))
             throw new ConflictoRepartoException("El estado del envío no admite recepción.");
-        if (envio.Estado is EstadoEnvio.Admitido or EstadoEnvio.EnDevolucion)
+        if (cambiaEstado)
         {
             var correlacion = Guid.CreateVersion7();
             await db.SetShipmentHistoryContextAsync("RecepcionDeposito", correlacion, correlacion,
