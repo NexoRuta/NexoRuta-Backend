@@ -5,6 +5,7 @@ using NexoRuta.Application.Administracion.Exceptions;
 using NexoRuta.Application.Administracion.Interfaces;
 using NexoRuta.Application.Administracion.UseCases;
 using NexoRuta.Api.Features.Usuarios.Contracts;
+using NexoRuta.Application.Reparto.UseCases;
 using NexoRuta.Domain.Administracion;
 
 namespace NexoRuta.Api.Features.Usuarios.Controllers;
@@ -15,7 +16,8 @@ namespace NexoRuta.Api.Features.Usuarios.Controllers;
 [Route("api/usuarios/actual")]
 public sealed class UsuarioActualController(
     IUsuarioActual usuarioActual,
-    ObtenerPermisosActualesUseCase permisosActuales) : ControllerBase
+    ObtenerPermisosActualesUseCase permisosActuales,
+    GestionarRutasUseCase reparto) : ControllerBase
 {
     [HttpGet]
     [ProducesResponseType<UsuarioActualResponse>(StatusCodes.Status200OK)]
@@ -29,7 +31,10 @@ public sealed class UsuarioActualController(
                 return Ok(UsuarioActualResponse.Desde(identidad));
             if (HttpContext.Items[typeof(ContextoPlataforma)] is ContextoPlataforma plataforma)
                 return Ok(UsuarioActualResponse.Desde(plataforma));
-            return Ok(UsuarioActualResponse.Desde(await usuarioActual.ObtenerAsync(cancellationToken)));
+            var actor = await usuarioActual.ObtenerAsync(cancellationToken);
+            var response = UsuarioActualResponse.Desde(actor);
+            var puedeGestionarDecision = await reparto.PuedeGestionarDecisionesOperativasAsync(cancellationToken);
+            return Ok(response with { PuedeGestionarDecisionesOperativasEnvio = puedeGestionarDecision });
         }
         catch (AccesoActualNoDisponibleException exception)
         {

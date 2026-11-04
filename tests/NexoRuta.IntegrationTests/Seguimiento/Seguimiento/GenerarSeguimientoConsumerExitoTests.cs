@@ -42,7 +42,7 @@ public sealed class GenerarSeguimientoConsumerExitoTests(
         await rabbitMq.StartAsync();
 
         // Inicializar la API para disponer de los datos demo.
-        using var api = new IntegrationApiFactory(database, "Development");
+        using var api = new IntegrationApiFactory(database, "Development", seedShippingServices: true);
         using var client = api.CreateHttpClient();
 
         Guid operadorId;
@@ -81,11 +81,8 @@ public sealed class GenerarSeguimientoConsumerExitoTests(
                 operadorId,
                 destinatarioNombre = "Destinatario RabbitMQ", destinatarioEmail = "destinatario@example.test",
                 direccion = "San José, Uruguay",
-                codigoBulto = "SEGUIMIENTO-RABBIT-001",
-                pesoGramos = 1200m,
-                largoCentimetros = 25m,
-                anchoCentimetros = 20m,
-                altoCentimetros = 15m
+                servicio = ServiciosEnvioTestData.Declarar(operadorId),
+                bultos = new[] { new { codigo = "SEGUIMIENTO-RABBIT-001", pesoGramos = 1200m, largoCentimetros = 25m, anchoCentimetros = 20m, altoCentimetros = 15m } }
             })
         };
 

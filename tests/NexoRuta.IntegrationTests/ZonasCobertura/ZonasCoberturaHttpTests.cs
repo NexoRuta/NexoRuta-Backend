@@ -137,6 +137,37 @@ public sealed class ZonasCoberturaHttpTests(PostgresFixture postgres) : IClassFi
         using var secondActivate = await client.PutAsJsonAsync($"/api/configuracion/zonas/{secondId}/estado",
             new { estado = "Activa", version = 1 });
         Assert.Equal(HttpStatusCode.OK, secondActivate.StatusCode);
+
+        using var sanJoseCreated = await client.PostAsJsonAsync("/api/configuracion/zonas", new
+        { nombre = "San Jose regression", codigoDepartamento = "UY-SJ" });
+        Assert.Equal(HttpStatusCode.Created, sanJoseCreated.StatusCode);
+        var sanJose = await sanJoseCreated.Content.ReadFromJsonAsync<JsonElement>();
+        var sanJoseId = sanJose.GetProperty("id").GetGuid();
+        using var sanJoseSlot = await client.PostAsJsonAsync($"/api/configuracion/zonas/{sanJoseId}/franjas",
+            new { diaSemanaIso = 3, horaInicio = "13:00", horaFin = "14:00", versionZona = 0 });
+        Assert.Equal(HttpStatusCode.Created, sanJoseSlot.StatusCode);
+        using var sanJoseActivate = await client.PutAsJsonAsync($"/api/configuracion/zonas/{sanJoseId}/estado",
+            new { estado = "Activa", version = 1 });
+        Assert.Equal(HttpStatusCode.OK, sanJoseActivate.StatusCode);
+        using var sanJoseRead = await client.GetAsync($"/api/configuracion/zonas/{sanJoseId}");
+        Assert.Equal(HttpStatusCode.OK, sanJoseRead.StatusCode);
+        var sanJoseState = await sanJoseRead.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("Activa", sanJoseState.GetProperty("estado").GetString());
+        Assert.Equal(2, sanJoseState.GetProperty("version").GetInt64());
+        Assert.Equal(3, sanJoseState.GetProperty("revisionActual").GetInt32());
+        using var sanJoseStale = await client.PutAsJsonAsync($"/api/configuracion/zonas/{sanJoseId}/estado",
+            new { estado = "Inactiva", version = 1 });
+        Assert.Equal(HttpStatusCode.Conflict, sanJoseStale.StatusCode);
+        using var sanJoseAfterStale = await client.GetAsync($"/api/configuracion/zonas/{sanJoseId}");
+        Assert.Equal("Activa", (await sanJoseAfterStale.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("estado").GetString());
+        using var sanJoseDeactivate = await client.PutAsJsonAsync($"/api/configuracion/zonas/{sanJoseId}/estado",
+            new { estado = "Inactiva", version = 2 });
+        Assert.Equal(HttpStatusCode.OK, sanJoseDeactivate.StatusCode);
+        using var sanJoseAfterDeactivate = await client.GetAsync($"/api/configuracion/zonas/{sanJoseId}");
+        var sanJoseInactiveState = await sanJoseAfterDeactivate.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("Inactiva", sanJoseInactiveState.GetProperty("estado").GetString());
+        Assert.Equal(3, sanJoseInactiveState.GetProperty("version").GetInt64());
         using var wrongZoneSlot = await client.PutAsJsonAsync($"/api/configuracion/zonas/{secondId}/franjas/{firstSlotId}",
             new { diaSemanaIso = 2, horaInicio = "10:00", horaFin = "12:00", estado = "Activa", versionZona = 2 });
         Assert.Equal(HttpStatusCode.NotFound, wrongZoneSlot.StatusCode);
@@ -169,7 +200,8 @@ public sealed class ZonasCoberturaHttpTests(PostgresFixture postgres) : IClassFi
         Assert.Equal(2, listed.GetProperty("total").GetInt32());
         using var allStates = await client.GetAsync("/api/configuracion/zonas?estado=Inactiva");
         var inactive = await allStates.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal(1, inactive.GetProperty("total").GetInt32());
+        Assert.Equal(2, inactive.GetProperty("total").GetInt32());
+        Assert.Contains(inactive.GetProperty("items").EnumerateArray(), z => z.GetProperty("nombre").GetString() == "Inactive zone");
 
         using var slots = await client.GetAsync($"/api/configuracion/zonas/{firstId}/franjas");
         var slotList = await slots.Content.ReadFromJsonAsync<JsonElement>();

@@ -77,7 +77,7 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         var address = new Direccion(operatorId, "Test address");
         var shipment = new Envio(operatorId, commerceId, userId, recipient.Id, address.Id, operatorId);
         var parcel = new Bulto(operatorId, shipment.Id, "RACE-1", 100m, 10m, 10m, 10m);
-        var save = new EfEnviosRepository(shipmentDb).GuardarAsync(shipment, recipient, address, parcel);
+        var save = new EfEnviosRepository(shipmentDb).GuardarAsync(shipment, recipient, address, [parcel], ServiciosEnvioTestData.Comando(operatorId));
         await lockObserver.LockStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.False(save.IsCompleted);
 
@@ -208,11 +208,25 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         Assert.Equal(cuenta, await Cuenta(db, inicial.UsuarioEmail, TipoAccesoUsuario.Comercio));
 
         await using var consulta = new NexoRutaDbContext(options);
+        var contexto = await new EfAccesosUsuarioRepository(consulta).ObtenerAsync(cuenta.AccesoId)
+            ?? throw new InvalidOperationException("The selected commerce access is missing.");
+        await using (var transaccion = await consulta.BeginOrJoinAsync())
+        {
+            await consulta.ApplyAsync(RlsActorContext.From(contexto));
+            await consulta.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO "IdentidadesEnvioImportado"
+                    ("ComercioId", "ReferenciaExterna", "EnvioId", "OperadorId", "VersionHuella", "Huella")
+                VALUES ({cuenta.ComercioId!.Value}, {"EXT-POSTGRES-1"}, {dos.Id}, {segundo.Id}, {(short)1}, {new byte[32]})
+                """);
+            await transaccion.CommitAsync();
+        }
         var listados = await Listar(consulta, cuenta.AccesoId);
         Assert.Equal(2, listados.Count);
         var persistido = Assert.Single(listados, x => x.Id == dos.Id);
         Assert.Equal(cuenta.ComercioId, persistido.Origen.ComercioId);
         Assert.Equal("Destinatario de prueba", persistido.DestinatarioNombre);
+        Assert.Equal("destinatario@example.test", persistido.DestinatarioEmail);
+        Assert.Equal("EXT-POSTGRES-1", persistido.ReferenciaExterna);
         Assert.Equal("Av. Rivera 123", persistido.Direccion);
         var bulto = Assert.Single(persistido.Bultos);
         Assert.Equal("SEGUNDO", bulto.Codigo);
@@ -220,6 +234,14 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         Assert.Equal(32m, bulto.LargoCentimetros);
         Assert.Equal(21m, bulto.AnchoCentimetros);
         Assert.Equal(11m, bulto.AltoCentimetros);
+        Assert.True(persistido.DestinoConfirmado);
+
+        var envioDb = await consulta.Envios.SingleAsync(e => e.Id == dos.Id);
+        var direccionDb = await consulta.Direcciones.SingleAsync(d => d.Id == envioDb.DireccionId);
+        direccionDb.ConfirmarUbicacion(-34.9, -56.2, cuenta.UsuarioId, DateTimeOffset.UtcNow, direccionDb.Version);
+        await consulta.SaveChangesAsync();
+        var confirmado = Assert.Single(await Listar(consulta, cuenta.AccesoId), e => e.Id == dos.Id);
+        Assert.True(confirmado.DestinoConfirmado);
     }
 
     [Fact]
@@ -250,6 +272,8 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         var otroRol = new Rol("owner", "Owner", null, otraEmpresa.Id);
         var otroAcceso = new AccesoUsuario(otroUsuario.Id, null, otraEmpresa.Id, otroRol);
         db.AddRange(segundoOperador, otraEmpresa, otroUsuario, otroRol, otroAcceso);
+        foreach (var permission in await db.Permisos.Where(x => x.Codigo == "envios.crear" || x.Codigo == "envios.consultar").ToArrayAsync())
+            db.Add(new RolPermiso(otroRol.Id, permission.Id));
         await db.SaveChangesAsync();
 
         var propioUno = await Crear(db, comercio.AccesoId, operador.OperadorId!.Value, "PROPIO-UNO");
@@ -350,125 +374,261 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
     {
         const string anterior = "20261008163520_OperatorUserAccess";
         const string actual = "20261008180729_AccountOwnerAndShipmentOperator";
+
         var inicial = Datos();
         await using var db = new NexoRutaDbContext(options);
         var migrator = db.GetService<IMigrator>();
+
         await migrator.MigrateAsync(anterior);
+
         var opUno = new Operador(inicial.OperadorNombre);
         inicial.OperadorId = opUno.Id;
+
         var opDos = new Operador("Otro operador anterior");
         var comercio = new Comercio(inicial.ComercioNombre);
         inicial.ComercioId = comercio.Id;
-        var usuario = new Usuario(inicial.UsuarioEmail, AuthenticationTestData.Hash(inicial.UsuarioEmail));
-        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Usuarios\" (\"Id\", \"Email\") VALUES ({usuario.Id}, {usuario.Email})");
+
+        var usuario = new Usuario(
+            inicial.UsuarioEmail,
+            AuthenticationTestData.Hash(inicial.UsuarioEmail));
+
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"INSERT INTO \"Usuarios\" (\"Id\", \"Email\") VALUES ({usuario.Id}, {usuario.Email})");
+
         var vinculoUno = Guid.CreateVersion7();
         var vinculoDos = Guid.CreateVersion7();
-        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Operadores\" (\"Id\", \"Nombre\") VALUES ({opUno.Id}, {opUno.Nombre}), ({opDos.Id}, {opDos.Nombre})");
-        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Comercios\" (\"Id\", \"Nombre\") VALUES ({comercio.Id}, {comercio.Nombre})");
+
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"INSERT INTO \"Operadores\" (\"Id\", \"Nombre\") VALUES ({opUno.Id}, {opUno.Nombre}), ({opDos.Id}, {opDos.Nombre})");
+
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"INSERT INTO \"Comercios\" (\"Id\", \"Nombre\") VALUES ({comercio.Id}, {comercio.Nombre})");
+
         await db.Database.ExecuteSqlInterpolatedAsync(
             $"INSERT INTO \"OperadoresComercios\" (\"Id\", \"OperadorId\", \"ComercioId\") VALUES ({vinculoUno}, {opUno.Id}, {comercio.Id}), ({vinculoDos}, {opDos.Id}, {comercio.Id})");
-        // ponytail: migration retains the lowest UUID; same-millisecond UUIDv7 calls are not ordered.
+
+        // La migración conserva el UUID menor entre las cuentas duplicadas.
         var cuentaAnterior = Guid.Parse("018f0000-0000-7000-8000-000000000001");
         var segundoAcceso = Guid.Parse("018f0000-0000-7000-8000-000000000002");
+
         await db.Database.ExecuteSqlInterpolatedAsync(
             $"INSERT INTO \"AccesosUsuario\" (\"Id\", \"UsuarioId\", \"OperadorId\", \"OperadorComercioId\") VALUES ({cuentaAnterior}, {usuario.Id}, {opUno.Id}, {vinculoUno}), ({segundoAcceso}, {usuario.Id}, {opDos.Id}, {vinculoDos})");
-        var destinatario = new Destinatario(opUno.Id, "Destinatario anterior", "destinatario@example.test");
+
+        var destinatario = new Destinatario(
+            opUno.Id,
+            "Destinatario anterior",
+            "destinatario@example.test");
+
         var direccion = new Direccion(opUno.Id, "Direccion anterior");
-        var envio = new Envio(opUno.Id, comercio.Id, usuario.Id, destinatario.Id, direccion.Id, opUno.Id);
-        var bulto = new Bulto(opUno.Id, envio.Id, "ANTERIOR", 1750m, 32m, 21m, 11m);
+
+        var envio = new Envio(
+            opUno.Id,
+            comercio.Id,
+            usuario.Id,
+            destinatario.Id,
+            direccion.Id,
+            opUno.Id);
+
+        var bulto = new Bulto(
+            opUno.Id,
+            envio.Id,
+            "ANTERIOR",
+            1750m,
+            32m,
+            21m,
+            11m);
+
         await InsertarDestinoAnterior(db, destinatario, direccion);
         await InsertarEnvioAnterior(db, envio, vinculoUno);
         await InsertarBultoAnterior(db, bulto);
 
         await migrator.MigrateAsync(actual);
-        Assert.Equal(comercio.Id, await db.Database.SqlQuery<Guid>($"SELECT \"ComercioId\" AS \"Value\" FROM \"AccesosUsuario\" WHERE \"Id\" = {cuentaAnterior}").SingleAsync());
-        Assert.Equal(usuario.Id, await db.Database.SqlQuery<Guid>($"SELECT \"UsuarioId\" AS \"Value\" FROM \"AccesosUsuario\" WHERE \"Id\" = {cuentaAnterior}").SingleAsync());
-        // AccountOwner historically collapses duplicate user/commerce accounts to the lowest original UUID.
-        var preCu01AccessIds = await db.Database.SqlQueryRaw<Guid>("SELECT \"Id\" AS \"Value\" FROM \"AccesosUsuario\" ORDER BY \"Id\"").ToArrayAsync();
+
+        Assert.Equal(
+            comercio.Id,
+            await db.Database.SqlQuery<Guid>(
+                $"SELECT \"ComercioId\" AS \"Value\" FROM \"AccesosUsuario\" WHERE \"Id\" = {cuentaAnterior}")
+                .SingleAsync());
+
+        Assert.Equal(
+            usuario.Id,
+            await db.Database.SqlQuery<Guid>(
+                $"SELECT \"UsuarioId\" AS \"Value\" FROM \"AccesosUsuario\" WHERE \"Id\" = {cuentaAnterior}")
+                .SingleAsync());
+
+        var preCu01AccessIds = await db.Database.SqlQueryRaw<Guid>(
+            "SELECT \"Id\" AS \"Value\" FROM \"AccesosUsuario\" ORDER BY \"Id\"")
+            .ToArrayAsync();
+
         Assert.Equal(new[] { cuentaAnterior }, preCu01AccessIds);
+
         await MigrarActualConCorreosDeFixture(db, migrator);
         db.ChangeTracker.Clear();
-        var historical = await db.AccesosUsuario.SingleAsync(x => x.UsuarioId == usuario.Id);
+
+        var historical = await db.AccesosUsuario
+            .SingleAsync(x => x.UsuarioId == usuario.Id);
+
         Assert.Equal(cuentaAnterior, historical.Id);
         Assert.Equal(usuario.Id, historical.UsuarioId);
         Assert.Equal(comercio.Id, historical.ComercioId);
         Assert.Null(historical.OperadorId);
         Assert.Null(historical.RolId);
-        Assert.Null((await db.Usuarios.SingleAsync(x => x.Id == usuario.Id)).PasswordHash);
-        Assert.Null(await new EfAccesosUsuarioRepository(db).ObtenerAsync(cuentaAnterior));
-        Assert.Equal(envio.Id, await db.Database.SqlQueryRaw<Guid>("SELECT \"Id\" AS \"Value\" FROM \"Envios\"").SingleAsync());
+
+        Assert.Null(
+            (await db.Usuarios.SingleAsync(x => x.Id == usuario.Id))
+            .PasswordHash);
+
+        Assert.Null(
+            await new EfAccesosUsuarioRepository(db)
+                .ObtenerAsync(cuentaAnterior));
+
+        Assert.Equal(
+            envio.Id,
+            await db.Database.SqlQueryRaw<Guid>(
+                "SELECT \"Id\" AS \"Value\" FROM \"Envios\"")
+                .SingleAsync());
+
         Assert.False(historical.EsPropietario);
 
         await migrator.MigrateAsync(anterior);
-        // ShipmentCommerce rollback reconstructs shipment-backed links only. No synthetic operator account is seeded.
-        Assert.Equal(preCu01AccessIds, await db.Database.SqlQueryRaw<Guid>("SELECT \"Id\" AS \"Value\" FROM \"AccesosUsuario\" ORDER BY \"Id\"").ToArrayAsync());
+
+        // El rollback reconstruye los vínculos respaldados por envíos.
+        Assert.Equal(
+            preCu01AccessIds,
+            await db.Database.SqlQueryRaw<Guid>(
+                "SELECT \"Id\" AS \"Value\" FROM \"AccesosUsuario\" ORDER BY \"Id\"")
+                .ToArrayAsync());
+
         await MigrarActualConCorreosDeFixture(db, migrator);
         db.ChangeTracker.Clear();
-        Assert.Equal(usuario.Id, (await db.AccesosUsuario.SingleAsync(x => x.Id == cuentaAnterior)).UsuarioId);
+
+        Assert.Equal(
+            usuario.Id,
+            (await db.AccesosUsuario.SingleAsync(
+                x => x.Id == cuentaAnterior)).UsuarioId);
+
         await ConfigureHistoricAccounts(db, inicial);
-        var persistido = Assert.Single(await Listar(db, cuentaAnterior));
-        Assert.Equal(envio.Id, persistido.Id);
-        Assert.Equal(comercio.Id, persistido.Origen.ComercioId);
-        Assert.Equal(bulto.Codigo, Assert.Single(persistido.Bultos).Codigo);
-        Assert.Equal(bulto.Id, (await db.Bultos.SingleAsync(x => x.EnvioId == envio.Id)).Id);
+
+        await VerificarEnvioHistoricoAsync(
+            db, cuentaAnterior, envio, bulto);
     }
 
     [Fact]
     public async Task Migracion_EliminaElVinculoYConservaLosEnviosAlMigrarYRevertir()
     {
         const string anterior = "20261008180729_AccountOwnerAndShipmentOperator";
+
         var inicial = Datos();
         await using var db = new NexoRutaDbContext(options);
         var migrator = db.GetService<IMigrator>();
+
         await AuthenticationTestData.Seeder(db, inicial).SeedAsync();
-        var cuenta = await Cuenta(db, inicial.UsuarioEmail, TipoAccesoUsuario.Comercio);
-        var operador = await Cuenta(db, inicial.OperadorUsuarioEmail, TipoAccesoUsuario.Operador);
-        // This legacy migration intentionally refuses to discard recorded operator ownership.
-        // The round-trip only exercises shipment-link compatibility, so remove that marker in
-        // this ephemeral fixture before downgrading; production data is never changed here.
+
+        var cuenta = await Cuenta(
+            db, inicial.UsuarioEmail, TipoAccesoUsuario.Comercio);
+
+        var operador = await Cuenta(
+            db, inicial.OperadorUsuarioEmail, TipoAccesoUsuario.Operador);
+
+        // Solo en esta base efímera: habilita el downgrade histórico
+        // sin intentar descartar una propiedad de operador registrada.
         await db.Database.ExecuteSqlInterpolatedAsync(
             $"UPDATE \"AccesosUsuario\" SET \"EsPropietario\" = FALSE WHERE \"OperadorId\" = {operador.OperadorId}");
+
         await migrator.MigrateAsync(anterior);
+
         var vinculo = Guid.CreateVersion7();
+
         await db.Database.ExecuteSqlInterpolatedAsync(
             $"INSERT INTO \"OperadoresComercios\" (\"Id\", \"OperadorId\", \"ComercioId\") VALUES ({vinculo}, {operador.OperadorId!.Value}, {cuenta.ComercioId!.Value})");
-        var destinatario = new Destinatario(operador.OperadorId.Value, "Destinatario anterior", "destinatario@example.test");
-        var direccion = new Direccion(operador.OperadorId.Value, "Dirección anterior");
+
+        var destinatario = new Destinatario(
+            operador.OperadorId.Value,
+            "Destinatario anterior",
+            "destinatario@example.test");
+
+        var direccion = new Direccion(
+            operador.OperadorId.Value,
+            "Dirección anterior");
+
         await InsertarDestinoAnterior(db, destinatario, direccion);
-        var envio = new Envio(operador.OperadorId.Value, cuenta.ComercioId.Value, cuenta.UsuarioId, destinatario.Id, direccion.Id, operador.OperadorId.Value);
+
+        var envio = new Envio(
+            operador.OperadorId.Value,
+            cuenta.ComercioId.Value,
+            cuenta.UsuarioId,
+            destinatario.Id,
+            direccion.Id,
+            operador.OperadorId.Value);
+
         await InsertarEnvioAnterior(db, envio, vinculo);
-        var bulto = new Bulto(envio.OperadorId, envio.Id, "ANTERIOR", 1750m, 32m, 21m, 11m);
+
+        var bulto = new Bulto(
+            envio.OperadorId,
+            envio.Id,
+            "ANTERIOR",
+            1750m,
+            32m,
+            21m,
+            11m);
+
         await InsertarBultoAnterior(db, bulto);
 
         await MigrarActualConCorreosDeFixture(db, migrator);
         await MigrarActualConCorreosDeFixture(db, migrator);
-        Assert.False(await db.Database.SqlQueryRaw<bool>("SELECT to_regclass('\"OperadoresComercios\"') IS NOT NULL AS \"Value\"").SingleAsync());
+
+        Assert.False(
+            await db.Database.SqlQueryRaw<bool>(
+                "SELECT to_regclass('\"OperadoresComercios\"') IS NOT NULL AS \"Value\"")
+                .SingleAsync());
+
         db.ChangeTracker.Clear();
-        var migratedAccess = await db.AccesosUsuario.SingleAsync(x => x.Id == cuenta.AccesoId);
+
+        var migratedAccess = await db.AccesosUsuario
+            .SingleAsync(x => x.Id == cuenta.AccesoId);
+
         Assert.Equal(cuenta.UsuarioId, migratedAccess.UsuarioId);
         Assert.Equal(cuenta.ComercioId, migratedAccess.ComercioId);
         Assert.Null(migratedAccess.RolId);
-        Assert.Null((await db.Usuarios.SingleAsync(x => x.Id == cuenta.UsuarioId)).PasswordHash);
+
+        Assert.Null(
+            (await db.Usuarios.SingleAsync(
+                x => x.Id == cuenta.UsuarioId)).PasswordHash);
+
         await ConfigureHistoricAccounts(db, inicial);
-        var persistido = Assert.Single(await Listar(db, cuenta.AccesoId));
-        Assert.Equal(envio.Id, persistido.Id);
-        Assert.Equal(cuenta.ComercioId, persistido.Origen.ComercioId);
-        Assert.Equal(cuenta.UsuarioId, persistido.Origen.CreadoPorUsuarioId);
-        Assert.Equal(bulto.Codigo, Assert.Single(persistido.Bultos).Codigo);
+
+        await VerificarEnvioHistoricoAsync(
+            db, cuenta.AccesoId, envio, bulto);
 
         await migrator.MigrateAsync(anterior);
-        Assert.Equal(1, await db.Database.SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM \"OperadoresComercios\"").SingleAsync());
-        Assert.Equal(1, await db.Database.SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM \"Envios\" e JOIN \"OperadoresComercios\" r ON e.\"OperadorComercioId\" = r.\"Id\" AND e.\"OperadorId\" = r.\"OperadorId\"").SingleAsync());
+
+        Assert.Equal(
+            1,
+            await db.Database.SqlQueryRaw<int>(
+                "SELECT count(*)::int AS \"Value\" FROM \"OperadoresComercios\"")
+                .SingleAsync());
+
+        Assert.Equal(
+            1,
+            await db.Database.SqlQueryRaw<int>(
+                "SELECT count(*)::int AS \"Value\" FROM \"Envios\" e JOIN \"OperadoresComercios\" r ON e.\"OperadorComercioId\" = r.\"Id\" AND e.\"OperadorId\" = r.\"OperadorId\"")
+                .SingleAsync());
+
         await MigrarActualConCorreosDeFixture(db, migrator);
         db.ChangeTracker.Clear();
-        await ConfigureHistoricAccounts(db, inicial);
-        var envios = await Listar(db, cuenta.AccesoId);
-        Assert.Single(envios);
-        Assert.Contains(envios, x => x.Id == envio.Id && x.Origen.ComercioId == cuenta.ComercioId);
-        Assert.Equal(1, await db.Bultos.CountAsync());
-        Assert.True(await db.Bultos.AnyAsync(x => x.Id == bulto.Id && x.EnvioId == envio.Id));
-    }
 
+        await ConfigureHistoricAccounts(db, inicial);
+
+        await VerificarEnvioHistoricoAsync(
+            db, cuenta.AccesoId, envio, bulto);
+
+        Assert.Equal(1, await db.Bultos.CountAsync());
+
+        Assert.True(
+            await db.Bultos.AnyAsync(
+                x => x.Id == bulto.Id && x.EnvioId == envio.Id));
+    }
+    
     [Fact]
     public async Task Guardar_AggregateWithMismatchedTenantKeysWritesNothing()
     {
@@ -477,6 +637,7 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         await AuthenticationTestData.Seeder(db, inicial).SeedAsync();
         var comercio = await Cuenta(db, inicial.UsuarioEmail, TipoAccesoUsuario.Comercio);
         var operador = await Cuenta(db, inicial.OperadorUsuarioEmail, TipoAccesoUsuario.Operador);
+        await ServiciosEnvioTestData.PublicarReglasYServicioAsync(db, operador.OperadorId!.Value, operador.UsuarioId);
         var destinatario = new Destinatario(operador.OperadorId!.Value, "Ana", "destinatario@example.test");
         var direccion = new Direccion(operador.OperadorId.Value, "Rivera 123");
         var envio = new Envio(operador.OperadorId.Value, comercio.ComercioId!.Value,
@@ -488,7 +649,7 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         await using var transaction = await db.Database.BeginTransactionAsync();
         await db.ApplyAsync(RlsActorContext.From(context));
         var error = await Assert.ThrowsAsync<ArgumentException>(() =>
-            new EfEnviosRepository(db).GuardarAsync(envio, destinatario, direccion, bulto));
+            new EfEnviosRepository(db).GuardarAsync(envio, destinatario, direccion, [bulto], ServiciosEnvioTestData.Comando(envio.OperadorId)));
         Assert.Contains("tenant keys", error.Message, StringComparison.OrdinalIgnoreCase);
 
         await using var consulta = new NexoRutaDbContext(options);
@@ -557,7 +718,7 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         var context = await new EfAccesosUsuarioRepository(db).ObtenerAsync(accesoId)
             ?? throw new InvalidOperationException("The selected access is missing.");
         if (context.ComercioId is not null && await db.Operadores.AnyAsync(o => o.Id == operadorId))
-            await ReglasEnvioTestData.PublicarInicialAsync(db, operadorId, context.UsuarioId);
+            await ServiciosEnvioTestData.PublicarReglasYServicioAsync(db, operadorId, context.UsuarioId);
         await using var transaction = await db.BeginOrJoinAsync();
         await db.ApplyAsync(RlsActorContext.From(context));
         var created = await new CrearEnvioUseCase(new EfEnviosRepository(db), new UsuarioSeleccionado(db, accesoId), new EfOperadoresRepository(db))
@@ -566,11 +727,7 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
                 DestinatarioNombre: "Destinatario de prueba",
                 DestinatarioEmail: "destinatario@example.test",
                 Direccion: "Av. Rivera 123",
-                CodigoBulto: codigo,
-                PesoGramos: 1750m,
-                LargoCentimetros: 32m,
-                AnchoCentimetros: 21m,
-                AltoCentimetros: 11m));
+                Bultos: [new BultoDeclarado(codigo, 1750m, 32m, 21m, 11m)], Servicio: ServiciosEnvioTestData.Comando(operadorId)));
         await transaction.CommitAsync();
         return created;
     }
@@ -592,6 +749,63 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
             => await new EfAccesosUsuarioRepository(db).ObtenerAsync(accesoId, cancellationToken)
                 ?? throw new AccesoActualNoDisponibleException();
     }
-    private static Task MigrarActualConCorreosDeFixture(NexoRutaDbContext db, IMigrator migrator) => HistoricRecipientEmail.MigrateAsync(db);
+    private static async Task MigrarActualConCorreosDeFixture(NexoRutaDbContext db, IMigrator migrator)
+    {
+        await HistoricRecipientEmail.MigrateAsync(db);
+        // These round-trip fixtures stop before the breaking shipment-rules migration, while the
+        // current repository projection includes the later shipment creation timestamp.
+        await db.Database.ExecuteSqlRawAsync("ALTER TABLE \"Envios\" ADD COLUMN IF NOT EXISTS \"CreadoEnUtc\" timestamp with time zone NOT NULL DEFAULT now()");
+    }
+    private static async Task VerificarEnvioHistoricoAsync(
+        NexoRutaDbContext db,
+        Guid accesoId,
+        Envio esperado,
+        Bulto bultoEsperado)
+    {
+        var contexto = await new EfAccesosUsuarioRepository(db)
+            .ObtenerAsync(accesoId)
+            ?? throw new InvalidOperationException(
+                "The historical commerce access is missing.");
 
+        Assert.Equal((Guid?)esperado.ComercioId, contexto.ComercioId);
+
+        await using var transaction = await db.BeginOrJoinAsync();
+        await db.ApplyAsync(RlsActorContext.From(contexto));
+
+        var envio = Assert.Single(
+            await db.Envios
+                .AsNoTracking()
+                .Where(x => x.ComercioId == esperado.ComercioId)
+                .Select(x => new
+                {
+                    x.Id,
+                    x.OperadorId,
+                    x.ComercioId,
+                    x.CreadoPorUsuarioId
+                })
+                .ToArrayAsync());
+
+        Assert.Equal(esperado.Id, envio.Id);
+        Assert.Equal(esperado.OperadorId, envio.OperadorId);
+        Assert.Equal(esperado.ComercioId, envio.ComercioId);
+        Assert.Equal(esperado.CreadoPorUsuarioId, envio.CreadoPorUsuarioId);
+
+        var bulto = Assert.Single(
+            await db.Bultos
+                .AsNoTracking()
+                .Where(x => x.EnvioId == esperado.Id)
+                .Select(x => new
+                {
+                    x.Id,
+                    x.EnvioId,
+                    x.Codigo
+                })
+                .ToArrayAsync());
+
+        Assert.Equal(bultoEsperado.Id, bulto.Id);
+        Assert.Equal(esperado.Id, bulto.EnvioId);
+        Assert.Equal(bultoEsperado.Codigo, bulto.Codigo);
+
+        await transaction.CommitAsync();
+    }
 }

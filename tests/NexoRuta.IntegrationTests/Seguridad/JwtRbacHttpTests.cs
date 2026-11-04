@@ -28,7 +28,7 @@ public sealed class JwtRbacHttpTests(PostgresFixture postgres) : IClassFixture<P
     public async Task LoginUsesIdentityHashAndDoesNotRevealMissingUsers(string scenario, HttpStatusCode expected)
     {
         var database = await postgres.CreateDatabaseAsync();
-        using var factory = database.CreateApiFactory();
+        using var factory = database.CreateShippingApiFactory();
         using var client = factory.CreateHttpClient();
         await using var db = database.CreateDbContext();
         var access = await db.AccesosUsuario.SingleAsync(x => x.ComercioId != null);
@@ -74,7 +74,7 @@ public sealed class JwtRbacHttpTests(PostgresFixture postgres) : IClassFixture<P
     public async Task InvalidLoginEntriesReturnBadRequest(string? email, string? password)
     {
         var database = await postgres.CreateDatabaseAsync();
-        using var factory = database.CreateApiFactory();
+        using var factory = database.CreateShippingApiFactory();
         using var client = factory.CreateHttpClient();
         using var response = await client.PostAsJsonAsync("/api/auth/login", new { Email = email, Password = password });
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -127,7 +127,7 @@ public sealed class JwtRbacHttpTests(PostgresFixture postgres) : IClassFixture<P
     public async Task DatabaseChangesRevokePreviouslyIssuedJwtDespiteForgedPermissionClaims(string change)
     {
         var database = await postgres.CreateDatabaseAsync();
-        using var factory = database.CreateApiFactory();
+        using var factory = database.CreateShippingApiFactory();
         using var client = factory.CreateHttpClient();
         await using var db = database.CreateDbContext();
         var commerce = await db.AccesosUsuario.SingleAsync(x => x.ComercioId != null);
@@ -167,7 +167,7 @@ public sealed class JwtRbacHttpTests(PostgresFixture postgres) : IClassFixture<P
     public async Task EveryRegisteredPolicyUsesCurrentPostgresGrants(string policy, bool commerceAllowed, bool operatorAllowed)
     {
         var database = await postgres.CreateDatabaseAsync();
-        using var factory = database.CreateApiFactory();
+        using var factory = database.CreateShippingApiFactory();
         using var client = factory.CreateHttpClient();
         await using var scope = factory.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<NexoRuta.Infrastructure.Persistence.NexoRutaDbContext>();
@@ -239,7 +239,7 @@ public sealed class JwtRbacHttpTests(PostgresFixture postgres) : IClassFixture<P
     public async Task JwtScopesShipmentCreationAndListingByCommerceAndOperator()
     {
         var database = await postgres.CreateDatabaseAsync();
-        using var factory = database.CreateApiFactory();
+        using var factory = database.CreateShippingApiFactory();
         using var client = factory.CreateHttpClient();
         await using var db = database.CreateDbContext();
         var commerce = await db.AccesosUsuario.SingleAsync(x => x.ComercioId != null);
@@ -253,16 +253,15 @@ public sealed class JwtRbacHttpTests(PostgresFixture postgres) : IClassFixture<P
         foreach (var permission in await db.Permisos.Where(x => x.Codigo == "envios.crear" || x.Codigo == "envios.consultar").ToListAsync())
             db.Add(new RolPermiso(secondRole.Id, permission.Id));
         await db.SaveChangesAsync();
-        await ReglasEnvioTestData.PublicarInicialAsync(db, secondOperator.Id, operatorAccess.UsuarioId);
+        await ServiciosEnvioTestData.PublicarReglasYServicioAsync(db, secondOperator.Id, operatorAccess.UsuarioId);
         var commerceJwt = await Login(client, (await db.Usuarios.SingleAsync(x => x.Id == commerce.UsuarioId)).Email);
         var operatorJwt = await Login(client, (await db.Usuarios.SingleAsync(x => x.Id == operatorAccess.UsuarioId)).Email);
         var secondJwt = await Login(client, secondUser.Email);
         async Task<Guid> Create(string token, Guid operatorId)
         {
             using var request = Request(token, HttpMethod.Post);
-            request.Content = JsonContent.Create(new { OperadorId = operatorId, DestinatarioNombre = "Recipient", DestinatarioEmail = "destinatario@example.test",
-                Direccion = "Address 123", CodigoBulto = Guid.NewGuid().ToString("N"), PesoGramos = 100,
-                LargoCentimetros = 10, AnchoCentimetros = 10, AltoCentimetros = 10 });
+            request.Content = JsonContent.Create(new { OperadorId = operatorId, Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(operatorId), DestinatarioNombre = "Recipient", DestinatarioEmail = "destinatario@example.test",
+                Direccion = "Address 123", Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = Guid.NewGuid().ToString("N"), PesoGramos = 100, LargoCentimetros = 10, AnchoCentimetros = 10, AltoCentimetros = 10  } }});
             using var response = await client.SendAsync(request);
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
             return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
@@ -279,9 +278,8 @@ public sealed class JwtRbacHttpTests(PostgresFixture postgres) : IClassFixture<P
             Assert.Equal(expected.Order(), rows!.Select(x => x.GetProperty("id").GetGuid()).Order());
         }
         using var forbiddenRequest = Request(operatorJwt, HttpMethod.Post);
-        forbiddenRequest.Content = JsonContent.Create(new { OperadorId = operatorAccess.OperadorId,
-            DestinatarioNombre = "Recipient", DestinatarioEmail = "destinatario@example.test", Direccion = "Address 123", CodigoBulto = "DENIED",
-            PesoGramos = 100, LargoCentimetros = 10, AnchoCentimetros = 10, AltoCentimetros = 10 });
+        forbiddenRequest.Content = JsonContent.Create(new { OperadorId = operatorAccess.OperadorId, Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(operatorAccess.OperadorId),
+            DestinatarioNombre = "Recipient", DestinatarioEmail = "destinatario@example.test", Direccion = "Address 123", Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "DENIED", PesoGramos = 100, LargoCentimetros = 10, AnchoCentimetros = 10, AltoCentimetros = 10  } }});
         using var forbidden = await client.SendAsync(forbiddenRequest);
         Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
         Assert.Equal(3, await db.Envios.CountAsync());
@@ -291,7 +289,7 @@ public sealed class JwtRbacHttpTests(PostgresFixture postgres) : IClassFixture<P
     public async Task PublicTrackingIsUnchangedForAnonymousAndJwtClients()
     {
         var database = await postgres.CreateDatabaseAsync();
-        using var factory = database.CreateApiFactory();
+        using var factory = database.CreateShippingApiFactory();
         using var client = factory.CreateHttpClient();
         await using var db = database.CreateDbContext();
         var access = await db.AccesosUsuario.SingleAsync(x => x.ComercioId != null);

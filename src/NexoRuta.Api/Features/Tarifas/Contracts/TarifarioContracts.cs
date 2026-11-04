@@ -153,6 +153,18 @@ public static class TarifarioContractMapper
                         adjustment.Nombre, Tipo(adjustment.Tipo), adjustment.ImporteFijoUyu,
                         adjustment.Porcentaje)).ToArray())).ToArray());
 
+    public static VersionTarifarioResponse Detalle(TarifarioPublicacionSnapshot version)
+        => new(version.VersionTarifarioId, EstadoVersionTarifarioContract.Publicada,
+            version.NumeroVersionPublicada, version.VersionConcurrencia, Moneda(version.Moneda),
+            version.CreadaUtc, version.PublicadaUtc,
+            version.Tarifas.OrderBy(rate => rate.ZonaId).ThenBy(rate => rate.Modalidad)
+                .Select(rate => new TarifaZonaModalidadResponse(rate.ZonaId, Modalidad(rate.Modalidad),
+                    rate.ImporteBaseUyu, rate.PrecioPorKilogramoUyu, rate.PrecioPorMetroCubicoUyu,
+                    rate.Ajustes.OrderBy(adjustment => adjustment.Id)
+                        .Select(adjustment => new AjusteTarifarioResponse(adjustment.Nombre,
+                            Tipo(adjustment.Tipo), adjustment.ImporteFijoUyu, adjustment.Porcentaje)).ToArray()))
+                .ToArray());
+
     public static SimulacionTarifaResponse Simulacion(ResultadoCalculoTarifa result)
     {
         if (result.VersionTarifarioId is not { } versionId || result.VersionConcurrencia is not { } concurrency)

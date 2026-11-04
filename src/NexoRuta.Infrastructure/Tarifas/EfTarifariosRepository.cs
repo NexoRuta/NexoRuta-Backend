@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
+using NexoRuta.Infrastructure.Caching;
+using NexoRuta.Infrastructure.Hosting;
 using NexoRuta.Application.Tarifas.Repositories;
 using NexoRuta.Domain.Tarifas;
 using NexoRuta.Domain.ZonasCobertura;
@@ -8,7 +10,7 @@ using NexoRuta.Infrastructure.Persistence;
 
 namespace NexoRuta.Infrastructure.Tarifas;
 
-public sealed class EfTarifariosRepository(NexoRutaDbContext db) : ITarifariosRepository
+public sealed class EfTarifariosRepository(NexoRutaDbContext db, DistributedCacheAccess? cache = null) : ITarifariosRepository
 {
     public async Task<TarifarioConsulta> ConsultarAsync(Guid operadorId, CancellationToken cancellationToken = default)
     {
@@ -37,10 +39,13 @@ public sealed class EfTarifariosRepository(NexoRutaDbContext db) : ITarifariosRe
         return (items, total);
     }
 
-    public Task<VersionTarifario?> ObtenerPublicacionAsync(Guid operadorId, Guid versionId,
+    public async Task<TarifarioPublicacionSnapshot?> ObtenerPublicacionAsync(Guid operadorId, Guid versionId,
         CancellationToken cancellationToken = default)
-        => VersionsQuery(operadorId).AsNoTracking().SingleOrDefaultAsync(x => x.Id == versionId
-            && x.Estado == EstadoVersionTarifario.Publicada, cancellationToken);
+    {
+        var header = await BuscarCabeceraAsync(operadorId, versionId, cancellationToken);
+        if (header is null || header.Estado != EstadoVersionTarifario.Publicada) return null;
+        return await ObtenerSnapshotPublicadoAsync(header, cancellationToken);
+    }
 
     public async Task<VersionTarifario> CrearBorradorAsync(Guid operadorId, Guid usuarioId,
         CancellationToken cancellationToken = default)
@@ -144,15 +149,79 @@ public sealed class EfTarifariosRepository(NexoRutaDbContext db) : ITarifariosRe
     public async Task<DatosSimulacionTarifario?> ObtenerParaSimularAsync(Guid operadorId, Guid versionId,
         Guid zonaId, ModalidadTarifaria modalidad, CancellationToken cancellationToken = default)
     {
-        var version = await VersionsQuery(operadorId).AsNoTracking()
-            .SingleOrDefaultAsync(x => x.Id == versionId, cancellationToken);
-        if (version is null) return null;
-        var rate = version.BuscarTarifa(zonaId, modalidad);
+        var header = await BuscarCabeceraAsync(operadorId, versionId, cancellationToken);
+        if (header is null) return null;
+        TarifaCalculo? rate;
+        if (header.Estado == EstadoVersionTarifario.Publicada)
+        {
+            var snapshot = await ObtenerSnapshotPublicadoAsync(header, cancellationToken);
+            rate = snapshot?.BuscarCalculo(zonaId, modalidad);
+        }
+        else
+        {
+            if (cache is null) DistributedCacheTelemetry.Request(DistributedCacheTelemetry.PublishedTariff, "bypass");
+            else cache.Bypass(DistributedCacheTelemetry.PublishedTariff);
+            var draft = await VersionsQuery(operadorId).AsNoTracking()
+                .SingleOrDefaultAsync(x => x.Id == versionId && x.Estado == EstadoVersionTarifario.Borrador,
+                    cancellationToken);
+            rate = draft?.BuscarTarifa(zonaId, modalidad)?.ACalculo(draft);
+        }
         var zoneIsActive = await db.ZonasCobertura.AsNoTracking()
             .AnyAsync(x => x.OperadorId == operadorId && x.Id == zonaId && x.Estado == EstadoZonaCobertura.Activa,
                 cancellationToken);
-        return new(version, rate, zoneIsActive);
+        return new(rate, zoneIsActive);
     }
+
+    private async Task<TarifarioPublicacionSnapshot?> ObtenerSnapshotPublicadoAsync(CabeceraTarifario header,
+        CancellationToken cancellationToken)
+    {
+        var cacheKey = cache?.Key(DistributedCacheTelemetry.PublishedTariff,
+            $"{header.OperadorId:D}:{header.Id:D}");
+        if (cache is not null)
+        {
+            var cached = await cache.GetAsync<TarifarioPublicacionSnapshot>(
+                DistributedCacheTelemetry.PublishedTariff, cacheKey!,
+                value => value.EsValido(header.OperadorId, header.Id, header.NumeroVersionPublicada,
+                    header.VersionConcurrencia),
+                cancellationToken);
+            if (cached.Lookup == DistributedCacheLookup.Hit) return cached.Value;
+        }
+        else
+        {
+            DistributedCacheTelemetry.Request(DistributedCacheTelemetry.PublishedTariff, "bypass");
+        }
+
+        var version = await VersionsQuery(header.OperadorId).AsNoTracking()
+            .SingleOrDefaultAsync(x => x.Id == header.Id && x.Estado == EstadoVersionTarifario.Publicada,
+                cancellationToken);
+        if (version is null) return null;
+        var snapshot = new TarifarioPublicacionSnapshot(version.OperadorId, version.Id,
+            version.NumeroVersionPublicada
+                ?? throw new InvalidOperationException("Una publicaciÃ³n no tiene nÃºmero de versiÃ³n."),
+            version.VersionConcurrencia, version.Moneda, version.CreadaUtc, version.PublicadaUtc,
+            version.Tarifas.OrderBy(rate => rate.ZonaId).ThenBy(rate => rate.Modalidad)
+                .Select(rate => new TarifaPublicadaSnapshot(rate.ZonaId, rate.Modalidad,
+                    rate.ImporteBaseUyu, rate.PrecioPorKilogramoUyu, rate.PrecioPorMetroCubicoUyu,
+                    rate.Ajustes.OrderBy(adjustment => adjustment.Id)
+                        .Select(adjustment => new AjustePublicadoSnapshot(adjustment.Id, adjustment.Nombre,
+                            adjustment.Tipo, adjustment.ImporteFijoUyu, adjustment.Porcentaje)).ToArray()))
+                .ToArray());
+        if (cache is not null)
+            await cache.SetAsync(DistributedCacheTelemetry.PublishedTariff, cacheKey!, snapshot,
+                cache.Settings.PublishedTariff.TtlSeconds, cancellationToken);
+        return snapshot;
+    }
+
+    private Task<CabeceraTarifario?> BuscarCabeceraAsync(Guid operadorId, Guid versionId,
+        CancellationToken cancellationToken)
+        => db.VersionesTarifario.AsNoTracking()
+            .Where(version => version.OperadorId == operadorId && version.Id == versionId)
+            .Select(version => new CabeceraTarifario(version.OperadorId, version.Id, version.Estado,
+                version.NumeroVersionPublicada, version.VersionConcurrencia))
+            .SingleOrDefaultAsync(cancellationToken);
+
+    private sealed record CabeceraTarifario(Guid OperadorId, Guid Id, EstadoVersionTarifario Estado,
+        int? NumeroVersionPublicada, long VersionConcurrencia);
 
     private IQueryable<VersionTarifario> VersionsQuery(Guid operadorId)
         => db.VersionesTarifario.Where(x => x.OperadorId == operadorId)

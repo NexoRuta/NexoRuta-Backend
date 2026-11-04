@@ -19,9 +19,10 @@ public sealed class RutasController(GestionarRutasUseCase casos, ConfigurarRepar
         {
             var politica = await configuracion.ObtenerAsync(ct);
             if (politica is null) return Problem("Configurá las reglas de reparto antes de planificar.", statusCode: 409);
+            var baseOperativa = await configuracion.BaseAsync(ct);
             return Ok(new RecursosPlanificacionResponse(ConfiguracionRepartoContract.Desde(politica),
                 (await repartidores.ListarAsync(ct)).Where(r => r.Activo).Select(r => new RepartidorPlanificacionResponse(r.AccesoId, r.Nombre)).ToArray(),
-                (await configuracion.VehiculosAsync(ct)).Where(v => v.Activo).Select(VehiculoContract.Desde).ToArray()));
+                (await configuracion.VehiculosAsync(ct)).Where(v => v.Activo).Select(VehiculoContract.Desde).ToArray(), baseOperativa is null ? null : BaseOperativaResponse.Desde(baseOperativa)));
         }
         catch (RepartoNoPermitidoException) { return Forbid(); }
     }
@@ -45,7 +46,7 @@ public sealed class RutasController(GestionarRutasUseCase casos, ConfigurarRepar
     public async Task<IActionResult> Planificar(PlanificarRutaRequest request, CancellationToken ct)
     {
         try { return Ok(HojaRutaResponse.Desde(await casos.PlanificarAsync(new(request.RepartidorAccesoId,
-            request.VehiculoId, request.Fecha, request.Paradas.Select(x => new ParadaPlanificadaDatos(x.EnvioId, x.LlegadaEstimadaUtc)).ToArray()), ct))); }
+            request.VehiculoId, request.Fecha, request.Paradas.Select(x => new ParadaPlanificadaDatos(x.EnvioId, x.LlegadaEstimadaUtc, x.ServicioMinutos)).ToArray(), request.SalidaPlanificadaEnUtc), ct))); }
         catch (RepartoNoPermitidoException) { return Forbid(); }
         catch (ConflictoRepartoException ex) { return Problem(ex.Message, statusCode: 409); }
         catch (ArgumentException ex) { return Problem(ex.Message, statusCode: 400); }
@@ -66,8 +67,51 @@ public sealed class RutasController(GestionarRutasUseCase casos, ConfigurarRepar
         try
         {
             var hoja = await casos.ReasignarAsync(id, new(request.RutaDestinoId, request.VersionEnvio,
-                request.VersionRutaDestino, request.LlegadaEstimadaUtc, request.Motivo), ct);
+                request.VersionRutaDestino, request.LlegadaEstimadaUtc, request.Motivo, request.ServicioMinutos), ct);
             return hoja is null ? NotFound() : Ok(HojaRutaResponse.Desde(hoja));
+        }
+        catch (RepartoNoPermitidoException) { return Forbid(); }
+        catch (ConflictoRepartoException ex) { return Problem(ex.Message, statusCode: 409); }
+        catch (ArgumentException ex) { return Problem(ex.Message, statusCode: 400); }
+    }
+    [HttpPost("/api/envios/{id:guid}/reprogramacion"), Authorize(Policy = "envios.gestionar")]
+    [ProducesResponseType<ReprogramacionEnvioResponse>(200)]
+    [ProducesResponseType(400), ProducesResponseType(403), ProducesResponseType(404), ProducesResponseType(409)]
+    public async Task<IActionResult> Reprogramar(Guid id, ReprogramarEnvioRequest request, CancellationToken ct)
+    {
+        try
+        {
+            var resultado = await casos.ReprogramarAsync(id, new(request.VersionEnvio), ct);
+            return resultado is null ? NotFound() : Ok(ReprogramacionEnvioResponse.Desde(resultado));
+        }
+        catch (RepartoNoPermitidoException) { return Forbid(); }
+        catch (ConflictoRepartoException ex) { return Problem(ex.Message, statusCode: 409); }
+    }
+    [HttpPost("/api/envios/{id:guid}/iniciar-devolucion"), Authorize(Policy = "envios.gestionar")]
+    [ProducesResponseType<DecisionDevolucionEnvioResponse>(200)]
+    [ProducesResponseType(400), ProducesResponseType(403), ProducesResponseType(404), ProducesResponseType(409)]
+    public async Task<IActionResult> IniciarDevolucion(Guid id, IniciarDevolucionEnvioRequest request, CancellationToken ct)
+    {
+        try
+        {
+            var resultado = await casos.IniciarDevolucionAsync(id,
+                new(request.VersionEnvio, request.ComandoId, request.Motivo), ct);
+            return resultado is null ? NotFound() : Ok(DecisionDevolucionEnvioResponse.Desde(resultado));
+        }
+        catch (RepartoNoPermitidoException) { return Forbid(); }
+        catch (ConflictoRepartoException ex) { return Problem(ex.Message, statusCode: 409); }
+        catch (ArgumentException ex) { return Problem(ex.Message, statusCode: 400); }
+    }
+    [HttpPost("/api/envios/{id:guid}/confirmar-extravio"), Authorize(Policy = "envios.gestionar")]
+    [ProducesResponseType<ConfirmacionExtravioEnvioResponse>(200)]
+    [ProducesResponseType(400), ProducesResponseType(403), ProducesResponseType(404), ProducesResponseType(409)]
+    public async Task<IActionResult> ConfirmarExtravio(Guid id, ConfirmarExtravioEnvioRequest request, CancellationToken ct)
+    {
+        try
+        {
+            var resultado = await casos.ConfirmarExtravioAsync(id,
+                new(request.VersionEnvio, request.ComandoId, request.Motivo), ct);
+            return resultado is null ? NotFound() : Ok(ConfirmacionExtravioEnvioResponse.Desde(resultado));
         }
         catch (RepartoNoPermitidoException) { return Forbid(); }
         catch (ConflictoRepartoException ex) { return Problem(ex.Message, statusCode: 409); }
@@ -79,6 +123,19 @@ public sealed class RutasController(GestionarRutasUseCase casos, ConfigurarRepar
     public async Task<IActionResult> Despachar(Guid id, VersionRutaRequest request, CancellationToken ct)
     {
         try { var hoja = await casos.DespacharAsync(id, request.Version, ct); return hoja is null ? NotFound() : Ok(HojaRutaResponse.Desde(hoja)); }
+        catch (RepartoNoPermitidoException) { return Forbid(); }
+        catch (ConflictoRepartoException ex) { return Problem(ex.Message, statusCode: 409); }
+    }
+    [HttpPost("{id:guid}/cancelacion"), Authorize(Policy = "envios.gestionar")]
+    [ProducesResponseType<HojaRutaResponse>(200)]
+    [ProducesResponseType(400), ProducesResponseType(403), ProducesResponseType(404), ProducesResponseType(409)]
+    public async Task<IActionResult> Cancelar(Guid id, VersionRutaRequest request, CancellationToken ct)
+    {
+        try
+        {
+            var hoja = await casos.CancelarAsync(id, request.Version, ct);
+            return hoja is null ? NotFound() : Ok(HojaRutaResponse.Desde(hoja));
+        }
         catch (RepartoNoPermitidoException) { return Forbid(); }
         catch (ConflictoRepartoException ex) { return Problem(ex.Message, statusCode: 409); }
     }

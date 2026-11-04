@@ -31,6 +31,12 @@ public sealed class PushOutboxWorker(IServiceScopeFactory scopes, ITransporteFcm
         var mensaje = await outbox.ReservarSiguienteAsync(procesador, OutboxDestino.PushFcm, ct);
         WorkerTelemetry.SqlContact("Push");
         if (mensaje is null) return false;
+        using var activity = WorkerTelemetry.StartOutboxActivity(mensaje);
+        using var logScope = logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["correlation_id"] = WorkerTelemetry.CorrelationId(mensaje),
+            ["outbox_message_id"] = mensaje.Id.ToString("D")
+        });
         try
         {
             using var limite = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -44,7 +50,8 @@ public sealed class PushOutboxWorker(IServiceScopeFactory scopes, ITransporteFcm
         catch (Exception ex)
         {
             logger.LogWarning("Falló push {MensajeId}. ErrorType: {ErrorType}", mensaje.Id, ex.GetType().Name);
-                WorkerTelemetry.Failed("Push");
+            WorkerTelemetry.PushDeliveryFailed();
+            WorkerTelemetry.Failed("Push");
             await outbox.MarcarErrorAsync(mensaje.Id, procesador, ex.GetType().Name, ct);
         }
         return true;
@@ -56,7 +63,7 @@ public sealed class PushOutboxWorker(IServiceScopeFactory scopes, ITransporteFcm
             || mensaje.Destino != nameof(OutboxDestino.PushFcm) || mensaje.Ambito != nameof(OutboxScope.Envio)
             || mensaje.ClaveAmbito != mensaje.EnvioId || mensaje.VersionContrato != OutboxContractVersions.Current)
             throw new InvalidDataException("El mensaje no corresponde al ámbito de reparto.");
-        using var json = JsonDocument.Parse(mensaje.Payload);
+        using var json = JsonDocument.Parse(mensaje.BusinessPayload);
         if (mensaje.Tipo != OutboxMessageTypes.DeliveryChanged || !json.RootElement.GetProperty("avisoId").TryGetGuid(out var avisoId))
             throw new InvalidDataException("El mensaje no corresponde al contrato de notificación.");
         var repo = servicios.GetRequiredService<EfDespachoPushRepository>();

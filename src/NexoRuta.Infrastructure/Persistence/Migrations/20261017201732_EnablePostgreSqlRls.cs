@@ -638,6 +638,20 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                     nexoruta_app.lock_owned_role(uuid), nexoruta_app.revoke_org_sessions(text, uuid) TO nexoruta_api;
                 GRANT EXECUTE ON FUNCTION nexoruta_app.set_organization_state(text, uuid, text, bigint) TO nexoruta_api;
 
+                -- Validators require EXECUTE during CREATE OR REPLACE, even for inherited owners.
+                -- Restore only each NOLOGIN owner's own functions; runtime/PUBLIC grants stay scoped.
+                DO $owner_execute$
+                DECLARE item record;
+                BEGIN
+                    FOR item IN SELECT p.oid::regprocedure AS signature, r.rolname AS owner_name
+                        FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+                        JOIN pg_roles r ON r.oid=p.proowner
+                        WHERE n.nspname='nexoruta_app' AND NOT r.rolcanlogin
+                    LOOP
+                        EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO %I',item.signature,item.owner_name);
+                    END LOOP;
+                END $owner_execute$;
+
                 -- The SECURITY DEFINER owners still obey FORCE RLS; their policies are narrower than
                 -- their underlying grants and each function sets a transaction-local, function-derived key.
                 CREATE POLICY access_auth_fn_select ON public."AccesosUsuario" FOR SELECT TO nexoruta_auth_fn

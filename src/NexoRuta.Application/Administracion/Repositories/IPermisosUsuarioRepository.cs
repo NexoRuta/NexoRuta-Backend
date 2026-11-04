@@ -12,4 +12,10 @@ public interface IPermisosUsuarioRepository
         Guid usuarioId,
         Guid accesoId,
         CancellationToken cancellationToken = default);
+    Task<bool> PuedeGestionarDecisionesOperativasEnvioAsync(
+        Guid usuarioId,
+        Guid accesoId,
+        Guid rolId,
+        Guid operadorId,
+        CancellationToken cancellationToken = default);
 }

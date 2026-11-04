@@ -25,20 +25,20 @@ public sealed class ReglasEnvioAdmisionHttpTests(PostgresFixture postgres) : ICl
         var operador = await db.AccesosUsuario.SingleAsync(a => a.OperadorId != null);
         var comercio = await db.AccesosUsuario.SingleAsync(a => a.ComercioId != null);
         await client.SetBearerForAccessAsync(database, comercio.Id);
-        object Alta(string codigo) => new { OperadorId = operador.OperadorId, DestinatarioNombre = "Destinatario", DestinatarioEmail = "destinatario@example.test",
-            Direccion = "Dirección de prueba", CodigoBulto = codigo, PesoGramos = 1000, LargoCentimetros = 10, AnchoCentimetros = 10, AltoCentimetros = 10 };
+        object Alta(string codigo) => new { OperadorId = operador.OperadorId, Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(operador.OperadorId), DestinatarioNombre = "Destinatario", DestinatarioEmail = "destinatario@example.test",
+            Direccion = "Dirección de prueba", Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = codigo, PesoGramos = 1000, LargoCentimetros = 10, AnchoCentimetros = 10, AltoCentimetros = 10  } }};
         using var sinReglas = await client.PostAsJsonAsync("/api/envios", Alta("SIN-REGLAS"));
         Assert.Equal(HttpStatusCode.Conflict, sinReglas.StatusCode);
         Assert.Contains("publicar", await sinReglas.Content.ReadAsStringAsync());
         Assert.Empty(await db.Envios.ToArrayAsync()); Assert.Empty(await db.Destinatarios.ToArrayAsync()); Assert.Empty(await db.OutboxMessages.ToArrayAsync());
-        var primeraVersion = await ReglasEnvioTestData.PublicarInicialAsync(db, operador.OperadorId!.Value, operador.UsuarioId);
+        var primeraVersion = await ServiciosEnvioTestData.PublicarReglasYServicioAsync(db, operador.OperadorId!.Value, operador.UsuarioId);
         using var primerAlta = await client.PostAsJsonAsync("/api/envios", Alta("REGLAS-1"));
         Assert.Equal(HttpStatusCode.Created, primerAlta.StatusCode);
         var primero = (await primerAlta.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
         var repo = new EfReglasOperativasRepository(db);
         var borrador = await repo.CrearBorradorAsync(operador.OperadorId.Value, operador.UsuarioId);
         await repo.EditarBorradorAsync(operador.OperadorId.Value, operador.UsuarioId, 0,
-            new(5, 60, PoliticaDevolucionAlAgotarIntentos.IniciarAutomaticamente, 4320, 2880,
+            new(5, 60, PoliticaDevolucionAlAgotarIntentos.IniciarAutomaticamente, 4320, 2880, 60,
                 [TipoPruebaEntrega.DocumentoReceptor], [new("AUSENTE", "Ausente", false), new("RECHAZADO", "Rechazado", true)]));
         await repo.PublicarBorradorAsync(operador.OperadorId.Value, operador.UsuarioId, 1);
         using var segundaAlta = await client.PostAsJsonAsync("/api/envios", Alta("REGLAS-2"));

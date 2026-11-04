@@ -60,7 +60,7 @@ public sealed class OutboxMessage
             _ => throw new ArgumentException("Unregistered shipment outbox contract.")
         };
         return Create(id ?? Guid.CreateVersion7(), operatorId, shipmentId, OutboxScope.Envio, shipmentId,
-            type, contractVersion, destination, priority, payload, null);
+            type, contractVersion, destination, priority, OutboxTraceContext.AddCurrentTraceParent(payload), null);
     }
 
     public static OutboxMessage ForIdentity(

@@ -19,4 +19,12 @@ public sealed class OperadoresDisponiblesController(IOperadoresRepository operad
     {
         return Ok(await operadores.ListarAsync(cancellationToken));
     }
+
+    [HttpGet("importacion-envios")]
+    [Authorize(Policy = "envios.crear")]
+    [ProducesResponseType<IReadOnlyList<OperadorDisponibleParaImportacion>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> ListarParaImportacion(CancellationToken cancellationToken)
+        => Ok(await operadores.ListarParaImportacionAsync(cancellationToken));
 }

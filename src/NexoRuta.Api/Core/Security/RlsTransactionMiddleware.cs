@@ -3,6 +3,8 @@ using NexoRuta.Application.Administracion.Repositories;
 using NexoRuta.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace NexoRuta.Api.Core.Security;
 
@@ -55,7 +57,20 @@ public sealed class RlsTransactionMiddleware(RequestDelegate next)
         }
         catch
         {
-            await transaction.RollbackAsync(CancellationToken.None);
+            try
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+            }
+            catch (Exception rollbackException)
+            {
+                try
+                {
+                    httpContext.RequestServices.GetService<ILogger<RlsTransactionMiddleware>>()?.LogWarning(
+                        "RLS transaction rollback failed after a request error with {FailureType}; preserving the original failure.",
+                        rollbackException.GetType().Name);
+                }
+                catch { }
+            }
             throw;
         }
         finally

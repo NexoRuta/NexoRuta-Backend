@@ -15,6 +15,7 @@ public sealed class VersionReglasOperativas
     public PoliticaDevolucionAlAgotarIntentos? PoliticaDevolucionAlAgotarIntentos { get; private set; }
     public int? PlazoEstandarMinutos { get; private set; }
     public int? PlazoUrgenteMinutos { get; private set; }
+    public int? PlazoValidacionPruebaMinutos { get; private set; }
     public DateTimeOffset CreadaUtc { get; private set; }
     public Guid CreadaPorUsuarioId { get; private set; }
     public DateTimeOffset? PublicadaUtc { get; private set; }
@@ -36,6 +37,8 @@ public sealed class VersionReglasOperativas
                 fields.Add(nameof(PlazoEstandarMinutos));
             if (PlazoUrgenteMinutos is not (> 0 and <= ReglasOperativas.MaxDurationMinutes))
                 fields.Add(nameof(PlazoUrgenteMinutos));
+            if (PlazoValidacionPruebaMinutos is not (> 0 and <= ReglasOperativas.MaxDurationMinutes))
+                fields.Add(nameof(PlazoValidacionPruebaMinutos));
             if (requisitosPrueba.Count == 0) fields.Add(nameof(RequisitosPrueba));
             if (!motivos.Any(reason => reason.Disponible)) fields.Add(nameof(Motivos));
             return fields;
@@ -69,7 +72,8 @@ public sealed class VersionReglasOperativas
             IntervaloEntreIntentosMinutos = copiarDesde?.IntervaloEntreIntentosMinutos,
             PoliticaDevolucionAlAgotarIntentos = copiarDesde?.PoliticaDevolucionAlAgotarIntentos,
             PlazoEstandarMinutos = copiarDesde?.PlazoEstandarMinutos,
-            PlazoUrgenteMinutos = copiarDesde?.PlazoUrgenteMinutos
+            PlazoUrgenteMinutos = copiarDesde?.PlazoUrgenteMinutos,
+            PlazoValidacionPruebaMinutos = copiarDesde?.PlazoValidacionPruebaMinutos
         };
         if (copiarDesde is not null)
         {
@@ -91,6 +95,8 @@ public sealed class VersionReglasOperativas
             nameof(configuracion.PlazoEstandarMinutos));
         ValidarOpcionalPositivo(configuracion.PlazoUrgenteMinutos, ReglasOperativas.MaxDurationMinutes,
             nameof(configuracion.PlazoUrgenteMinutos));
+        ValidarOpcionalPositivo(configuracion.PlazoValidacionPruebaMinutos, ReglasOperativas.MaxDurationMinutes,
+            nameof(configuracion.PlazoValidacionPruebaMinutos));
         if (configuracion.PoliticaDevolucionAlAgotarIntentos is { } policy && !Enum.IsDefined(policy))
             throw new ArgumentException("La política de devolución no es válida.", nameof(configuracion.PoliticaDevolucionAlAgotarIntentos));
 
@@ -121,6 +127,7 @@ public sealed class VersionReglasOperativas
         PoliticaDevolucionAlAgotarIntentos = configuracion.PoliticaDevolucionAlAgotarIntentos;
         PlazoEstandarMinutos = configuracion.PlazoEstandarMinutos;
         PlazoUrgenteMinutos = configuracion.PlazoUrgenteMinutos;
+        PlazoValidacionPruebaMinutos = configuracion.PlazoValidacionPruebaMinutos;
         requisitosPrueba.RemoveAll(item => !retainedRequirements.Contains(item.Tipo));
         requisitosPrueba.AddRange(newRequirements);
         foreach (var updated in newMotives)

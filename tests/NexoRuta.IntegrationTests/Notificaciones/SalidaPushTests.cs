@@ -65,12 +65,19 @@ public sealed partial class PushOutboxTests
         await using (var db = p.Data.CreateDbContext())
             email = await db.AccesosUsuario.Where(a => a.Id == futuro.RepartidorAccesoId)
                 .Join(db.Usuarios, a => a.UsuarioId, u => u.Id, (a, u) => u.Email).SingleAsync();
-        using var login = await p.Client.PostAsJsonAsync("/api/auth/mobile/login", new { Email = email, Password = AuthenticationTestData.Password });
+        // The scenario performs five preceding auth logins on p.Factory; keep this additional actor login
+        // in its own restricted test host so the production per-IP login limit remains enabled and meaningful.
+        var loginRuntime = await NexoRuta.IntegrationTests.Seguridad.RlsRestrictedHttpFlowTests.RestrictApiAsync(p.Data);
+        using var loginFactory = new IntegrationApiFactory(loginRuntime,
+            settings: NexoRuta.IntegrationTests.Seguridad.RlsRestrictedHttpFlowTests.ApiSettings());
+        using var loginClient = loginFactory.CreateHttpClient();
+        using var login = await loginClient.PostAsJsonAsync("/api/auth/mobile/login", new { Email = email, Password = AuthenticationTestData.Password });
         Assert.Equal(HttpStatusCode.OK, login.StatusCode);
         p.Client.DefaultRequestHeaders.Authorization = new("Bearer", (await login.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("accessToken").GetString());
         using var ajena = await p.Client.DeleteAsync($"/api/mobile/instalaciones/{id}");
         Assert.Equal(HttpStatusCode.NotFound, ajena.StatusCode);
-        await p.Client.SetBearerForAccessAsync(p.Data, p.Aviso.AccesoId);
+        await loginClient.SetBearerForAccessAsync(p.Data, p.Aviso.AccesoId);
+        p.Client.DefaultRequestHeaders.Authorization = loginClient.DefaultRequestHeaders.Authorization;
         using var web = await p.Client.DeleteAsync($"/api/mobile/instalaciones/{id}");
         Assert.Equal(HttpStatusCode.Forbidden, web.StatusCode);
         await using var verificar = p.Data.CreateDbContext();

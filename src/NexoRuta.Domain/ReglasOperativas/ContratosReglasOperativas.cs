@@ -41,5 +41,6 @@ public sealed record ReglasOperativasConfiguracion(
     PoliticaDevolucionAlAgotarIntentos? PoliticaDevolucionAlAgotarIntentos,
     int? PlazoEstandarMinutos,
     int? PlazoUrgenteMinutos,
+    int? PlazoValidacionPruebaMinutos,
     IReadOnlyCollection<TipoPruebaEntrega> RequisitosPrueba,
     IReadOnlyCollection<MotivoNoEntregaConfiguracion> Motivos);

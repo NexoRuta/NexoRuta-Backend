@@ -1,6 +1,6 @@
 # CU-08 — Bultos: primer monitoreo
 
-- **Estado:** implementado para el recorte del 08/10/2026.
+- **Estado:** primer monitoreo del 08/10/2026 cubierto parcialmente; CU-08 es obligatorio y separado. El requisito completo es registrar uno o más bultos por envío; el flujo actual sólo registra uno y no demuestra cumplimiento completo.
 - **Módulo:** M02 — Envíos y depósito.
 - **Fuente:** `Monitoreo_2026-10-08_CU.xlsx`, CU-08.
 
@@ -16,4 +16,4 @@ El bulto se envía dentro de `POST /api/envios`; el alta devuelve sus datos y `G
 
 La prueba de integración verifica desde otra conexión el código y las cuatro medidas persistidas. Las pruebas del cliente y de OpenAPI comprueban los tipos, nombres y límites del contrato; el recorrido del formulario confirma el bulto en Backoffice.
 
-Este monitoreo exige al menos un bulto y el formulario registra uno por alta. Edición, múltiples bultos desde el portal, recepción por escaneo y discrepancias no forman parte de este recorte.
+Este monitoreo registra un bulto por alta. El flujo actual no cubre la cardinalidad de uno o más bultos exigida por CU-08 completo (PDF `Laboratorio__NET_2026.pdf`, §5.2 n.° 8; XLSM `CU obligatorios!A11:I11`). CU-08 debe cerrarse como caso obligatorio separado; su falta de múltiples bultos no es una mejora opcional de CU-07. Recepción por escaneo y discrepancias se mantienen fuera de este recorte.

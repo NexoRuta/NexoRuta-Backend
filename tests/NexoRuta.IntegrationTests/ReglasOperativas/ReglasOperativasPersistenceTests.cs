@@ -79,7 +79,7 @@ public sealed class ReglasOperativasPersistenceTests(PostgresFixture postgres) :
         Assert.Equal(publication.Motivos.Select(item => item.Codigo).Order().ToArray(),
             copied.Motivos.Select(item => item.Codigo).Order().ToArray());
 
-        var incomplete = new ReglasOperativasConfiguracion(null, null, null, null, null, [],
+        var incomplete = new ReglasOperativasConfiguracion(null, null, null, null, null, null, [],
             [new("DOMICILIO_CERRADO", "Domicilio cerrado", true),
              new("DIRECCION_INCORRECTA", "Dirección incorrecta", true)]);
         var incompleteCopy = await WithOperatorAsync(database, api, seed.OperatorA, seed.UserA,
@@ -191,7 +191,7 @@ public sealed class ReglasOperativasPersistenceTests(PostgresFixture postgres) :
     private static ReglasOperativasConfiguracion CompleteConfiguration(int maxAttempts = 3,
         string description = "Domicilio cerrado")
         => new(maxAttempts, 1440, PoliticaDevolucionAlAgotarIntentos.DecisionOperativa,
-            4320, 1440,
+            4320, 1440, 90,
             [TipoPruebaEntrega.FirmaEnPantalla, TipoPruebaEntrega.NombreReceptor],
             [new("DOMICILIO_CERRADO", description, true), new("DIRECCION_INCORRECTA", "Dirección incorrecta", true)]);
 

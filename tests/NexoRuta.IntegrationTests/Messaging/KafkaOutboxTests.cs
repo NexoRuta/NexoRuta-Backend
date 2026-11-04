@@ -174,7 +174,8 @@ public sealed class KafkaOutboxTests(PostgresFixture postgres, KafkaFixture kafk
                 var delivered = await channel.BasicGetAsync(RabbitMqSeguimientoTopology.ColaPrincipal, false);
                 Assert.NotNull(delivered);
                 Assert.Equal(trabajo.Id.ToString("D"), delivered.BasicProperties.MessageId);
-                Assert.Equal(trabajo.Payload, Encoding.UTF8.GetString(delivered.Body.Span));
+                Assert.True(JsonElement.DeepEquals(JsonDocument.Parse(OutboxClaim.From(trabajo).BusinessPayload).RootElement,
+                    JsonDocument.Parse(delivered.Body.ToArray()).RootElement));
                 await channel.BasicAckAsync(delivered.DeliveryTag, false);
             }
         }
@@ -216,7 +217,7 @@ public sealed class KafkaOutboxTests(PostgresFixture postgres, KafkaFixture kafk
 
     private static async Task<OutboxMessage> CreateEventAsync(IntegrationDatabase database)
     {
-        using var factory = new IntegrationApiFactory(database, "Development");
+        using var factory = new IntegrationApiFactory(database, "Development", seedShippingServices: true);
         using var client = factory.CreateHttpClient();
         await using var db = database.CreateDbContext();
         var operadorId = await db.Operadores.Select(x => x.Id).SingleAsync();
@@ -226,8 +227,8 @@ public sealed class KafkaOutboxTests(PostgresFixture postgres, KafkaFixture kafk
             Content = JsonContent.Create(new
             {
                 operadorId, destinatarioNombre = "Kafka test recipient", destinatarioEmail = "destinatario@example.test", direccion = "Test address",
-                codigoBulto = $"Kafka-{Guid.NewGuid():N}", pesoGramos = 1200m,
-                largoCentimetros = 25m, anchoCentimetros = 20m, altoCentimetros = 15m
+                servicio = ServiciosEnvioTestData.Declarar(operadorId),
+                bultos = new[] { new { codigo = $"Kafka-{Guid.NewGuid():N}", pesoGramos = 1200m, largoCentimetros = 25m, anchoCentimetros = 20m, altoCentimetros = 15m } }
             })
         };
         await client.SetBearerForAccessAsync(database, accesoId);
@@ -276,14 +277,24 @@ public sealed class KafkaOutboxTests(PostgresFixture postgres, KafkaFixture kafk
     {
         Assert.Equal(KafkaEnvioCreadoPublisher.Topic, record.Topic);
         Assert.Equal(evento.EnvioId!.Value.ToString("D"), record.Message.Key);
-        Assert.Equal(evento.Payload, record.Message.Value);
+        Assert.True(JsonElement.DeepEquals(JsonDocument.Parse(OutboxClaim.From(evento).BusinessPayload).RootElement,
+            JsonDocument.Parse(record.Message.Value).RootElement));
         var expected = new Dictionary<string, string>
         {
             ["eventId"] = evento.Id.ToString("D"), ["eventType"] = "EnvioCreado", ["eventVersion"] = "1",
             ["occurredAt"] = evento.CreadoEnUtc.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
             ["operadorId"] = evento.OperadorId!.Value.ToString("D"), ["contentType"] = "application/json"
         };
-        Assert.Equal(expected.Count, record.Message.Headers.Count);
+        var trace = record.Message.Headers.FirstOrDefault(h => h.Key == "traceparent");
+        Assert.Equal(expected.Count + (trace is null ? 0 : 1), record.Message.Headers.Count);
+        var originalTrace = OutboxClaim.From(evento).TraceParent;
+        if (originalTrace is not null)
+        {
+            Assert.NotNull(trace);
+            Assert.True(System.Diagnostics.ActivityContext.TryParse(originalTrace, null, out var originalContext));
+            Assert.True(System.Diagnostics.ActivityContext.TryParse(Encoding.UTF8.GetString(trace.GetValueBytes()), null, out var deliveredContext));
+            Assert.Equal(originalContext.TraceId, deliveredContext.TraceId);
+        }
         foreach (var (key, value) in expected)
             Assert.Equal(value, Encoding.UTF8.GetString(record.Message.Headers.GetLastBytes(key)));
         using var json = JsonDocument.Parse(record.Message.Value);

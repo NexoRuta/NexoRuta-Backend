@@ -39,6 +39,13 @@ public static class RlsContextContract
     public const string AuthUserId = "nexoruta.auth_user_id";
     public const string AuthOrganizationId = "nexoruta.auth_org_id";
     public const string AuthRoleId = "nexoruta.auth_role_id";
+    public const string HistorySourceType = "nexoruta.history_source_type";
+    public const string HistorySourceId = "nexoruta.history_source_id";
+    public const string HistoryOperationId = "nexoruta.history_operation_id";
+    public const string HistoryCorrelationId = "nexoruta.history_correlation_id";
+    public const string HistoryOccurredAt = "nexoruta.history_occurred_at";
+    public const string HistoryFactCode = "nexoruta.history_fact_code";
+    public const string HistoryProcess = "nexoruta.history_process";
 
     public static string ActorSqlValue(RlsActorKind actorKind) => actorKind switch
     {

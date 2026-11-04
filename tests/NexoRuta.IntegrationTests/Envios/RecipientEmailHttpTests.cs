@@ -19,13 +19,13 @@ public sealed class RecipientEmailHttpTests(PostgresFixture postgres) : IClassFi
     [InlineData("Nombre <persona@example.test>")]
     public async Task AltaSinCorreoValidoNoPersisteEnvioNiOutbox(string? email)
     {
-        var data = await postgres.CreateDatabaseAsync(); using var factory = data.CreateApiFactory(); using var client = factory.CreateHttpClient();
+        var data = await postgres.CreateDatabaseAsync(); using var factory = data.CreateShippingApiFactory(); using var client = factory.CreateHttpClient();
         await using var db = data.CreateDbContext();
         var comercio = await db.AccesosUsuario.SingleAsync(x => x.ComercioId != null);
         await client.SetBearerForAccessAsync(data, comercio.Id);
         var body = new Dictionary<string, object?> { ["operadorId"] = (await db.Operadores.SingleAsync()).Id,
-            ["destinatarioNombre"] = "Destinatario", ["direccion"] = "Dirección", ["codigoBulto"] = "EMAIL-TEST",
-            ["pesoGramos"] = 100m, ["largoCentimetros"] = 1m, ["anchoCentimetros"] = 1m, ["altoCentimetros"] = 1m };
+            ["destinatarioNombre"] = "Destinatario", ["direccion"] = "Dirección",
+            ["bultos"] = new[] { new { Codigo = "EMAIL-TEST", PesoGramos = 100m, LargoCentimetros = 1m, AnchoCentimetros = 1m, AltoCentimetros = 1m } } };
         if (email is not null) body["destinatarioEmail"] = email;
         using var respuesta = await client.PostAsJsonAsync("/api/envios", body);
         Assert.Equal(HttpStatusCode.BadRequest, respuesta.StatusCode);
@@ -35,12 +35,11 @@ public sealed class RecipientEmailHttpTests(PostgresFixture postgres) : IClassFi
     [Fact]
     public async Task CorreoSePersisteYSoloExisteLaFirmaSqlActual()
     {
-        var data = await postgres.CreateDatabaseAsync(); using var factory = data.CreateApiFactory(); using var client = factory.CreateHttpClient();
+        var data = await postgres.CreateDatabaseAsync(); using var factory = data.CreateShippingApiFactory(); using var client = factory.CreateHttpClient();
         await using var db = data.CreateDbContext();
         await client.SetBearerForAccessAsync(data, (await db.AccesosUsuario.SingleAsync(x => x.ComercioId != null)).Id);
-        using var respuesta = await client.PostAsJsonAsync("/api/envios", new { OperadorId = (await db.Operadores.SingleAsync()).Id,
-            DestinatarioNombre = "Destinatario", DestinatarioEmail = "persona@example.test", Direccion = "Dirección", CodigoBulto = "EMAIL-TEST",
-            PesoGramos = 100m, LargoCentimetros = 1m, AnchoCentimetros = 1m, AltoCentimetros = 1m });
+        using var respuesta = await client.PostAsJsonAsync("/api/envios", new { OperadorId = (await db.Operadores.SingleAsync()).Id, Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar((await db.Operadores.SingleAsync()).Id),
+            DestinatarioNombre = "Destinatario", DestinatarioEmail = "persona@example.test", Direccion = "Dirección", Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "EMAIL-TEST", PesoGramos = 100m, LargoCentimetros = 1m, AnchoCentimetros = 1m, AltoCentimetros = 1m  } }});
         Assert.Equal(HttpStatusCode.Created, respuesta.StatusCode);
         Assert.Equal("persona@example.test", (await db.Destinatarios.SingleAsync()).Email);
         Assert.True(await db.Database.SqlQuery<bool>($"SELECT to_regprocedure('nexoruta_app.create_shipment(uuid,uuid,uuid,uuid,text,text,text,numeric,numeric,numeric,numeric)') IS NULL AS \"Value\"").SingleAsync());

@@ -32,6 +32,7 @@ public sealed class CancelacionPublica(NexoRutaDbContext db, IDataProtectionProv
         await using var tx = await db.BeginOrJoinAsync(ct);
         var normalizado = codigo.Trim().Replace("-", "", StringComparison.Ordinal).ToUpperInvariant();
         var id = Guid.CreateVersion7(); var aviso = Guid.CreateVersion7(); var mensaje = Guid.CreateVersion7();
+        await db.SetShipmentHistoryContextAsync("CancelacionEnvio", id, cancellationToken: ct);
         var resultado = await db.Database.SqlQuery<string>($"SELECT nexoruta_app.confirm_public_cancellation({token},{normalizado},{id},{aviso},{mensaje}) AS \"Value\"").SingleAsync(ct);
         // Un resultado inválido también se confirma: conserva el contador de intentos.
         await tx.CommitAsync(ct); return resultado;

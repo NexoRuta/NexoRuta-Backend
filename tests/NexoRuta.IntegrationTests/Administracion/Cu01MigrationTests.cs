@@ -16,7 +16,7 @@ public sealed class Cu01MigrationTests(PostgresFixture postgres) : IClassFixture
     [InlineData(true)]
     public async Task SharedRolesConvertPerOrganizationWithExactEffectiveGrants(bool formerlyAppliedSchema)
     {
-        var database = await postgres.CreateDatabaseAsync();
+        var database = await postgres.CreateDatabaseAsync("20261012230124_AddUsuarioPasswordHash");
         await using var db = database.CreateDbContext();
         var migrator = db.GetService<IMigrator>();
         await migrator.MigrateAsync("20261012230124_AddUsuarioPasswordHash");
@@ -62,7 +62,7 @@ public sealed class Cu01MigrationTests(PostgresFixture postgres) : IClassFixture
         // Shared code cannot be reintroduced by unsafe rollback that merges administrative changes.
         var rollback = await Assert.ThrowsAsync<PostgresException>(() => migrator.MigrateAsync("20261012230124_AddUsuarioPasswordHash"));
         Assert.Contains("explicit consolidation", rollback.MessageText);
-        Assert.Equal(2, await db.Roles.CountAsync());
+        Assert.Equal(2, await db.Roles.CountAsync(r => r.Codigo != "despachador_operador"));
         Assert.Equal(1, await db.RolesPermisos.CountAsync());
     }
 

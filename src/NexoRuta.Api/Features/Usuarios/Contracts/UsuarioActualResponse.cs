@@ -4,7 +4,8 @@ namespace NexoRuta.Api.Features.Usuarios.Contracts;
 
 public sealed record UsuarioActualResponse(Guid? AccesoId, Guid UsuarioId, Guid? OperadorId,
     Guid? ComercioId, string UsuarioEmail, string? OperadorNombre, string? ComercioNombre,
-    Guid? RolId, string? RolCodigo, string Tipo, int? TipoAcceso)
+    Guid? RolId, string? RolCodigo, string Tipo, int? TipoAcceso,
+    bool PuedeGestionarDecisionesOperativasEnvio = false)
 {
     public static UsuarioActualResponse Desde(IdentidadSinOrganizacion actor) => new(null, actor.UsuarioId,
         null, null, actor.Email, null, null, null, null, "SinOrganizacion", null);

@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using NetTopologySuite;
 using NetTopologySuite.Geometries;
 using NetTopologySuite.IO;
@@ -19,7 +20,8 @@ namespace NexoRuta.Api.Features.ZonasCobertura.Controllers;
 [ProducesResponseType(StatusCodes.Status403Forbidden)]
 public sealed class ZonasCoberturaController(
     GestionarZonasCoberturaUseCase zonas,
-    ConsultarCoberturaUseCase cobertura) : ControllerBase
+    ConsultarCoberturaUseCase cobertura,
+    ILogger<ZonasCoberturaController> logger) : ControllerBase
 {
     private const int MaxRequestBytes = 1_048_576;
 
@@ -57,7 +59,8 @@ public sealed class ZonasCoberturaController(
         var hasGeometry = request.Geometria is not null;
         var hasDepartment = !string.IsNullOrWhiteSpace(request.CodigoDepartamento);
         if (hasGeometry == hasDepartment)
-            return BadRequest(Error("Indicá exactamente una geometría GeoJSON o un código de departamento."));
+            return RechazarBadRequest("Debe indicarse exactamente una geometría o un departamento.",
+                "Indicá exactamente una geometría GeoJSON o un código de departamento.");
 
         var id = hasGeometry
             ? await zonas.CrearAsync(request.Nombre, LeerGeometria(request.Geometria!), ct)
@@ -89,7 +92,8 @@ public sealed class ZonasCoberturaController(
     public Task<IActionResult> CambiarEstado(Guid zonaId, [FromBody] CambiarEstadoZonaRequest request,
         CancellationToken ct) => Ejecutar(async () =>
     {
-        if (!TryEstadoZona(request.Estado, out var status)) return BadRequest(Error("El estado debe ser Activa o Inactiva."));
+        if (!TryEstadoZona(request.Estado, out var status))
+            return RechazarBadRequest("Estado de zona inválido.", "El estado debe ser Activa o Inactiva.");
         var zone = await zonas.CambiarEstadoAsync(zonaId, status!.Value, request.Version!.Value, ct);
         return zone is null ? NotFound(Error("No se encontró la zona.")) : Ok(ZonaCoberturaResponseMapper.Desde(zone));
     });
@@ -190,18 +194,76 @@ public sealed class ZonasCoberturaController(
     private async Task<IActionResult> Ejecutar(Func<Task<IActionResult>> action)
     {
         try { return await action(); }
-        catch (AccesoCoberturaNoPermitidoException) { return Forbid(); }
-        catch (ConflictoConcurrenciaZonaException error) { return Conflict(Error(error.Message)); }
-        catch (ConflictoConfiguracionZonaException error) { return Conflict(Error(error.Message)); }
+        catch (AccesoCoberturaNoPermitidoException error)
+        {
+            RegistrarRechazo(StatusCodes.Status403Forbidden, error.GetType().Name, null);
+            return Forbid();
+        }
+        catch (ConflictoConcurrenciaZonaException error)
+        {
+            RegistrarRechazo(StatusCodes.Status409Conflict, error.GetType().Name, error.Message);
+            return Conflict(Error(error.Message));
+        }
+        catch (ConflictoConfiguracionZonaException error)
+        {
+            RegistrarRechazo(StatusCodes.Status409Conflict, error.GetType().Name, error.Message);
+            return Conflict(Error(error.Message));
+        }
         catch (ReferenciaTerritorialUruguayNoDisponibleException error)
         {
+            RegistrarRechazo(StatusCodes.Status503ServiceUnavailable, error.GetType().Name, error.Message);
             return StatusCode(StatusCodes.Status503ServiceUnavailable, Error(error.Message));
         }
-        catch (GeometriaFueraDeUruguayException error) { return BadRequest(Error(error.Message)); }
-        catch (KeyNotFoundException error) { return NotFound(Error(error.Message)); }
-        catch (ArgumentException error) { return BadRequest(Error(error.Message)); }
-        catch (Newtonsoft.Json.JsonException) { return BadRequest(Error("La geometría GeoJSON no tiene un formato válido.")); }
-        catch (TopologyException) { return BadRequest(Error("La geometría GeoJSON no es válida.")); }
+        catch (GeometriaFueraDeUruguayException error)
+        {
+            RegistrarRechazo(StatusCodes.Status400BadRequest, error.GetType().Name, error.Message);
+            return BadRequest(Error(error.Message));
+        }
+        catch (KeyNotFoundException error)
+        {
+            RegistrarRechazo(StatusCodes.Status404NotFound, error.GetType().Name, error.Message);
+            return NotFound(Error(error.Message));
+        }
+        catch (ArgumentException error)
+        {
+            RegistrarRechazo(StatusCodes.Status400BadRequest, error.GetType().Name, error.Message);
+            return BadRequest(Error(error.Message));
+        }
+        catch (Newtonsoft.Json.JsonException error)
+        {
+            const string message = "La geometría GeoJSON no tiene un formato válido.";
+            RegistrarRechazo(StatusCodes.Status400BadRequest, error.GetType().Name, message);
+            return BadRequest(Error(message));
+        }
+        catch (TopologyException error)
+        {
+            const string message = "La geometría GeoJSON no es válida.";
+            RegistrarRechazo(StatusCodes.Status400BadRequest, error.GetType().Name, message);
+            return BadRequest(Error(message));
+        }
+    }
+
+    private IActionResult RechazarBadRequest(string reason, string message)
+    {
+        RegistrarRechazo(StatusCodes.Status400BadRequest, reason, message);
+        return BadRequest(Error(message));
+    }
+
+    private void RegistrarRechazo(int statusCode, string reason, string? message)
+    {
+        var path = Request.Path.Value?.TrimEnd('/');
+        var isCreate = HttpMethods.IsPost(Request.Method) &&
+            string.Equals(path, "/api/configuracion/zonas", StringComparison.OrdinalIgnoreCase);
+        var isActivation = HttpMethods.IsPut(Request.Method) &&
+            path?.EndsWith("/estado", StringComparison.OrdinalIgnoreCase) == true;
+        if (!isCreate && !isActivation) return;
+
+        var traceId = HttpContext.TraceIdentifier;
+        Response.Headers["X-Correlation-ID"] = traceId;
+        var body = message is null ? "" : System.Text.Json.JsonSerializer.Serialize(new { message });
+        logger.LogWarning(
+            "Zone mutation rejected. TraceId={TraceId} Method={Method} Path={Path} StatusCode={StatusCode} Reason={Reason} ResponseBody={ResponseBody}",
+            traceId, Request.Method, path, statusCode, reason, body);
     }
 
     private static Geometry LeerGeometria(GeoJsonGeometryRequest request)

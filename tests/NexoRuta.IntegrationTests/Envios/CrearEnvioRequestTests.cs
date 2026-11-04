@@ -8,6 +8,10 @@ public sealed class CrearEnvioRequestTests
 {
     [Theory]
     [InlineData("es-UY", "0.01", true)]
+    [InlineData("es-UY", "1.005", false)]
+    [InlineData("es-UY", "1.000", true)]
+    [InlineData("en-US", "1.005", false)]
+    [InlineData("en-US", "1.00", true)]
     [InlineData("es-UY", "999999999", true)]
     [InlineData("es-UY", "0.009", false)]
     [InlineData("es-UY", "1000000000", false)]
@@ -24,13 +28,12 @@ public sealed class CrearEnvioRequestTests
             var number = decimal.Parse(value, CultureInfo.InvariantCulture);
             var request = new CrearEnvioRequest
             {
-                OperadorId = Guid.CreateVersion7(), DestinatarioNombre = "Ana", DestinatarioEmail = "destinatario@example.test",
-                Direccion = "Rivera 123", CodigoBulto = "B-001",
-                PesoGramos = number, LargoCentimetros = number, AnchoCentimetros = number, AltoCentimetros = number
+                OperadorId = Guid.CreateVersion7(), Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(Guid.CreateVersion7()), DestinatarioNombre = "Ana", DestinatarioEmail = "destinatario@example.test",
+                Direccion = "Rivera 123", Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "B-001", PesoGramos = number, LargoCentimetros = number, AnchoCentimetros = number, AltoCentimetros = number } }
             };
             var errors = new List<ValidationResult>();
-            Assert.Equal(expected, Validator.TryValidateObject(request, new ValidationContext(request), errors, true));
-            Assert.Equal(expected ? 0 : 4, errors.Count);
+            Assert.Equal(expected, Validator.TryValidateObject(request.Bultos[0], new ValidationContext(request.Bultos[0]), errors, true));
+            Assert.Equal(expected ? 0 : 4, errors.SelectMany(e => e.MemberNames).Distinct().Count());
         }
         finally
         {

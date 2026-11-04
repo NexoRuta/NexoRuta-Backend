@@ -916,6 +916,11 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("ComercioId")
                         .HasColumnType("uuid");
 
+                    b.Property<DateTimeOffset>("CreadoEnUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("now()");
+
                     b.Property<Guid>("CreadoPorUsuarioId")
                         .HasColumnType("uuid");
 
@@ -928,6 +933,9 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset?>("EntregaFisicaEnUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTimeOffset?>("EntregaFisicaRecibidaEnUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("Estado")
                         .IsRequired()
                         .HasMaxLength(32)
@@ -935,6 +943,9 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
 
                     b.Property<Guid>("OperadorId")
                         .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("PlazoPruebaVenceEnUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<long>("Version")
                         .IsConcurrencyToken()
@@ -949,6 +960,10 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("CreadoPorUsuarioId");
 
+                    b.HasIndex("PlazoPruebaVenceEnUtc")
+                        .HasDatabaseName("IX_Envios_ProofValidationDeadline")
+                        .HasFilter("\"Estado\" = 'EntregaPendienteValidacion' AND \"PlazoPruebaVenceEnUtc\" IS NOT NULL");
+
                     b.HasIndex("OperadorId", "DestinatarioId");
 
                     b.HasIndex("OperadorId", "DireccionId");
@@ -957,9 +972,11 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
 
                     b.ToTable("Envios", null, t =>
                         {
-                            t.HasCheckConstraint("CK_Envios_Cancelacion", "\"Estado\" <> 'Cancelado' OR \"EntregaFisicaEnUtc\" IS NULL");
-
                             t.HasCheckConstraint("CK_Envios_EntregaFisica", "\"Estado\" NOT IN ('Entregado','EntregaPendienteValidacion','EntregaSinValidacion') OR \"EntregaFisicaEnUtc\" IS NOT NULL");
+
+                            t.HasCheckConstraint("CK_Envios_ProofDeadlineRequiresPhysicalDelivery", "\"EntregaFisicaRecibidaEnUtc\" IS NULL OR \"EntregaFisicaEnUtc\" IS NOT NULL");
+
+                            t.HasCheckConstraint("CK_Envios_ProofDeadlineRequiresReceipt", "\"PlazoPruebaVenceEnUtc\" IS NULL OR (\"EntregaFisicaRecibidaEnUtc\" IS NOT NULL AND \"PlazoPruebaVenceEnUtc\" > \"EntregaFisicaRecibidaEnUtc\")");
 
                             t.HasCheckConstraint("CK_Envios_Version", "\"Version\" >= 0");
                         });
@@ -1130,6 +1147,9 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                     b.Property<int?>("PlazoUrgenteMinutos")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("PlazoValidacionPruebaMinutos")
+                        .HasColumnType("integer");
+
                     b.Property<string>("PoliticaDevolucionAlAgotarIntentos")
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
@@ -1169,6 +1189,8 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("CK_VersionesReglasOperativas_MaxAttempts", "\"MaxIntentosEntrega\" IS NULL OR \"MaxIntentosEntrega\" BETWEEN 1 AND 100");
 
+                            t.HasCheckConstraint("CK_VersionesReglasOperativas_ProofValidationDeadline", "\"PlazoValidacionPruebaMinutos\" IS NULL OR \"PlazoValidacionPruebaMinutos\" BETWEEN 1 AND 525600");
+
                             t.HasCheckConstraint("CK_VersionesReglasOperativas_Publication", "(\"Estado\" = 'Borrador' AND \"NumeroVersionPublicada\" IS NULL AND \"PublicadaUtc\" IS NULL AND \"PublicadaPorUsuarioId\" IS NULL) OR (\"Estado\" = 'Publicada' AND \"NumeroVersionPublicada\" > 0 AND \"PublicadaUtc\" IS NOT NULL AND \"PublicadaPorUsuarioId\" IS NOT NULL)");
 
                             t.HasCheckConstraint("CK_VersionesReglasOperativas_ReturnPolicy", "\"PoliticaDevolucionAlAgotarIntentos\" IS NULL OR \"PoliticaDevolucionAlAgotarIntentos\" IN ('DecisionOperativa', 'IniciarAutomaticamente')");
@@ -1178,6 +1200,48 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("CK_VersionesReglasOperativas_State", "\"Estado\" IN ('Borrador', 'Publicada')");
 
                             t.HasCheckConstraint("CK_VersionesReglasOperativas_UrgentDeadline", "\"PlazoUrgenteMinutos\" IS NULL OR \"PlazoUrgenteMinutos\" BETWEEN 1 AND 525600");
+                        });
+                });
+
+            modelBuilder.Entity("NexoRuta.Domain.Reparto.BaseOperativa", b =>
+                {
+                    b.Property<Guid>("OperadorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("ConfirmadaEnUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ConfirmadaPorAccesoId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Direccion")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<double?>("Latitud")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("Longitud")
+                        .HasColumnType("double precision");
+
+                    b.Property<int?>("MargenRetornoMinutos")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("ServicioPredeterminadoMinutos")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint");
+
+                    b.HasKey("OperadorId");
+
+                    b.ToTable("BasesOperativas", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_Base_Punto", "(\"Latitud\" IS NULL AND \"Longitud\" IS NULL AND \"ConfirmadaEnUtc\" IS NULL AND \"ConfirmadaPorAccesoId\" IS NULL) OR (\"Latitud\" IS NOT NULL AND \"Longitud\" IS NOT NULL AND \"Latitud\" BETWEEN -90 AND 90 AND \"Longitud\" BETWEEN -180 AND 180 AND \"ConfirmadaEnUtc\" IS NOT NULL AND \"ConfirmadaPorAccesoId\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_Base_Tiempos", "(\"ServicioPredeterminadoMinutos\" IS NULL OR \"ServicioPredeterminadoMinutos\" >= 0) AND (\"MargenRetornoMinutos\" IS NULL OR \"MargenRetornoMinutos\" >= 0)");
                         });
                 });
 
@@ -1213,6 +1277,121 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("NexoRuta.Domain.Reparto.ConfirmacionExtravioEnvio", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccesoId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ComandoId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("ConfirmadaEnUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("EnvioId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Motivo")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<Guid>("OperadorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OrganizacionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("UsuarioId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("VersionAnterior")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("VersionNueva")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("VersionReglasId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasAlternateKey("OperadorId", "Id");
+
+                    b.HasIndex("OperadorId", "ComandoId")
+                        .IsUnique();
+
+                    b.HasIndex("OperadorId", "EnvioId")
+                        .IsUnique();
+
+                    b.HasIndex("OperadorId", "VersionReglasId");
+
+                    b.ToTable("ConfirmacionesExtravioEnvio", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ConfirmacionesExtravioEnvio_Values", "\"VersionAnterior\" >= 0 AND \"VersionNueva\" = \"VersionAnterior\" + 1 AND char_length(btrim(\"Motivo\")) BETWEEN 1 AND 500 AND \"OrganizacionId\" = \"OperadorId\"");
+                        });
+                });
+
+            modelBuilder.Entity("NexoRuta.Domain.Reparto.DecisionDevolucionEnvio", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccesoId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ComandoId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("DecididaEnUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("EnvioId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Motivo")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<Guid>("OperadorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OrganizacionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("UsuarioId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("VersionAnterior")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("VersionNueva")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("VersionReglasId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasAlternateKey("OperadorId", "Id");
+
+                    b.HasIndex("OperadorId", "ComandoId")
+                        .IsUnique();
+
+                    b.HasIndex("OperadorId", "VersionReglasId");
+
+                    b.HasIndex("OperadorId", "EnvioId", "DecididaEnUtc");
+
+                    b.ToTable("DecisionesDevolucionEnvio", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_DecisionesDevolucionEnvio_Values", "\"VersionAnterior\" >= 0 AND \"VersionNueva\" = \"VersionAnterior\" + 1 AND char_length(btrim(\"Motivo\")) BETWEEN 1 AND 500 AND \"OrganizacionId\" = \"OperadorId\"");
+                        });
+                });
+
             modelBuilder.Entity("NexoRuta.Domain.Reparto.HojaRuta", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1241,8 +1420,16 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("OperadorId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("PlanTemporal")
+                        .HasColumnType("jsonb");
+
                     b.Property<Guid>("RepartidorAccesoId")
                         .HasColumnType("uuid");
+
+                    b.Property<bool>("ReservaRecursosActiva")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
 
                     b.Property<DateTimeOffset?>("SalidaEnUtc")
                         .HasColumnType("timestamp with time zone");
@@ -1281,15 +1468,84 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("OperadorId", "RepartidorAccesoId", "Fecha")
                         .IsUnique()
-                        .HasFilter("\"Estado\" <> 'Finalizada'");
+                        .HasFilter("\"Estado\" NOT IN ('Finalizada', 'Cancelada') AND \"ReservaRecursosActiva\"");
 
                     b.HasIndex("OperadorId", "VehiculoId", "Fecha")
                         .IsUnique()
-                        .HasFilter("\"Estado\" <> 'Finalizada'");
+                        .HasFilter("\"Estado\" NOT IN ('Finalizada', 'Cancelada') AND \"ReservaRecursosActiva\"");
 
                     b.ToTable("HojasRuta", null, t =>
                         {
                             t.HasCheckConstraint("CK_HojasRuta_Secuencia", "\"UltimaSecuencia\" >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("NexoRuta.Domain.Reparto.OcupacionRuta", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("AdquiridaEnUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("AdquiridaPorAccesoId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("AnuladaEnUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("AnuladaPorAccesoId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("Legada")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset?>("LiberadaEnUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("LiberadaPorAccesoId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OperadorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RepartidorAccesoId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("RetornoEnUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("RetornoPorAccesoId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RutaId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("VehiculoId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OperadorId", "RepartidorAccesoId")
+                        .IsUnique()
+                        .HasFilter("\"LiberadaEnUtc\" IS NULL AND \"AnuladaEnUtc\" IS NULL");
+
+                    b.HasIndex("OperadorId", "RutaId")
+                        .IsUnique();
+
+                    b.HasIndex("OperadorId", "VehiculoId")
+                        .IsUnique()
+                        .HasFilter("\"LiberadaEnUtc\" IS NULL AND \"AnuladaEnUtc\" IS NULL");
+
+                    b.HasIndex("RepartidorAccesoId", "OperadorId");
+
+                    b.ToTable("OcupacionesRuta", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_OcupacionesRuta_Hechos", "\"Version\" >= 0 AND (\"LiberadaEnUtc\" IS NULL OR (\"RetornoEnUtc\" IS NOT NULL AND \"AnuladaEnUtc\" IS NULL))");
                         });
                 });
 
@@ -1317,6 +1573,9 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                     b.Property<int>("Orden")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("ServicioMinutos")
+                        .HasColumnType("integer");
+
                     b.HasKey("RutaId", "EnvioId");
 
                     b.HasIndex("OperadorId", "EnvioId")
@@ -1331,6 +1590,8 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                     b.ToTable("ParadasRuta", null, t =>
                         {
                             t.HasCheckConstraint("CK_ParadasRuta_Orden", "\"Orden\" > 0");
+
+                            t.HasCheckConstraint("CK_ParadasRuta_Servicio", "\"ServicioMinutos\" IS NULL OR \"ServicioMinutos\" >= 0");
                         });
                 });
 
@@ -1394,6 +1655,12 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                     b.Property<decimal>("PesoMaximoGramos")
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
+
+                    b.Property<DateTimeOffset?>("VerificacionInicialEnUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("VerificacionInicialPorAccesoId")
+                        .HasColumnType("uuid");
 
                     b.Property<long>("Version")
                         .IsConcurrencyToken()
@@ -1919,6 +2186,177 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("NexoRuta.Infrastructure.Envios.EnvioEvento", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<Guid?>("ActorAccesoId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ActorOrganizacionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ActorProceso")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("ActorTipo")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<Guid?>("ActorUsuarioId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("AutorizacionPublicaId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("CancelacionEnvioId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CodigoHecho")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<Guid>("ComercioId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("CorrelacionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("EnvioId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("EstadoAnterior")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("EstadoNuevo")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("EstadoObservado")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<DateTimeOffset?>("OcurridaEnUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("OperacionJornadaId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OperadorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("OrigenId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("OrigenTipo")
+                        .IsRequired()
+                        .HasMaxLength(48)
+                        .HasColumnType("character varying(48)");
+
+                    b.Property<string>("Procedencia")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTimeOffset>("RegistradaEnUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("clock_timestamp()");
+
+                    b.Property<string>("Tipo")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<long?>("VersionAnterior")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("VersionNueva")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("VersionReglasId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CancelacionEnvioId")
+                        .IsUnique()
+                        .HasFilter("\"CancelacionEnvioId\" IS NOT NULL");
+
+                    b.HasIndex("OperadorId", "EnvioId")
+                        .IsUnique()
+                        .HasFilter("\"Tipo\" = 'EstadoObservadoInicio'");
+
+                    b.HasIndex("OperadorId", "VersionReglasId");
+
+                    b.HasIndex("ComercioId", "EnvioId", "RegistradaEnUtc");
+
+                    b.HasIndex("OperadorId", "EnvioId", "RegistradaEnUtc");
+
+                    b.HasIndex("OperadorId", "EnvioId", "VersionAnterior", "VersionNueva")
+                        .IsUnique()
+                        .HasFilter("\"Tipo\" = 'TransicionEstado'");
+
+                    b.HasIndex("OperadorId", "EnvioId", "OrigenTipo", "OrigenId", "CodigoHecho")
+                        .IsUnique()
+                        .HasFilter("\"Tipo\" = 'Hecho' AND \"OrigenId\" IS NOT NULL");
+
+                    b.ToTable("EnvioEventos", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_EnvioEventos_Actor", "(\"ActorTipo\" = 'Usuario' AND \"ActorUsuarioId\" IS NOT NULL AND \"ActorProceso\" IS NULL AND \"AutorizacionPublicaId\" IS NULL) OR (\"ActorTipo\" = 'Publico' AND \"ActorUsuarioId\" IS NULL AND \"ActorAccesoId\" IS NULL AND \"ActorProceso\" IS NULL AND \"AutorizacionPublicaId\" IS NOT NULL) OR (\"ActorTipo\" IN ('Proceso','Migracion') AND \"ActorUsuarioId\" IS NULL AND \"ActorAccesoId\" IS NULL AND \"ActorProceso\" IS NOT NULL AND \"AutorizacionPublicaId\" IS NULL)");
+
+                            t.HasCheckConstraint("CK_EnvioEventos_Forma", "(\"Tipo\" = 'Creacion' AND \"EstadoAnterior\" IS NULL AND \"EstadoNuevo\" = 'Admitido' AND \"EstadoObservado\" IS NULL AND \"VersionAnterior\" IS NULL AND \"VersionNueva\" = 0 AND \"CodigoHecho\" IS NULL) OR (\"Tipo\" = 'TransicionEstado' AND \"EstadoAnterior\" IS NOT NULL AND \"EstadoNuevo\" IS NOT NULL AND \"EstadoAnterior\" <> \"EstadoNuevo\" AND \"EstadoObservado\" IS NULL AND \"VersionAnterior\" >= 0 AND \"VersionNueva\" > \"VersionAnterior\" AND \"CodigoHecho\" IS NULL) OR (\"Tipo\" = 'EstadoObservadoInicio' AND \"EstadoAnterior\" IS NULL AND \"EstadoNuevo\" IS NULL AND \"EstadoObservado\" IS NOT NULL AND \"VersionAnterior\" IS NULL AND \"CodigoHecho\" IS NULL) OR (\"Tipo\" = 'Hecho' AND \"EstadoAnterior\" IS NULL AND \"EstadoNuevo\" IS NULL AND \"EstadoObservado\" IS NOT NULL AND \"VersionAnterior\" >= 0 AND \"VersionNueva\" > \"VersionAnterior\" AND \"CodigoHecho\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_EnvioEventos_OrigenCancelacion", "\"CancelacionEnvioId\" IS NULL OR (\"Tipo\" = 'TransicionEstado' AND \"EstadoNuevo\" = 'Cancelado' AND \"OrigenTipo\" = 'CancelacionEnvio' AND \"OrigenId\" = \"CancelacionEnvioId\")");
+
+                            t.HasCheckConstraint("CK_EnvioEventos_Procedencia", "\"Procedencia\" IN ('EnLinea','Corte','Backfill')");
+
+                            t.HasCheckConstraint("CK_EnvioEventos_Tipo", "\"Tipo\" IN ('Creacion','TransicionEstado','EstadoObservadoInicio','Hecho')");
+                        });
+                });
+
+            modelBuilder.Entity("NexoRuta.Infrastructure.Envios.IdentidadEnvioImportado", b =>
+                {
+                    b.Property<Guid>("ComercioId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ReferenciaExterna")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .UseCollation("C");
+
+                    b.Property<Guid>("EnvioId")
+                        .HasColumnType("uuid");
+
+                    b.Property<byte[]>("Huella")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<Guid>("OperadorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<short>("VersionHuella")
+                        .HasColumnType("smallint");
+
+                    b.HasKey("ComercioId", "ReferenciaExterna");
+
+                    b.HasIndex("ComercioId", "EnvioId")
+                        .IsUnique();
+
+                    b.HasIndex("OperadorId", "EnvioId");
+
+                    b.ToTable("IdentidadesEnvioImportado", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_IdentidadesEnvioImportado_Huella", "\"VersionHuella\" > 0 AND octet_length(\"Huella\") = 32");
+                        });
+                });
+
             modelBuilder.Entity("NexoRuta.Infrastructure.Notificaciones.EntregaPush", b =>
                 {
                     b.Property<Guid>("AvisoId")
@@ -2121,6 +2559,92 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                     b.ToTable("ProcessedMessages", (string)null);
                 });
 
+            modelBuilder.Entity("NexoRuta.Infrastructure.Persistence.EjecucionSeedDemo", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Comercios")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("CuentasComercio")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("CuentasOperador")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Envios")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Operaciones")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Operadores")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Rutas")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("SembradoEnUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("EjecucionSeedDemo", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_EjecucionSeedDemo_IdUnico", "\"Id\" = 1");
+                        });
+                });
+
+            modelBuilder.Entity("NexoRuta.Infrastructure.Reparto.EstimacionRegistro", b =>
+                {
+                    b.Property<Guid>("OperadorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RutaId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("NumeroVersion")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("ActorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ComandoId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ContextoHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Entrada")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("Motivo")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<DateTimeOffset>("RegistradaEnUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Resultado")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<long>("VersionRuta")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("OperadorId", "RutaId", "NumeroVersion");
+
+                    b.HasIndex("OperadorId", "ComandoId")
+                        .IsUnique();
+
+                    b.ToTable("EstimacionesRuta", (string)null);
+                });
+
             modelBuilder.Entity("NexoRuta.Infrastructure.Reparto.EvidenciaReparto", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2170,6 +2694,63 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                     b.HasIndex("OperadorId", "RutaId");
 
                     b.ToTable("EvidenciasReparto", (string)null);
+                });
+
+            modelBuilder.Entity("NexoRuta.Infrastructure.Reparto.HechoFlota", b =>
+                {
+                    b.Property<Guid>("OperadorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ComandoId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccesoId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Accion")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<DateTimeOffset>("ConfirmadoEnUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Hash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Motivo")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<Guid?>("OcupacionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Respuesta")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<Guid?>("RutaId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("UsuarioId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("VehiculoId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("VersionAnterior")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("OperadorId", "ComandoId");
+
+                    b.HasIndex("OperadorId", "OcupacionId");
+
+                    b.HasIndex("OperadorId", "VehiculoId");
+
+                    b.ToTable("HechosFlota", (string)null);
                 });
 
             modelBuilder.Entity("NexoRuta.Infrastructure.Reparto.OperacionJornada", b =>
@@ -2232,6 +2813,42 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("OperacionesJornada", (string)null);
+                });
+
+            modelBuilder.Entity("NexoRuta.Infrastructure.Reparto.PerfilVialRegistro", b =>
+                {
+                    b.Property<Guid>("OperadorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("VehiculoId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ActorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Compatibilidad")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<DateTimeOffset>("ConfirmadoEnUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Motivo")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint");
+
+                    b.HasKey("OperadorId", "VehiculoId");
+
+                    b.ToTable("PerfilesVialesVehiculo", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_PerfilVial_Compatibilidad", "\"Compatibilidad\" IN ('SinDeterminar','DriveConfirmado','NoCompatible') AND \"Version\">0");
+                        });
                 });
 
             modelBuilder.Entity("NexoRuta.Infrastructure.Reparto.PruebaEntrega", b =>
@@ -2743,6 +3360,15 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 
+            modelBuilder.Entity("NexoRuta.Domain.Reparto.BaseOperativa", b =>
+                {
+                    b.HasOne("NexoRuta.Domain.Administracion.Operador", null)
+                        .WithMany()
+                        .HasForeignKey("OperadorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("NexoRuta.Domain.Reparto.ConfiguracionReparto", b =>
                 {
                     b.HasOne("NexoRuta.Domain.Administracion.Operador", null)
@@ -2752,11 +3378,67 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("NexoRuta.Domain.Reparto.ConfirmacionExtravioEnvio", b =>
+                {
+                    b.HasOne("NexoRuta.Domain.Envios.Envio", null)
+                        .WithMany()
+                        .HasForeignKey("OperadorId", "EnvioId")
+                        .HasPrincipalKey("OperadorId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("NexoRuta.Domain.ReglasOperativas.VersionReglasOperativas", null)
+                        .WithMany()
+                        .HasForeignKey("OperadorId", "VersionReglasId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NexoRuta.Domain.Reparto.DecisionDevolucionEnvio", b =>
+                {
+                    b.HasOne("NexoRuta.Domain.Envios.Envio", null)
+                        .WithMany()
+                        .HasForeignKey("OperadorId", "EnvioId")
+                        .HasPrincipalKey("OperadorId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("NexoRuta.Domain.ReglasOperativas.VersionReglasOperativas", null)
+                        .WithMany()
+                        .HasForeignKey("OperadorId", "VersionReglasId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("NexoRuta.Domain.Reparto.HojaRuta", b =>
                 {
                     b.HasOne("NexoRuta.Domain.Reparto.ConfiguracionReparto", null)
                         .WithMany()
                         .HasForeignKey("OperadorId", "ConfiguracionVersion")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("NexoRuta.Domain.Reparto.Vehiculo", null)
+                        .WithMany()
+                        .HasForeignKey("OperadorId", "VehiculoId")
+                        .HasPrincipalKey("OperadorId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("NexoRuta.Domain.Reparto.Repartidor", null)
+                        .WithMany()
+                        .HasForeignKey("RepartidorAccesoId", "OperadorId")
+                        .HasPrincipalKey("AccesoId", "OperadorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NexoRuta.Domain.Reparto.OcupacionRuta", b =>
+                {
+                    b.HasOne("NexoRuta.Domain.Reparto.HojaRuta", null)
+                        .WithMany()
+                        .HasForeignKey("OperadorId", "RutaId")
+                        .HasPrincipalKey("OperadorId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
@@ -2951,6 +3633,51 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 
+            modelBuilder.Entity("NexoRuta.Infrastructure.Envios.EnvioEvento", b =>
+                {
+                    b.HasOne("NexoRuta.Infrastructure.Envios.CancelacionEnvio", null)
+                        .WithMany()
+                        .HasForeignKey("CancelacionEnvioId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("NexoRuta.Domain.Envios.Envio", null)
+                        .WithMany()
+                        .HasForeignKey("ComercioId", "EnvioId")
+                        .HasPrincipalKey("ComercioId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("NexoRuta.Domain.Envios.Envio", null)
+                        .WithMany()
+                        .HasForeignKey("OperadorId", "EnvioId")
+                        .HasPrincipalKey("OperadorId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("NexoRuta.Domain.ReglasOperativas.VersionReglasOperativas", null)
+                        .WithMany()
+                        .HasForeignKey("OperadorId", "VersionReglasId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NexoRuta.Infrastructure.Envios.IdentidadEnvioImportado", b =>
+                {
+                    b.HasOne("NexoRuta.Domain.Envios.Envio", null)
+                        .WithMany()
+                        .HasForeignKey("ComercioId", "EnvioId")
+                        .HasPrincipalKey("ComercioId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("NexoRuta.Domain.Envios.Envio", null)
+                        .WithMany()
+                        .HasForeignKey("OperadorId", "EnvioId")
+                        .HasPrincipalKey("OperadorId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("NexoRuta.Infrastructure.Notificaciones.EntregaPush", b =>
                 {
                     b.HasOne("NexoRuta.Domain.Notificaciones.AvisoReparto", null)
@@ -2994,6 +3721,16 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 
+            modelBuilder.Entity("NexoRuta.Infrastructure.Reparto.EstimacionRegistro", b =>
+                {
+                    b.HasOne("NexoRuta.Domain.Reparto.HojaRuta", null)
+                        .WithMany()
+                        .HasForeignKey("OperadorId", "RutaId")
+                        .HasPrincipalKey("OperadorId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("NexoRuta.Infrastructure.Reparto.EvidenciaReparto", b =>
                 {
                     b.HasOne("NexoRuta.Domain.Reparto.Repartidor", null)
@@ -3018,6 +3755,22 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("NexoRuta.Infrastructure.Reparto.HechoFlota", b =>
+                {
+                    b.HasOne("NexoRuta.Domain.Reparto.OcupacionRuta", null)
+                        .WithMany()
+                        .HasForeignKey("OperadorId", "OcupacionId")
+                        .HasPrincipalKey("OperadorId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("NexoRuta.Domain.Reparto.Vehiculo", null)
+                        .WithMany()
+                        .HasForeignKey("OperadorId", "VehiculoId")
+                        .HasPrincipalKey("OperadorId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("NexoRuta.Infrastructure.Reparto.OperacionJornada", b =>
                 {
                     b.HasOne("NexoRuta.Domain.Reparto.Repartidor", null)
@@ -3036,6 +3789,16 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                     b.HasOne("NexoRuta.Domain.Reparto.HojaRuta", null)
                         .WithMany()
                         .HasForeignKey("OperadorId", "RutaId")
+                        .HasPrincipalKey("OperadorId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NexoRuta.Infrastructure.Reparto.PerfilVialRegistro", b =>
+                {
+                    b.HasOne("NexoRuta.Domain.Reparto.Vehiculo", null)
+                        .WithMany()
+                        .HasForeignKey("OperadorId", "VehiculoId")
                         .HasPrincipalKey("OperadorId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();

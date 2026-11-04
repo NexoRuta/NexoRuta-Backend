@@ -89,6 +89,17 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
             Assert.False((bool)(await identityTables.ExecuteScalarAsync())!, "Identity's global account store must remain queryable before tenant selection.");
         }
 
+        // A pinned public path is safe only while runtime and PUBLIC cannot create shadow objects.
+        await using (var schema = new NpgsqlCommand("""
+            SELECT NOT EXISTS (
+                SELECT 1 FROM pg_namespace n,
+                LATERAL aclexplode(COALESCE(n.nspacl,acldefault('n',n.nspowner))) a
+                WHERE n.nspname='public' AND a.privilege_type='CREATE' AND a.grantee=0)
+                AND NOT has_schema_privilege('nexoruta_api','public','CREATE')
+                AND NOT has_schema_privilege('nexoruta_worker','public','CREATE')
+                AND NOT has_schema_privilege('nexoruta_bootstrap','public','CREATE')
+            """, connection))
+            Assert.True((bool)(await schema.ExecuteScalarAsync())!);
         await using (var functions = new NpgsqlCommand("""
             SELECT p.proname, p.proconfig, r.rolcanlogin, r.rolsuper, r.rolbypassrls,
                    EXISTS (
@@ -111,8 +122,9 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
                 Assert.False(reader.GetBoolean(5), $"PUBLIC must not execute {reader.GetString(0)}.");
                 var config = reader.GetFieldValue<string[]>(1);
                 var searchPath = Assert.Single(config, value => value.StartsWith("search_path=", StringComparison.Ordinal));
-                Assert.Contains(searchPath.Replace(" ", "", StringComparison.Ordinal),
-                    new[] { "search_path=pg_catalog", "search_path=pg_catalog,nexoruta_app" });
+                var normalizedPath = searchPath.Replace(" ", "", StringComparison.Ordinal);
+                Assert.Contains(normalizedPath,
+                    new[] { "search_path=pg_catalog", "search_path=pg_catalog,nexoruta_app", "search_path=pg_catalog,public" });
             }
             Assert.True(count >= 15, "Expected the scoped context and security-definer functions to be installed.");
         }
@@ -300,9 +312,10 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
             var user = await db.Usuarios.SingleAsync(x => x.Id == rows.UserA);
             loginEmail = user.Email;
             user.ActualizarPasswordHash(new PasswordHasher<Usuario>().HashPassword(user, AuthenticationTestData.Password));
-            var permission = new Permiso("envios.consultar", "Consult shipments");
+            var permission = await db.Permisos.SingleOrDefaultAsync(p => p.Codigo == "envios.consultar")
+                ?? new Permiso("envios.consultar", "Consult shipments");
             var roleId = await db.AccesosUsuario.Where(x => x.Id == rows.AccessA).Select(x => x.RolId!.Value).SingleAsync();
-            db.Add(permission);
+            if (db.Entry(permission).State == EntityState.Detached) db.Add(permission);
             db.Add(new RolPermiso(roleId, permission.Id));
             var operatorUser = new Usuario(operatorEmail);
             operatorUser.ActualizarPasswordHash(new PasswordHasher<Usuario>().HashPassword(operatorUser, AuthenticationTestData.Password));
@@ -418,7 +431,7 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
             await platform.InicializarAsync("platform-bootstrap@example.test", AuthenticationTestData.Password);
             var seeder = new DatosInicialesSeeder(db, initial, configuration, identityUsers, platform);
             await seeder.SeedAsync();
-            await platform.InicializarAsync("platform-bootstrap@example.test", AuthenticationTestData.Password, permitirExistente: true);
+            await platform.InicializarAsync("platform-bootstrap@example.test", AuthenticationTestData.Password, sincronizarPasswordExistente: true);
             await seeder.SeedAsync();
         }
 
@@ -523,27 +536,23 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
         await SetContextAsync(connection, transaction, "actor_kind", "comercio");
         await SetContextAsync(connection, transaction, "org_id", rows.CommerceA.ToString("D"));
         await SetContextAsync(connection, transaction, "user_id", rows.UserA.ToString("D"));
+        await SetContextAsync(connection, transaction, "access_id", rows.AccessA.ToString("D"));
         await SetContextAsync(connection, transaction, "selected_operator_id", rows.OperatorB.ToString("D"));
         await SetContextAsync(connection, transaction, "shipment_id", shipmentId.ToString("D"));
 
         await using (var create = new NpgsqlCommand("""
             SELECT nexoruta_app.create_shipment(
-                @shipment, @recipient, @address_id, @parcel, @recipient_name, @recipient_email, @address, @code,
-                @weight, @length, @width, @height, @rules_version)
+                @shipment, @recipient, @address_id, @recipient_name, @recipient_email, @address, @parcels::jsonb, @rules_version)
             """, connection, transaction))
         {
             create.Parameters.AddWithValue("shipment", shipmentId);
             create.Parameters.AddWithValue("recipient", recipientId);
             create.Parameters.AddWithValue("address_id", addressId);
-            create.Parameters.AddWithValue("parcel", parcelId);
             create.Parameters.AddWithValue("recipient_name", "New recipient");
             create.Parameters.AddWithValue("recipient_email", "destinatario@example.test");
             create.Parameters.AddWithValue("address", "New address");
-            create.Parameters.AddWithValue("code", "NEW-1");
-            create.Parameters.AddWithValue("weight", 100m);
-            create.Parameters.AddWithValue("length", 10m);
-            create.Parameters.AddWithValue("width", 10m);
-            create.Parameters.AddWithValue("height", 10m);
+            create.Parameters.AddWithValue("parcels", System.Text.Json.JsonSerializer.Serialize(new[] {
+                new { Id = parcelId, Codigo = "NEW-1", PesoGramos = 100m, LargoCentimetros = 10m, AnchoCentimetros = 10m, AltoCentimetros = 10m } }));
             create.Parameters.AddWithValue("rules_version", rows.OperatorB);
             Assert.Equal(shipmentId, (Guid)(await create.ExecuteScalarAsync())!);
         }
@@ -817,11 +826,21 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
     [Fact]
     public async Task UpgradeFromThePreviousSchemaPreservesUserAccessAndShipmentGuids()
     {
-        var database = await postgres.CreateDatabaseAsync();
-        var rows = await SeedTenantGraphAsync(database);
+        var database = await postgres.CreateDatabaseAsync(PreviousMigration);
+        var rows = new TenantRows(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
         await using (var db = database.CreateDbContext())
         {
-            await db.Database.MigrateAsync(PreviousMigration);
+            var role = Guid.NewGuid();
+            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Usuarios\" (\"Id\",\"Email\",\"PasswordHash\") VALUES ({rows.UserA},{"legacy-rls@example.test"},{AuthenticationTestData.Hash("legacy-rls@example.test")})");
+            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Operadores\" (\"Id\",\"Nombre\") VALUES ({rows.OperatorA},'Legacy operator')");
+            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Comercios\" (\"Id\",\"Nombre\") VALUES ({rows.CommerceA},'Legacy commerce')");
+            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Roles\" (\"Id\",\"Codigo\",\"Nombre\",\"TipoOrganizacion\",\"ComercioId\") VALUES ({role},'legacy-rls','Legacy role','Comercio',{rows.CommerceA})");
+            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"AccesosUsuario\" (\"Id\",\"UsuarioId\",\"ComercioId\",\"RolId\") VALUES ({rows.AccessA},{rows.UserA},{rows.CommerceA},{role})");
+            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Destinatarios\" (\"Id\",\"OperadorId\",\"Nombre\") VALUES ({rows.RecipientA1},{rows.OperatorA},'Legacy recipient')");
+            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Direcciones\" (\"Id\",\"OperadorId\",\"Descripcion\") VALUES ({rows.AddressA1},{rows.OperatorA},'Legacy address')");
+            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Envios\" (\"Id\",\"OperadorId\",\"ComercioId\",\"CreadoPorUsuarioId\",\"DestinatarioId\",\"DireccionId\",\"Estado\") VALUES ({rows.ShipmentA1},{rows.OperatorA},{rows.CommerceA},{rows.UserA},{rows.RecipientA1},{rows.AddressA1},'Admitido')");
             await HistoricRecipientEmail.MigrateAsync(db);
         }
 

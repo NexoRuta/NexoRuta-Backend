@@ -23,6 +23,7 @@ public sealed class VersionReglasOperativasTests
             nameof(VersionReglasOperativas.PoliticaDevolucionAlAgotarIntentos),
             nameof(VersionReglasOperativas.PlazoEstandarMinutos),
             nameof(VersionReglasOperativas.PlazoUrgenteMinutos),
+            nameof(VersionReglasOperativas.PlazoValidacionPruebaMinutos),
             nameof(VersionReglasOperativas.RequisitosPrueba),
             nameof(VersionReglasOperativas.Motivos)
         }, incomplete.CamposIncompletos);
@@ -36,6 +37,8 @@ public sealed class VersionReglasOperativasTests
 
         Assert.Throws<ArgumentOutOfRangeException>(() => draft.ReemplazarConfiguracion(0,
             Complete(maxAttempts: 0)));
+        Assert.Throws<ArgumentOutOfRangeException>(() => draft.ReemplazarConfiguracion(0,
+            Complete(proofDeadline: 0)));
         Assert.Throws<ArgumentException>(() => draft.ReemplazarConfiguracion(0,
             Complete(requirements: [TipoPruebaEntrega.Fotografia, TipoPruebaEntrega.Fotografia])));
         Assert.Throws<ArgumentException>(() => draft.ReemplazarConfiguracion(0,
@@ -65,6 +68,7 @@ public sealed class VersionReglasOperativasTests
         Assert.Equal("No había receptor en el domicilio", Assert.Single(copied.Motivos).Descripcion);
         Assert.Equal(1, copied.VersionConcurrencia);
         Assert.Equal(1, first.VersionConcurrencia);
+        Assert.Equal(90, copied.PlazoValidacionPruebaMinutos);
     }
 
     [Fact]
@@ -104,9 +108,10 @@ public sealed class VersionReglasOperativasTests
 
     private static ReglasOperativasConfiguracion Complete(
         int maxAttempts = 3,
+        int? proofDeadline = 90,
         IReadOnlyCollection<TipoPruebaEntrega>? requirements = null,
         IReadOnlyCollection<MotivoNoEntregaConfiguracion>? motives = null)
         => new(maxAttempts, 1440, PoliticaDevolucionAlAgotarIntentos.DecisionOperativa,
-            4320, 1440, requirements ?? [TipoPruebaEntrega.FirmaEnPantalla, TipoPruebaEntrega.NombreReceptor],
+            4320, 1440, proofDeadline, requirements ?? [TipoPruebaEntrega.FirmaEnPantalla, TipoPruebaEntrega.NombreReceptor],
             motives ?? [new("DOMICILIO_CERRADO", "Domicilio cerrado", true)]);
 }

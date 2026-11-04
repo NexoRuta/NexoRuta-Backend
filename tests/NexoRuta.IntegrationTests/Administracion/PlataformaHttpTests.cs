@@ -55,7 +55,7 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
     public async Task AdministrativeEndpointsRequireAuthentication()
     {
         var database = await postgres.CreateDatabaseAsync();
-        using var factory = database.CreateApiFactory();
+        using var factory = database.CreateShippingApiFactory();
         using var client = factory.CreateHttpClient();
         foreach (var kind in new[] { "operadores", "comercios" })
         {
@@ -91,9 +91,19 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
             var createdAccess = await verifyRls.AccesosUsuario.SingleAsync(x => x.UsuarioId == result.UsuarioId);
             var otherOperator = await verifyRls.Operadores.SingleAsync(x => x.Nombre == "RLS operator");
             var otherOwnerAccess = await verifyRls.AccesosUsuario.SingleAsync(x => x.OperadorId == otherOperator.Id && x.EsPropietario);
+            var dispatcher = await verifyRls.Roles.SingleAsync(x => x.OperadorId == createdAccess.OperadorId
+                && x.Codigo == "despachador_operador");
             var manager = new RlsActorContext(RlsActorKind.Plataforma, CanManageOrganizations: true);
 
             Assert.NotNull(createdAccess.RolId);
+            Assert.True(dispatcher.EsProtegidoSistema);
+            Assert.Contains(await verifyRls.RolesPermisos.Where(x => x.RolId == dispatcher.Id)
+                .Join(verifyRls.Permisos, grant => grant.PermisoId, permission => permission.Id,
+                    (_, permission) => permission.Codigo).ToArrayAsync(), code => code == "envios.gestionar");
+            Assert.Contains(await verifyRls.RolesPermisos.Where(x => x.RolId == dispatcher.Id)
+                .Join(verifyRls.Permisos, grant => grant.PermisoId, permission => permission.Id,
+                    (_, permission) => permission.Codigo).ToArrayAsync(), code => code == "envios.consultar");
+            Assert.False(await verifyRls.AccesosUsuario.AnyAsync(x => x.RolId == dispatcher.Id));
             Assert.True(await CanReadAccessAsAsync(runtime, createdAccess.Id, manager,
                 createdAccess.OrganizacionId, createdAccess.UsuarioId, createdAccess.RolId.Value));
             Assert.False(await CanReadAccessAsAsync(runtime, createdAccess.Id, manager,
@@ -113,6 +123,33 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
         using var conflict = await platformClient.PostAsJsonAsync("/api/admin/operadores",
             Request("Must roll back", "authorized-operator@example.test"));
         Assert.Equal(HttpStatusCode.Conflict, conflict.StatusCode);
+
+        using (var operatorFactory = new IntegrationApiFactory(runtime,
+            settings: NexoRuta.IntegrationTests.Seguridad.RlsRestrictedHttpFlowTests.ApiSettings()))
+        using (var operatorClient = operatorFactory.CreateHttpClient())
+        {
+            await Login(operatorClient, "authorized-operator@example.test");
+            using (var currentResponse = await operatorClient.GetAsync("/api/usuarios/actual"))
+            {
+                Assert.Equal(HttpStatusCode.OK, currentResponse.StatusCode);
+                using var current = System.Text.Json.JsonDocument.Parse(await currentResponse.Content.ReadAsStringAsync());
+                Assert.True(current.RootElement.GetProperty("puedeGestionarDecisionesOperativasEnvio").GetBoolean());
+            }
+            using var assignableResponse = await operatorClient.GetAsync("/api/roles/asignables");
+            Assert.Equal(HttpStatusCode.OK, assignableResponse.StatusCode);
+            var assignable = await assignableResponse.Content.ReadFromJsonAsync<JsonElement[]>();
+            var dispatcher = Assert.Single(assignable!, role => role.GetProperty("codigo").GetString() == "despachador_operador");
+            Assert.True(dispatcher.GetProperty("esProtegidoSistema").GetBoolean());
+            using var assignedUser = await operatorClient.PostAsJsonAsync("/api/usuarios", new
+            {
+                Email = "dispatcher-from-existing-flow@example.test", Password, RolId = dispatcher.GetProperty("id").GetGuid()
+            });
+            Assert.Equal(HttpStatusCode.Created, assignedUser.StatusCode);
+            await using var assignmentCheck = database.CreateDbContext();
+            Assert.True(await assignmentCheck.AccesosUsuario.AnyAsync(x => x.UsuarioId ==
+                assignmentCheck.Usuarios.Where(u => u.Email == "dispatcher-from-existing-flow@example.test")
+                    .Select(u => u.Id).Single() && x.RolId == dispatcher.GetProperty("id").GetGuid()));
+        }
 
         using var organizationClient = factory.CreateHttpClient();
         await Login(organizationClient, initial.OperadorUsuarioEmail);
@@ -154,7 +191,7 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
     public async Task OrganizationAdministratorsCannotUsePlatformOrGrantPlatformPermissions(bool commerce)
     {
         var database = await postgres.CreateDatabaseAsync();
-        using var factory = database.CreateApiFactory();
+        using var factory = database.CreateShippingApiFactory();
         using var client = factory.CreateHttpClient();
         await using var db = database.CreateDbContext();
         var access = await db.AccesosUsuario.SingleAsync(x => commerce ? x.ComercioId != null : x.OperadorId != null);
@@ -220,7 +257,7 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
         Assert.Equal(created.AccesoId, access.Id);
         Assert.Equal(created.RolId, access.RolId);
         Assert.Equal(created.Organizacion.Id, access.OrganizacionId);
-        var role = await db.Roles.SingleAsync();
+        var role = await db.Roles.SingleAsync(r => r.Id == created.RolId);
         Assert.True(role.EsProtegidoSistema);
         Assert.Equal(type, role.TipoOrganizacion);
         var grants = await (from grant in db.RolesPermisos join p in db.Permisos on grant.PermisoId equals p.Id
@@ -269,7 +306,7 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
     public async Task TokenScopeCannotBeReinterpretedEvenWithAnOtherwiseValidSignature()
     {
         var database = await postgres.CreateDatabaseAsync();
-        using var factory = database.CreateApiFactory();
+        using var factory = database.CreateShippingApiFactory();
         using var client = factory.CreateHttpClient();
         await Initialize(database);
         await using var db = database.CreateDbContext();
@@ -319,7 +356,11 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
         var op2 = await Create("operadores", "operator2@example.test");
         var commerce1 = await Create("comercios", "commerce1@example.test");
         var commerce2 = await Create("comercios", "commerce2@example.test");
-        await using (var reglas = database.CreateDbContext()) await ReglasEnvioTestData.SembrarInicialesAsync(reglas);
+        await using (var reglas = database.CreateDbContext())
+        {
+            await ReglasEnvioTestData.SembrarInicialesAsync(reglas);
+            await ServiciosEnvioTestData.SembrarAsync(reglas);
+        }
         // Only four explicit logins after the platform login, within the existing five/minute limiter.
         await Login(client, "commerce1@example.test");
         var available = await client.GetFromJsonAsync<JsonElement[]>("/api/operadores");
@@ -328,8 +369,7 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
         {
             using var response = await client.PostAsJsonAsync("/api/envios", new
             {
-                OperadorId = op, DestinatarioNombre = "Recipient", DestinatarioEmail = "destinatario@example.test", Direccion = "Delivery address", CodigoBulto = "BOX",
-                PesoGramos = 100, LargoCentimetros = 10, AnchoCentimetros = 10, AltoCentimetros = 10
+                OperadorId = op, Servicio = NexoRuta.IntegrationTests.Fixtures.ServiciosEnvioTestData.Declarar(op), DestinatarioNombre = "Recipient", DestinatarioEmail = "destinatario@example.test", Direccion = "Delivery address", Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "BOX", PesoGramos = 100, LargoCentimetros = 10, AnchoCentimetros = 10, AltoCentimetros = 10 } }
             });
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         }
@@ -370,7 +410,8 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
         Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync($"/api/admin/{(kind == "operadores" ? "comercios" : "operadores")}", Request("Cross-kind", "same@example.test"))).StatusCode);
         await using var db = database.CreateDbContext();
         Assert.Equal(2, await db.Operadores.CountAsync() + await db.Comercios.CountAsync());
-        Assert.Equal(2, await db.Roles.CountAsync());
+        Assert.Equal(2, await db.AccesosUsuario.Select(a => a.RolId).Distinct().CountAsync());
+        Assert.Equal(kind == "operadores" ? 4 : 2, await db.Roles.CountAsync());
         Assert.Equal(2, await db.AccesosUsuario.CountAsync());
         Assert.Equal(3, await db.Usuarios.CountAsync());
         var user = await db.Usuarios.SingleAsync(x => x.Email == "same@example.test");
@@ -419,6 +460,8 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
     public async Task FailureAfterSavingAllEntitiesRollsBackIncludingNewCatalogEntries(TipoAccesoUsuario type)
     {
         var database = await postgres.CreateDatabaseAsync();
+        Guid[] originalPermissions;
+        await using (var baseline = database.CreateDbContext()) originalPermissions = await baseline.Permisos.Select(p => p.Id).OrderBy(id => id).ToArrayAsync();
         await using (var db = database.CreateDbContext(new FailAfterSave()))
             await Assert.ThrowsAsync<InvalidOperationException>(() => Repository(db).CrearAsync(type, "Rollback", "rollback@example.test", Password, default));
         await using var verification = database.CreateDbContext();
@@ -426,7 +469,7 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
         Assert.Empty(await verification.Comercios.ToListAsync());
         Assert.Empty(await verification.Usuarios.ToListAsync());
         Assert.Empty(await verification.Roles.ToListAsync());
-        Assert.Empty(await verification.Permisos.ToListAsync());
+        Assert.Equal(originalPermissions, await verification.Permisos.Select(p => p.Id).OrderBy(id => id).ToArrayAsync());
         Assert.Empty(await verification.RolesPermisos.ToListAsync());
         Assert.Empty(await verification.AccesosUsuario.ToListAsync());
     }
@@ -466,29 +509,34 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
     [Fact]
     public async Task UpgradeFromPreviousSchemaPreservesIdentitiesRolesGrantsAndShipments()
     {
-        var database = await postgres.CreateDatabaseAsync();
+        var database = await postgres.CreateDatabaseAsync("20261016021011_ProtectSystemAdministratorRoles");
         await using var db = database.CreateDbContext();
-        await db.Database.MigrateAsync();
-        var shipment = await SeguimientoTestData.CreateEnvioAsync(db);
-        var role = new Rol("legacy", "Legacy", shipment.OperadorId, null);
-        role.ProtegerComoRolSistema();
-        var access = new AccesoUsuario(shipment.CreadoPorUsuarioId, shipment.OperadorId, null, role);
-        var permission = new Permiso("envios.consultar", "View shipments");
-        db.AddRange(role, permission, new RolPermiso(role.Id, permission.Id));
-        await db.SaveChangesAsync();
-        db.AccesosUsuario.Add(access);
-        await db.SaveChangesAsync();
-        var hash = (await db.Usuarios.SingleAsync()).PasswordHash;
-        await db.Database.MigrateAsync("20261016021011_ProtectSystemAdministratorRoles");
+        var userId=Guid.NewGuid(); var operatorId=Guid.NewGuid(); var commerceId=Guid.NewGuid();
+        var recipientId=Guid.NewGuid(); var addressId=Guid.NewGuid();
+        var shipment=new { Id=Guid.NewGuid(), CreadoPorUsuarioId=userId };
+        var role=new Rol("legacy","Legacy",operatorId,null); role.ProtegerComoRolSistema();
+        var access=new AccesoUsuario(userId,operatorId,null,role);
+        var permission=new Permiso("envios.consultar","View shipments");
+        const string hash="preserved-legacy-password-hash";
+        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Usuarios\" (\"Id\",\"Email\",\"PasswordHash\") VALUES ({userId},{"legacy-upgrade@example.test"},{hash})");
+        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Operadores\" (\"Id\",\"Nombre\") VALUES ({operatorId},'Legacy operator')");
+        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Comercios\" (\"Id\",\"Nombre\") VALUES ({commerceId},'Legacy commerce')");
+        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Roles\" (\"Id\",\"Codigo\",\"Nombre\",\"OperadorId\",\"TipoOrganizacion\",\"EsProtegidoSistema\") VALUES ({role.Id},'legacy','Legacy',{operatorId},'Operador',true)");
+        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Permisos\" (\"Id\",\"Codigo\",\"Nombre\") VALUES ({permission.Id},'envios.consultar','View shipments')");
+        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"RolesPermisos\" (\"RolId\",\"PermisoId\") VALUES ({role.Id},{permission.Id})");
+        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"AccesosUsuario\" (\"Id\",\"UsuarioId\",\"OperadorId\",\"RolId\") VALUES ({access.Id},{userId},{operatorId},{role.Id})");
+        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Destinatarios\" (\"Id\",\"OperadorId\",\"Nombre\") VALUES ({recipientId},{operatorId},'Legacy recipient')");
+        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Direcciones\" (\"Id\",\"OperadorId\",\"Descripcion\") VALUES ({addressId},{operatorId},'Legacy address')");
+        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"Envios\" (\"Id\",\"OperadorId\",\"ComercioId\",\"CreadoPorUsuarioId\",\"DestinatarioId\",\"DireccionId\",\"Estado\") VALUES ({shipment.Id},{operatorId},{commerceId},{userId},{recipientId},{addressId},'Admitido')");
         await HistoricRecipientEmail.MigrateAsync(db);
         db.ChangeTracker.Clear();
         Assert.Equal(shipment.Id, await db.Envios.Select(e => e.Id).SingleAsync());
         Assert.Equal(access.Id, (await db.AccesosUsuario.SingleAsync()).Id);
         Assert.Equal(shipment.CreadoPorUsuarioId, (await db.Usuarios.SingleAsync()).Id);
         Assert.Equal(hash, (await db.Usuarios.SingleAsync()).PasswordHash);
-        Assert.Equal(role.Id, (await db.Roles.SingleAsync()).Id);
-        Assert.True((await db.Roles.SingleAsync()).EsProtegidoSistema);
-        Assert.Equal(permission.Id, (await db.RolesPermisos.SingleAsync()).PermisoId);
+        Assert.Equal(role.Id, (await db.Roles.SingleAsync(r => r.Id == role.Id)).Id);
+        Assert.True((await db.Roles.SingleAsync(r => r.Id == role.Id)).EsProtegidoSistema);
+        Assert.Equal(permission.Id, (await db.RolesPermisos.SingleAsync(r => r.RolId == role.Id)).PermisoId);
         Assert.Empty(await db.AccesosPlataforma.ToListAsync());
         Assert.Empty(await db.RolesPlataforma.ToListAsync());
         Assert.True(db.Model.FindEntityType(typeof(AccesoUsuario))!.GetIndexes().Single(x => x.Properties.Select(p => p.Name).SequenceEqual(["UsuarioId"])).IsUnique);

@@ -18,17 +18,21 @@ using NexoRuta.Worker.Messaging;
 using NexoRuta.Worker;
 
 var builder = Host.CreateApplicationBuilder(args);
+builder.Logging.UseNexoRutaLogging("NexoRuta.Worker." + (builder.Configuration["Messaging:Transport"] ?? "RabbitMq"));
 builder.Services.AddHostingTelemetry(builder.Configuration, "NexoRuta.Worker." + (builder.Configuration["Messaging:Transport"] ?? "RabbitMq"));
 builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.Warning);
 
 var transport = builder.Configuration[WorkerConfigurationKeys.Transport] ?? WorkerTransportNames.RabbitMq;
 if (transport is not (WorkerTransportNames.RabbitMq or WorkerTransportNames.Kafka or WorkerTransportNames.Push))
     throw new InvalidOperationException("Messaging:Transport must be RabbitMq, Kafka or Push.");
+WorkerTelemetry.UseTransport(transport);
 
 var connectionString = builder.Configuration.GetConnectionString("Postgres")
     ?? throw new InvalidOperationException("ConnectionStrings:Postgres is required for this Worker.");
 builder.Services.AddDbContext<NexoRutaDbContext>(options => options.UseNexoRutaPostgres(connectionString));
 builder.Services.AddScoped<EfOutboxRepository>();
+builder.Services.AddSingleton<TimeProvider>(TimeProvider.System);
+builder.Services.AddHostedService<ProofValidationDeadlineWorker>();
 
 if (transport == WorkerTransportNames.RabbitMq)
 {
@@ -72,7 +76,12 @@ else if (transport == WorkerTransportNames.Push)
 {
     builder.Services.AddScoped<NexoRuta.Infrastructure.Notificaciones.CifradorRegistroPush>();
     builder.Services.AddScoped<NexoRuta.Infrastructure.Notificaciones.EfDespachoPushRepository>();
-    builder.Services.AddSingleton<ITransporteFcm, TransporteFcm>();
+    var pushNoSend = builder.Configuration.GetValue<bool>("Push:NoSend");
+    if (pushNoSend && !builder.Environment.IsDevelopment())
+        throw new InvalidOperationException("Push:NoSend is available only in Development.");
+    builder.Services.AddSingleton<ITransporteFcm>(services => pushNoSend
+        ? new TransporteFcmNoSend()
+        : new TransporteFcm(services.GetRequiredService<IConfiguration>()));
     builder.Services.AddHostedService<PushOutboxWorker>();
 }
 else

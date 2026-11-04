@@ -23,12 +23,18 @@ public sealed class Direccion
         Descripcion = descripcion.Trim();
     }
 
-    public void ConfirmarUbicacion(double latitud, double longitud, Guid usuarioId, DateTimeOffset ahora, long version)
+    public void ConfirmarUbicacion(double latitud, double longitud, Guid usuarioId, DateTimeOffset ahora, long version, string? descripcion = null)
     {
         if (version != Version) throw new InvalidOperationException("La dirección cambió. Consultá su versión actual.");
         if (!double.IsFinite(latitud) || !double.IsFinite(longitud) || latitud is < -90 or > 90
             || longitud is < -180 or > 180 || usuarioId == Guid.Empty || ahora == default)
             throw new ArgumentException("Las coordenadas y el usuario que confirma no son válidos.");
+        if (descripcion is not null)
+        {
+            if (string.IsNullOrWhiteSpace(descripcion) || descripcion.Trim().Length > 240)
+                throw new ArgumentException("La dirección es obligatoria y admite hasta 240 caracteres.", nameof(descripcion));
+            Descripcion = descripcion.Trim();
+        }
         Latitud = latitud; Longitud = longitud; ConfirmadaPorUsuarioId = usuarioId;
         ConfirmadaEnUtc = ahora.ToUniversalTime(); Version++;
     }

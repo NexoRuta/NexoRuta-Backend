@@ -16,6 +16,8 @@ public sealed record OutboxClaim(
     DateTimeOffset CreadoEnUtc)
 {
     public OutboxPriority Priority => Enum.Parse<OutboxPriority>(Prioridad, ignoreCase: false);
+    public string? TraceParent => OutboxTraceContext.ReadTraceParent(Payload);
+    public string BusinessPayload => OutboxTraceContext.BusinessPayload(Payload);
 
     public static OutboxClaim From(OutboxMessage message) => new(
         message.Id, message.OperadorId, message.EnvioId, message.Ambito.ToString(), message.ClaveAmbito,

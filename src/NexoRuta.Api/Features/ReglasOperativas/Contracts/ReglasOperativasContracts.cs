@@ -67,6 +67,9 @@ public sealed class ReemplazarBorradorReglasOperativasRequest
     [JsonRequired, Range(1, ReglasOperativasDomain.MaxDurationMinutes)]
     public int? PlazoUrgenteMinutos { get; init; }
 
+    [JsonRequired, Range(1, ReglasOperativasDomain.MaxDurationMinutes)]
+    public int? PlazoValidacionPruebaMinutos { get; init; }
+
     [JsonRequired, Required, MaxLength(ReglasOperativasApiLimits.MaxRequirements)]
     public TipoPruebaEntregaContract[] RequisitosPrueba { get; init; } = [];
 
@@ -127,6 +130,7 @@ public sealed record VersionReglasOperativasResponse(
     PoliticaDevolucionContract? PoliticaDevolucionAlAgotarIntentos,
     int? PlazoEstandarMinutos,
     int? PlazoUrgenteMinutos,
+    int? PlazoValidacionPruebaMinutos,
     IReadOnlyList<TipoPruebaEntregaContract> RequisitosPrueba,
     IReadOnlyList<MotivoNoEntregaResponse> Motivos,
     DateTimeOffset CreadaUtc,
@@ -149,7 +153,7 @@ public static class ReglasOperativasContractMapper
         => new(version.Id, Estado(version.Estado), version.NumeroVersionPublicada,
             version.VersionConcurrencia, version.MaxIntentosEntrega,
             version.IntervaloEntreIntentosMinutos, Politica(version.PoliticaDevolucionAlAgotarIntentos),
-            version.PlazoEstandarMinutos, version.PlazoUrgenteMinutos,
+            version.PlazoEstandarMinutos, version.PlazoUrgenteMinutos, version.PlazoValidacionPruebaMinutos,
             version.RequisitosPrueba.OrderBy(item => item.Tipo).Select(item => Tipo(item.Tipo)).ToArray(),
             version.Motivos.OrderBy(item => item.Codigo, StringComparer.Ordinal)
                 .Select(item => new MotivoNoEntregaResponse(item.Codigo, item.Descripcion, item.Disponible)).ToArray(),
@@ -158,7 +162,7 @@ public static class ReglasOperativasContractMapper
     public static ReglasOperativasConfiguracion Configuracion(ReemplazarBorradorReglasOperativasRequest request)
         => new(request.MaxIntentosEntrega, request.IntervaloEntreIntentosMinutos,
             Politica(request.PoliticaDevolucionAlAgotarIntentos), request.PlazoEstandarMinutos,
-            request.PlazoUrgenteMinutos, request.RequisitosPrueba.Select(Tipo).ToArray(),
+            request.PlazoUrgenteMinutos, request.PlazoValidacionPruebaMinutos, request.RequisitosPrueba.Select(Tipo).ToArray(),
             request.Motivos.Select(item => new MotivoNoEntregaConfiguracion(
                 item.Codigo, item.Descripcion, item.Disponible)).ToArray());
 
@@ -169,6 +173,7 @@ public static class ReglasOperativasContractMapper
         nameof(VersionReglasOperativas.PoliticaDevolucionAlAgotarIntentos) => "politicaDevolucionAlAgotarIntentos",
         nameof(VersionReglasOperativas.PlazoEstandarMinutos) => "plazoEstandarMinutos",
         nameof(VersionReglasOperativas.PlazoUrgenteMinutos) => "plazoUrgenteMinutos",
+        nameof(VersionReglasOperativas.PlazoValidacionPruebaMinutos) => "plazoValidacionPruebaMinutos",
         nameof(VersionReglasOperativas.RequisitosPrueba) => "requisitosPrueba",
         nameof(VersionReglasOperativas.Motivos) => "motivos",
         nameof(ReglasOperativasConfiguracion) => "configuracion",

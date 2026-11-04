@@ -91,6 +91,8 @@ public sealed class AltaPropiaHttpTests(PostgresFixture postgres) : IClassFixtur
         var current = await client.GetFromJsonAsync<JsonElement>("/api/usuarios/actual");
         Assert.Equal(userId, current.GetProperty("usuarioId").GetGuid());
         Assert.Equal(type.ToString(), current.GetProperty("tipo").GetString());
+        Assert.Equal(type == TipoAccesoUsuario.Operador,
+            current.GetProperty("puedeGestionarDecisionesOperativasEnvio").GetBoolean());
         foreach (var other in new[] { "comercios", "operadores" })
             Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync($"/api/alta-propia/{other}", new { Nombre = "Second" })).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.PutAsJsonAsync($"/api/roles/{organization.RolId}/permisos", new { Permisos = Array.Empty<string>() })).StatusCode);
@@ -99,13 +101,28 @@ public sealed class AltaPropiaHttpTests(PostgresFixture postgres) : IClassFixtur
         Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync("/api/usuarios", new { Email = "owner@example.test", Password, RolId = organization.RolId })).StatusCode);
         await using var db = database.CreateDbContext();
         Assert.Equal(1, await db.Usuarios.CountAsync());
-        var role = await db.Roles.SingleAsync();
-        Assert.True(role.EsProtegidoSistema);
-        var permissions = await (from grant in db.RolesPermisos join permission in db.Permisos on grant.PermisoId equals permission.Id select permission.Codigo).ToListAsync();
-        Assert.Equal(CatalogoPermisos.Para(type).Select(x => x.Codigo).Order(), permissions.Order());
-        Assert.True((await db.AccesosUsuario.SingleAsync()).Activo);
-        Assert.True((await db.AccesosUsuario.SingleAsync()).EsPropietario);
         var createdAccess = await db.AccesosUsuario.SingleAsync();
+        var role = await db.Roles.SingleAsync(x => x.Id == createdAccess.RolId);
+        Assert.True(role.EsProtegidoSistema);
+        var permissions = await (from grant in db.RolesPermisos
+            join permission in db.Permisos on grant.PermisoId equals permission.Id
+            where grant.RolId == role.Id
+            select permission.Codigo).ToListAsync();
+        Assert.Equal(CatalogoPermisos.Para(type).Select(x => x.Codigo).Order(), permissions.Order());
+        Assert.True(createdAccess.Activo);
+        Assert.True(createdAccess.EsPropietario);
+        Assert.Equal(type == TipoAccesoUsuario.Operador ? 2 : 1, await db.Roles.CountAsync());
+        if (type == TipoAccesoUsuario.Operador)
+        {
+            var dispatcher = await db.Roles.SingleAsync(x => x.Codigo == "despachador_operador");
+            Assert.True(dispatcher.EsProtegidoSistema);
+            Assert.Empty(await db.AccesosUsuario.Where(x => x.RolId == dispatcher.Id).ToArrayAsync());
+            Assert.Equal(new[] { "envios.consultar", "envios.gestionar" }, await (from grant in db.RolesPermisos
+                join permission in db.Permisos on grant.PermisoId equals permission.Id
+                where grant.RolId == dispatcher.Id
+                orderby permission.Codigo
+                select permission.Codigo).ToArrayAsync());
+        }
         var ownership = new EfAccesosUsuarioRepository(db);
         Assert.True(await ownership.EsPropietarioAsync(userId, createdAccess.Id));
         Assert.False(await ownership.EsPropietarioAsync(Guid.NewGuid(), createdAccess.Id));
@@ -126,7 +143,7 @@ public sealed class AltaPropiaHttpTests(PostgresFixture postgres) : IClassFixtur
         // Install the catalog before the rendezvous so catalog initialization cannot serialize the race.
         await using (var db = database.CreateDbContext())
         {
-            db.AddRange(CatalogoPermisos.Todos.Select(p => new Permiso(p.Codigo, p.Nombre)));
+            db.AddRange(CatalogoPermisos.Todos.Where(p => !db.Permisos.Any(existing => existing.Codigo == p.Codigo)).Select(p => new Permiso(p.Codigo, p.Nombre)));
             await db.SaveChangesAsync();
         }
         using var factory = Factory(database, new MembershipRendezvous());
@@ -141,11 +158,11 @@ public sealed class AltaPropiaHttpTests(PostgresFixture postgres) : IClassFixtur
         Assert.True(organizations.Length == 1, $"Unexpected persisted organizations: {string.Join(", ", organizations)}");
         Assert.Equal(1, await final.Usuarios.CountAsync());
         Assert.Equal(1, await final.AccesosUsuario.CountAsync());
-        Assert.Equal(1, await final.Roles.CountAsync());
+        Assert.Equal(1, await final.AccesosUsuario.Select(a => a.RolId).Distinct().CountAsync());
         var access = await final.AccesosUsuario.SingleAsync();
         Assert.True(access.EsPropietario);
-        Assert.Equal(access.RolId, (await final.Roles.SingleAsync()).Id);
-        Assert.Equal(CatalogoPermisos.Para(access.TipoOrganizacion).Count, await final.RolesPermisos.CountAsync());
+        Assert.Equal(access.RolId, (await final.Roles.SingleAsync(r => r.Id == access.RolId)).Id);
+        Assert.Equal(CatalogoPermisos.Para(access.TipoOrganizacion).Count, await final.RolesPermisos.CountAsync(g => g.RolId == access.RolId));
     }
 
     [Fact]
@@ -209,6 +226,8 @@ public sealed class AltaPropiaHttpTests(PostgresFixture postgres) : IClassFixtur
     public async Task FailureAfterSaveRollsBackEveryOrganizationRowWithoutChangingIdentity()
     {
         var database = await postgres.CreateDatabaseAsync();
+        Guid[] originalPermissions;
+        await using (var before = database.CreateDbContext()) originalPermissions = await before.Permisos.Select(p => p.Id).OrderBy(id => id).ToArrayAsync();
         Guid userId;
         string hash;
         await using (var db = database.CreateDbContext())
@@ -228,7 +247,7 @@ public sealed class AltaPropiaHttpTests(PostgresFixture postgres) : IClassFixtur
         Assert.Empty(await final.Comercios.ToListAsync());
         Assert.Empty(await final.Roles.ToListAsync());
         Assert.Empty(await final.RolesPermisos.ToListAsync());
-        Assert.Empty(await final.Permisos.ToListAsync());
+        Assert.Equal(originalPermissions, await final.Permisos.Select(p => p.Id).OrderBy(id => id).ToArrayAsync());
     }
 
     private sealed class FailAfterSave : SaveChangesInterceptor

@@ -56,6 +56,8 @@ public sealed class ReglasOperativasUseCaseTests
         }
         public Task<IReadOnlyList<string>> ListarCodigosAsync(Guid usuarioId, Guid accesoId,
             CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<string>>([]);
+        public Task<bool> PuedeGestionarDecisionesOperativasEnvioAsync(Guid usuarioId, Guid accesoId, Guid rolId,
+            Guid operadorId, CancellationToken cancellationToken = default) => Task.FromResult(false);
     }
 
     private sealed class Repository : IReglasOperativasRepository

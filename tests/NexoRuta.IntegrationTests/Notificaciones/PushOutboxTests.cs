@@ -9,7 +9,10 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using NexoRuta.Api.Features.Reparto.Contracts;
+using NexoRuta.Domain.Envios;
 using NexoRuta.Domain.Notificaciones;
+using NexoRuta.Domain.ReglasOperativas;
+using NexoRuta.Infrastructure.ReglasOperativas;
 using NexoRuta.Infrastructure.Notificaciones;
 using NexoRuta.Infrastructure.Outbox;
 using NexoRuta.Infrastructure.Persistence;
@@ -65,13 +68,15 @@ public sealed partial class PushOutboxTests(PostgresFixture postgres) : IClassFi
             ? [new(EstadoEnvioPush.Aceptado, "aceptado-primero"), new(EstadoEnvioPush.Reintentar)]
             : m.Fids.Select(_ => new ResultadoEnvioPush(EstadoEnvioPush.Aceptado, "aceptado-reintento")).ToArray() };
         using var worker = new PushOutboxWorker(services.GetRequiredService<IServiceScopeFactory>(), transporte, NullLogger<PushOutboxWorker>.Instance);
-        var antes = DateTimeOffset.UtcNow;
+        await using var clock = p.Data.CreateDbContext();
+        var antes = await clock.Database.SqlQuery<DateTimeOffset>($"SELECT clock_timestamp() AS \"Value\"").SingleAsync();
         Assert.True(await worker.ProcesarSiguienteAsync(default));
         await using (var db = p.Data.CreateDbContext())
         {
             var mensaje = await db.OutboxMessages.SingleAsync(x => x.Id == p.Mensaje);
+            var ahora = await db.Database.SqlQuery<DateTimeOffset>($"SELECT clock_timestamp() AS \"Value\"").SingleAsync();
             Assert.Equal(OutboxEstado.Error, mensaje.Estado);
-            Assert.InRange(mensaje.ProximoIntentoEnUtc, antes.AddSeconds(10), DateTimeOffset.UtcNow.AddSeconds(25));
+            Assert.InRange(mensaje.ProximoIntentoEnUtc, antes.AddSeconds(10), ahora.AddSeconds(25));
             Assert.Single(await db.EntregasPush.ToArrayAsync());
             await db.OutboxMessages.Where(x => x.Id == p.Mensaje).ExecuteUpdateAsync(s => s.SetProperty(x => x.ProximoIntentoEnUtc, DateTimeOffset.UtcNow.AddSeconds(-1)));
         }
@@ -157,23 +162,33 @@ public sealed partial class PushOutboxTests(PostgresFixture postgres) : IClassFi
         Assert.Equal("42501", vencido.SqlState);
     }
 
-    private async Task<PreparadoPush> PrepararPush(int cantidad, bool registrarAviso = true)
+    private async Task<PreparadoPush> PrepararPush(int cantidad, bool registrarAviso = true,
+        bool recibir = true, bool planificar = true, bool automatizarDevolucion = false)
     {
         var data = await postgres.CreateDatabaseAsync();
-        var settings = new Dictionary<string, string?> { ["Push:RegistrationEncryptionKey"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)) };
+        var settings = new Dictionary<string, string?>
+        {
+            ["Push:RegistrationEncryptionKey"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)),
+            ["Reparto:EvidenciasEncryptionKey"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
+        };
         var config = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
         using (var seed = new IntegrationApiFactory(data, settings: settings))
         using (seed.CreateHttpClient()) { }
+        if (automatizarDevolucion) await PublicarReglasDeAgotamientoAutomatico(data);
         var runtime = await NexoRuta.IntegrationTests.Seguridad.RlsRestrictedHttpFlowTests.RestrictApiAsync(data);
         settings["DatabaseInitialization:SeedData"] = "false";
         var factory = new IntegrationApiFactory(runtime, settings: settings);
         var client = factory.CreateHttpClient();
-        var preparado = await Preparar(data, client);
-        using var plan = await client.PostAsJsonAsync("/api/rutas", Solicitud(preparado));
-        Assert.Equal(HttpStatusCode.OK, plan.StatusCode);
-        var hoja = (await plan.Content.ReadFromJsonAsync<HojaRutaResponse>())!;
-        using var despacho = await client.PostAsJsonAsync($"/api/rutas/{hoja.Id}/despacho", new { hoja.Version });
-        Assert.Equal(HttpStatusCode.OK, despacho.StatusCode);
+        var preparado = await Preparar(data, client, recibir: recibir);
+        HojaRutaResponse? hoja = null;
+        if (planificar)
+        {
+            using var plan = await client.PostAsJsonAsync("/api/rutas", Solicitud(preparado));
+            Assert.Equal(HttpStatusCode.OK, plan.StatusCode);
+            hoja = (await plan.Content.ReadFromJsonAsync<HojaRutaResponse>())!;
+            using var despacho = await client.PostAsJsonAsync($"/api/rutas/{hoja.Id}/despacho", new { hoja.Version });
+            Assert.Equal(HttpStatusCode.OK, despacho.StatusCode);
+        }
         await using var db = data.CreateDbContext();
         var access = await db.AccesosUsuario.SingleAsync(x => x.Id == preparado.AccesoId);
         var email = await db.Usuarios.Where(x => x.Id == access.UsuarioId).Select(x => x.Email).SingleAsync();
@@ -188,11 +203,25 @@ public sealed partial class PushOutboxTests(PostgresFixture postgres) : IClassFi
             Assert.Equal(HttpStatusCode.NoContent, registro.StatusCode);
         }
         var versionEnvio = await db.Envios.Where(e => e.Id == preparado.EnvioId).Select(e => e.Version).SingleAsync();
-        var aviso = new AvisoReparto(access.OperadorId!.Value, access.Id, hoja.Id, preparado.EnvioId, versionEnvio, "Cancelacion", "Motivo de prueba", DateTimeOffset.UtcNow);
+        var aviso = new AvisoReparto(access.OperadorId!.Value, access.Id, hoja?.Id ?? Guid.CreateVersion7(),
+            preparado.EnvioId, versionEnvio, "Cancelacion", "Motivo de prueba", DateTimeOffset.UtcNow);
         var mensaje = OutboxMessage.ForShipment(aviso.OperadorId, aviso.EnvioId, OutboxMessageTypes.DeliveryChanged,
             OutboxDestino.PushFcm, JsonSerializer.Serialize(new { avisoId = aviso.Id }));
         if (registrarAviso) { db.AvisosReparto.Add(aviso); db.OutboxMessages.Add(mensaje); await db.SaveChangesAsync(); }
         return new(data, factory, client, aviso, mensaje.Id, fids, config);
+    }
+
+    private static async Task PublicarReglasDeAgotamientoAutomatico(IntegrationDatabase data)
+    {
+        await using var db = data.CreateDbContext();
+        var access = await db.AccesosUsuario.SingleAsync(x => x.OperadorId != null);
+        var operatorId = access.OperadorId!.Value;
+        var rules = new EfReglasOperativasRepository(db);
+        await rules.CrearBorradorAsync(operatorId, access.UsuarioId);
+        await rules.EditarBorradorAsync(operatorId, access.UsuarioId, 0,
+            new(1, 30, PoliticaDevolucionAlAgotarIntentos.IniciarAutomaticamente, 2880, 1440, 60,
+                [TipoPruebaEntrega.NombreReceptor], [new("AUSENTE", "Ausente", true)]));
+        await rules.PublicarBorradorAsync(operatorId, access.UsuarioId, 1);
     }
 
     private static async Task<ServiceProvider> ServiciosWorker(PreparadoPush p)

@@ -16,7 +16,7 @@ public sealed record AltaOrganizacion(OrganizacionAdministrativa Organizacion, G
 public interface IPlataformaRepository
 {
     Task<ContextoPlataforma?> ObtenerAccesoAsync(Guid accesoId, CancellationToken ct);
-    Task InicializarAsync(string email, string password, CancellationToken ct = default, bool permitirExistente = false);
+    Task InicializarAsync(string email, string password, CancellationToken ct = default, bool sincronizarPasswordExistente = false);
     Task<AltaOrganizacion> CrearAsync(TipoAccesoUsuario tipo, string nombre, string email, string password, CancellationToken ct);
     Task<PaginaOrganizaciones> ListarAsync(TipoAccesoUsuario tipo, EstadoOrganizacion? estado, int pagina, int tamanoPagina, CancellationToken ct);
     Task<OrganizacionAdministrativa?> ObtenerAsync(TipoAccesoUsuario tipo, Guid id, CancellationToken ct);

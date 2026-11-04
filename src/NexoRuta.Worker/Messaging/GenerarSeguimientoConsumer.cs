@@ -89,6 +89,13 @@ public sealed class GenerarSeguimientoConsumer(
             var contratoValidado = false;
             Guid? idLog = Guid.TryParse(entrega.BasicProperties.MessageId, out var id)
                 && id != Guid.Empty ? id : null;
+            var traceParent = WorkerTelemetry.ReadTraceParent(entrega.BasicProperties.Headers);
+            using var activity = WorkerTelemetry.StartConsumerActivity(traceParent, "rabbitmq.process");
+            using var logScope = logger.BeginScope(new Dictionary<string, object?>
+            {
+                ["correlation_id"] = WorkerTelemetry.CorrelationId(traceParent, idLog?.ToString("D") ?? "unknown"),
+                ["outbox_message_id"] = idLog?.ToString("D")
+            });
 
             try
             {

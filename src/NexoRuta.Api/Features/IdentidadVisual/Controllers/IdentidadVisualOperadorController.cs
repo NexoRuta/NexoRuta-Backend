@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using NexoRuta.Api.Features.IdentidadVisual.Contracts;
 using NexoRuta.Application.Administracion.Context;
 using NexoRuta.Application.Administracion.Repositories;
+using NexoRuta.Application.Administracion.Dtos;
 using NexoRuta.Domain.Administracion;
 using NexoRuta.Infrastructure.IdentidadVisual;
 using NexoRuta.Infrastructure.Persistence;
@@ -16,6 +17,7 @@ namespace NexoRuta.Api.Features.IdentidadVisual.Controllers;
 [Route("api/configuracion/identidad-visual")]
 public sealed class IdentidadVisualOperadorController(
     NexoRutaDbContext db,
+    IConsultaIdentidadVisualOperador consultaIdentidad,
     TimeProvider reloj) : ControllerBase
 {
     private static readonly HashSet<string> CamposPermitidos = new(StringComparer.OrdinalIgnoreCase)
@@ -30,7 +32,7 @@ public sealed class IdentidadVisualOperadorController(
     public async Task<IActionResult> Obtener(CancellationToken ct)
     {
         if (!TryOperator(out var context)) return Forbid();
-        var current = await ObtenerVigenteAsync(context.OperadorId!.Value, ct);
+        var current = await consultaIdentidad.ObtenerVigenteAsync(context.OperadorId!.Value, ct);
         return Ok(Administracion(current, context.OperadorNombre ?? "Operador"));
     }
 
@@ -165,6 +167,12 @@ public sealed class IdentidadVisualOperadorController(
             current?.CorreoPublico, current?.TelefonoPublico, current?.ColorPrimario, current?.ColorSecundario,
             current?.LogoContenido, current?.LogoTipoContenido);
 
+    private static IdentidadVisualAdministracionResponse Administracion(IdentidadVisualOperadorSnapshot? current,
+        string fallback)
+        => new(current?.Version ?? 0, current?.NombreComercial, current?.NombreComercial ?? fallback,
+            current?.CorreoPublico, current?.TelefonoPublico, current?.ColorPrimario, current?.ColorSecundario,
+            current?.LogoContenido, current?.LogoTipoContenido);
+
 }
 
 [ApiController]
@@ -172,6 +180,7 @@ public sealed class IdentidadVisualOperadorController(
 [Route("api/operadores/{operadorId:guid}/identidad-visual")]
 public sealed class IdentidadVisualPublicaController(
     NexoRutaDbContext db,
+    IConsultaIdentidadVisualOperador consultaIdentidad,
     IOperadoresRepository operadores) : ControllerBase
 {
     [HttpGet]
@@ -186,10 +195,7 @@ public sealed class IdentidadVisualPublicaController(
         var operatorInfo = await operadores.ObtenerAsync(operadorId, ct);
         if (operatorInfo is null) return NotFound();
         await db.SelectOperatorAsync(operadorId, ct);
-        var current = await db.VersionesIdentidadVisualOperador.AsNoTracking()
-            .Where(item => item.OperadorId == operadorId)
-            .OrderByDescending(item => item.Version)
-            .FirstOrDefaultAsync(ct);
+        var current = await consultaIdentidad.ObtenerVigenteAsync(operadorId, ct);
         return Ok(new IdentidadVisualPublicaResponse(current?.NombreComercial ?? operatorInfo.Nombre,
             current?.CorreoPublico, current?.TelefonoPublico, current?.ColorPrimario,
             current?.ColorSecundario, current?.LogoContenido, current?.LogoTipoContenido));

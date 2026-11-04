@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using NetTopologySuite.Geometries;
-using Npgsql;
 using NexoRuta.Application.ZonasCobertura.Repositories;
 using NexoRuta.Application.ZonasCobertura;
 using NexoRuta.Domain.ZonasCobertura;
@@ -96,23 +95,23 @@ public sealed class EfZonasCoberturaRepository : IZonasCoberturaRepository
         return Task.FromResult<TerritorioUruguayReferencia?>(IncludedTerritory.Value);
     }
 
-    public async Task<ResultadoValidacionTerritorial> ValidarTerritorioUruguayAsync(
+    public Task<ResultadoValidacionTerritorial> ValidarTerritorioUruguayAsync(
         Geometry geometria, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(geometria);
         if (geometria.IsEmpty || !geometria.IsValid || geometria.SRID != DepartamentoReferencia.GeometriaSrid)
             throw new ArgumentException("La geometría debe ser válida, no vacía y tener SRID 4326.", nameof(geometria));
 
-        var territory = IncludedTerritory.Value;
-        var parameters = new object[]
-        {
-            new NpgsqlParameter("territory", territory.GeometriaConDepartamentos),
-            new NpgsqlParameter("candidate", geometria)
-        };
-        var covered = await db.Database.SqlQueryRaw<bool>(
-                "SELECT ST_Covers(@territory, @candidate) AS \"Value\"", parameters)
-            .SingleAsync(cancellationToken);
-        return covered ? ResultadoValidacionTerritorial.Cubierta : ResultadoValidacionTerritorial.FueraDelTerritorio;
+        cancellationToken.ThrowIfCancellationRequested();
+        if (geometria is Polygon or MultiPolygon
+            && IncludedCatalog.Value.Departamentos.Any(departamento =>
+                departamento.Geometry.EqualsTopologically(geometria)))
+            return Task.FromResult(ResultadoValidacionTerritorial.Cubierta);
+
+        var covered = IncludedTerritory.Value.Geometria.Covers(geometria);
+        return Task.FromResult(covered
+            ? ResultadoValidacionTerritorial.Cubierta
+            : ResultadoValidacionTerritorial.FueraDelTerritorio);
     }
 
     private static TerritorioUruguayReferencia CrearTerritorioIncluido()
@@ -136,7 +135,6 @@ public sealed class EfZonasCoberturaRepository : IZonasCoberturaRepository
         return new TerritorioUruguayReferencia(CatalogoDepartamentosUruguay.CountryCode,
             catalog.VersionFuente, outline, components, outline.EnvelopeInternal);
     }
-
     private IQueryable<DepartamentoReferencia> ReferenciasActuales()
         => db.DepartamentosReferencia.Where(department =>
             !db.DepartamentosReferencia.Any(other => other.Codigo == department.Codigo

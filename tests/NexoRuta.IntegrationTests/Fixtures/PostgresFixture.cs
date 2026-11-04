@@ -14,9 +14,23 @@ public sealed class PostgresFixture : IAsyncLifetime
     private readonly string initialDatabase = $"integration_{Guid.NewGuid():N}";
     private readonly string username = $"test_{Guid.NewGuid():N}";
     private PostgreSqlContainer? container;
+    private NativePostgres? native;
 
     public async Task InitializeAsync()
     {
+        var mode = Environment.GetEnvironmentVariable("NEXORUTA_TEST_POSTGRES_MODE");
+        if (mode == "native")
+        {
+            native = new NativePostgres();
+            try
+            {
+                await native.StartAsync(initialDatabase, username, Convert.ToHexString(RandomNumberGenerator.GetBytes(32)));
+            }
+            catch { await native.DisposeAsync(); native = null; throw; }
+            return;
+        }
+        if (!string.IsNullOrEmpty(mode) && mode != "docker")
+            throw new InvalidOperationException("NEXORUTA_TEST_POSTGRES_MODE must be native or docker.");
         var createdContainer = new PostgreSqlBuilder("postgis/postgis:18-3.6-alpine")
             .WithDatabase(initialDatabase)
             .WithUsername(username)
@@ -44,10 +58,14 @@ public sealed class PostgresFixture : IAsyncLifetime
 
     public async Task<IntegrationDatabase> CreateDatabaseAsync(string? targetMigration = null)
     {
-        var startedContainer = container ?? throw new InvalidOperationException("The PostgreSQL fixture did not start.");
-        Assert.False(string.IsNullOrWhiteSpace(startedContainer.Id));
-        Assert.Equal("Running", startedContainer.State.ToString());
-        var source = new NpgsqlConnectionStringBuilder(startedContainer.GetConnectionString());
+        if (container is { } startedContainer)
+        {
+            Assert.False(string.IsNullOrWhiteSpace(startedContainer.Id));
+            Assert.Equal("Running", startedContainer.State.ToString());
+        }
+        var ownedConnection = native?.ConnectionString ?? container?.GetConnectionString()
+            ?? throw new InvalidOperationException("The owned PostgreSQL fixture did not start.");
+        var source = new NpgsqlConnectionStringBuilder(ownedConnection);
         Assert.Equal(initialDatabase, source.Database);
         Assert.Equal(username, source.Username);
         await MeasureAsync("verify_container_identity", async () =>
@@ -62,8 +80,8 @@ public sealed class PostgresFixture : IAsyncLifetime
             Assert.Equal(username, reader.GetString(1));
             Assert.InRange(reader.GetInt32(2), 180000, 189999);
         });
-        // Only this owned container can supply a connection; external settings are ignored.
-        var connection = new NpgsqlConnectionStringBuilder(container.GetConnectionString())
+        // Only this fixture-owned cluster can supply a connection; external settings are ignored.
+        var connection = new NpgsqlConnectionStringBuilder(ownedConnection)
         {
             Database = $"integration_{Guid.NewGuid():N}",
             Pooling = false
@@ -119,12 +137,13 @@ public sealed class PostgresFixture : IAsyncLifetime
         }
     }
 
-    // All per-test databases disappear with the owned container. No database deletion SQL.
-    public Task DisposeAsync()
+    // All per-test databases disappear with the owned cluster. No database deletion SQL.
+    public async Task DisposeAsync()
     {
         var current = container;
         container = null;
-        return current is null ? Task.CompletedTask : current.DisposeAsync().AsTask();
+        if (current is not null) await current.DisposeAsync();
+        if (native is not null) { await native.DisposeAsync(); native = null; }
     }
 }
 
@@ -152,6 +171,9 @@ public sealed class IntegrationDatabase
             .Options;
         return new(optionsWithInterceptors);
     }
+
+    public IntegrationApiFactory CreateShippingApiFactory(params IInterceptor[] interceptors) =>
+        new(this, interceptors: interceptors, seedShippingServices: true);
 
     public IntegrationApiFactory CreateApiFactory(params IInterceptor[] interceptors) =>
         new(this, interceptors: interceptors);
