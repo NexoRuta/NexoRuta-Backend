@@ -229,7 +229,7 @@ public sealed class IdentidadVisualOperadorHttpTests(PostgresFixture postgres) :
         using var seedClient = bootstrapApi.CreateHttpClient();
         var actors = await SeedActorsAsync(database);
         var runtime = await RlsRestrictedHttpFlowTests.RestrictApiAsync(database);
-        await using var redis = await RedisTestServer.CreateAsync();
+        await using var redis = await RedisTestServer.CreateAsync(stableHostPort: true);
         var redisConnectionString = redis.ConnectionString;
         await redis.StopAsync();
 
@@ -255,6 +255,7 @@ public sealed class IdentidadVisualOperadorHttpTests(PostgresFixture postgres) :
         Assert.Equal(1, queries.SnapshotReads);
 
         await redis.StartAsync();
+        Assert.Equal(redisConnectionString, redis.ConnectionString);
         await WaitForRedisReadyAsync(redisConnectionString);
 
         queries.Reset();
@@ -281,6 +282,7 @@ public sealed class IdentidadVisualOperadorHttpTests(PostgresFixture postgres) :
         Assert.Equal(1, queries.SnapshotReads);
 
         await redis.StartAsync();
+        Assert.Equal(redisConnectionString, redis.ConnectionString);
         await WaitForRedisReadyAsync(redisConnectionString);
         queries.Reset();
         using (var afterRestartMiss = await client.GetAsync("/api/configuracion/identidad-visual"))
@@ -633,7 +635,7 @@ public sealed class IdentidadVisualOperadorHttpTests(PostgresFixture postgres) :
             await Task.Delay(TimeSpan.FromMilliseconds(250));
         }
 
-        Assert.True(false, $"Redis did not accept PING after restarting within 20 seconds. {lastError}");
+        Assert.Fail($"Redis did not accept PING after restarting within 20 seconds. {lastError}");
     }
 
     private static MultipartFormDataContent Form(int version, string? name = null, string? email = null,

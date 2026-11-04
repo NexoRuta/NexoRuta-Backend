@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using DotNet.Testcontainers.Builders;
+using DotNet.Testcontainers.Containers;
 using Testcontainers.Redis;
 
 namespace NexoRuta.IntegrationTests.Fixtures;
@@ -9,9 +11,10 @@ namespace NexoRuta.IntegrationTests.Fixtures;
 public sealed class RedisTestServer : IAsyncDisposable
 {
     public const string ContainerImage = "redis:7.2.16-alpine3.21";
+    private const ushort RedisPort = 6379;
     private const string NativeVersion = "7.2.16";
 
-    private readonly RedisContainer? container;
+    private readonly IContainer? container;
     private readonly bool native;
     private readonly string? nativeDirectory;
     private readonly string? nativeExecutable;
@@ -19,7 +22,7 @@ public sealed class RedisTestServer : IAsyncDisposable
     private Process? nativeProcess;
     private bool running;
 
-    private RedisTestServer(RedisContainer container)
+    private RedisTestServer(IContainer container)
     {
         this.container = container;
     }
@@ -32,15 +35,24 @@ public sealed class RedisTestServer : IAsyncDisposable
         nativeDirectory = directory;
     }
 
-    public string ConnectionString => container?.GetConnectionString()
-        ?? $"127.0.0.1:{nativePort},abortConnect=false,connectRetry=1,connectTimeout=1000";
+    public string ConnectionString => container is not null
+        ? $"{container.Hostname}:{container.GetMappedPublicPort(RedisPort)}"
+        : $"127.0.0.1:{nativePort},abortConnect=false,connectRetry=1,connectTimeout=1000";
 
-    public static async Task<RedisTestServer> CreateAsync(CancellationToken cancellationToken = default)
+    public static async Task<RedisTestServer> CreateAsync(
+        bool stableHostPort = false,
+        CancellationToken cancellationToken = default)
     {
         var mode = Environment.GetEnvironmentVariable("NEXORUTA_TEST_REDIS_MODE") ?? "docker";
         if (mode == "docker")
         {
-            var server = new RedisTestServer(new RedisBuilder(ContainerImage).Build());
+            var container = stableHostPort
+                ? new ContainerBuilder(ContainerImage)
+                    .WithPortBinding(RedisPort, GetAvailableHostPort())
+                    .WithWaitStrategy(Wait.ForUnixContainer().UntilCommandIsCompleted("redis-cli", "ping"))
+                    .Build()
+                : new RedisBuilder(ContainerImage).Build();
+            var server = new RedisTestServer(container);
             try
             {
                 await server.StartCoreAsync(cancellationToken);
@@ -76,6 +88,13 @@ public sealed class RedisTestServer : IAsyncDisposable
             await nativeServer.DisposeAsync();
             throw;
         }
+    }
+
+    private static int GetAvailableHostPort()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        return ((IPEndPoint)listener.LocalEndpoint).Port;
     }
 
     public Task StartAsync(CancellationToken cancellationToken = default)
