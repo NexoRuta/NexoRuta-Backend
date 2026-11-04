@@ -335,8 +335,7 @@ public sealed class RutasHttpTests(PostgresFixture postgres) : IClassFixture<Pos
             new { Version = 0, Latitud = -34.9, Longitud = -56.2 });
         Assert.Equal(HttpStatusCode.NoContent, destinoSegundo.StatusCode);
         await client.SetBearerForAccessAsync(data, original.AccesoId);
-        using var recepcionSegunda = await client.PostAsJsonAsync($"/api/deposito/envios/{segundoEnvio.Id}/recepcion", new { Version = 0 });
-        Assert.Equal(HttpStatusCode.NoContent, recepcionSegunda.StatusCode);
+        await RecepcionTestData.RecibirInicialAsync(data, client, segundoEnvio.Id);
         var otroRepartidor = await CrearRepartidorAlternativo(data, original.AccesoId);
         var rutaVaciada = (await client.GetFromJsonAsync<HojaRutaResponse[]>($"/api/rutas?fecha={FechaOperacion:yyyy-MM-dd}"))!
             .Single(x => x.Id == rutaOriginal.Id);
@@ -430,7 +429,7 @@ public sealed class RutasHttpTests(PostgresFixture postgres) : IClassFixture<Pos
         await using var db = data.CreateDbContext();
         var accesoBase = await db.AccesosUsuario.SingleAsync(x => x.Id == accesoBaseId);
         var rol = await db.Roles.SingleAsync(x => x.Id == accesoBase.RolId);
-        var usuario = new Usuario("repartidor-alternativo@example.test");
+        var usuario = new Usuario("repartidor-alternativo@example.test", AuthenticationTestData.Hash("repartidor-alternativo@example.test"));
         var acceso = new AccesoUsuario(usuario.Id, accesoBase.OperadorId, null, rol);
         db.AddRange(usuario, acceso);
         await db.SaveChangesAsync();
@@ -447,6 +446,14 @@ public sealed class RutasHttpTests(PostgresFixture postgres) : IClassFixture<Pos
         using var plan = await client.PostAsJsonAsync("/api/rutas", Solicitud(preparado));
         Assert.Equal(HttpStatusCode.OK, plan.StatusCode);
         var hoja = (await plan.Content.ReadFromJsonAsync<HojaRutaResponse>())!;
+        await using (var history = data.CreateDbContext())
+        {
+            var reception = await history.EnvioEventos.SingleAsync(e => e.EnvioId == preparado.EnvioId && e.EstadoNuevo == "EnDeposito");
+            Assert.Equal("RecepcionDeposito", reception.OrigenTipo);
+            Assert.Equal("Usuario", reception.ActorTipo);
+            Assert.Equal(preparado.AccesoId, reception.ActorAccesoId);
+            Assert.NotNull(reception.OrigenId);
+        }
         Assert.Equal("Planificada", hoja.Estado);
         Assert.Single(hoja.Paradas);
         Assert.Equal((-34.9, -56.2), (hoja.Paradas[0].Latitud, hoja.Paradas[0].Longitud));
@@ -483,18 +490,142 @@ public sealed class RutasHttpTests(PostgresFixture postgres) : IClassFixture<Pos
         Assert.Equal(EstadoEnvio.EnDeposito, (await db.Envios.SingleAsync(x => x.Id == preparado.EnvioId)).Estado);
     }
 
+    [Theory]
+    [InlineData(1, 409)]
+    [InlineData(2, 200)]
+    public async Task ExactStopLimitUsesShipmentsAndPreservesExplicitOrder(int maximum, int status)
+    {
+        var data = await postgres.CreateDatabaseAsync();
+        using var factory = data.CreateApiFactory(); using var client = factory.CreateHttpClient();
+        var p = await Preparar(data, client);
+        using var config = await client.PutAsJsonAsync("/api/reparto/configuracion", new
+        { Version = 1, ZonaHoraria = "America/Montevideo", MaximoParadas = maximum, BloquearDiscrepanciasCarga = true });
+        Assert.Equal(HttpStatusCode.OK, config.StatusCode);
+        Guid secondId;
+        await using (var db = data.CreateDbContext())
+        {
+            var first = await db.Envios.SingleAsync(e => e.Id == p.EnvioId);
+            var second = new Envio(first.OperadorId, first.ComercioId, first.CreadoPorUsuarioId,
+                first.DestinatarioId, first.DireccionId, first.VersionReglasId);
+            db.Add(second); db.Add(new Bulto(first.OperadorId,second.Id,"SECOND-STOP",1,1,1,1));
+            await db.SaveChangesAsync();
+            await ServiciosEnvioTestData.AdjuntarCargoAsync(db,second,await db.Bultos.Where(b => b.EnvioId == second.Id).ToArrayAsync());
+            secondId = second.Id;
+        }
+        await RecepcionTestData.RecibirInicialAsync(data, client, secondId);
+        using var plan = await client.PostAsJsonAsync("/api/rutas", new
+        { RepartidorAccesoId = p.AccesoId,p.VehiculoId,Fecha=FechaOperacion,
+            Paradas = new[] { new {EnvioId=secondId,LlegadaEstimadaUtc=LlegadaEstimada},new {p.EnvioId,LlegadaEstimadaUtc=LlegadaEstimada} } });
+        Assert.Equal(status,(int)plan.StatusCode);
+        await using var verify = data.CreateDbContext();
+        if (status == 200)
+        {
+            var sheet = (await plan.Content.ReadFromJsonAsync<HojaRutaResponse>())!;
+            Assert.Equal(new[] {secondId,p.EnvioId},sheet.Paradas.Select(x=>x.EnvioId));
+            var saved = await verify.HojasRuta.AsNoTracking().SingleAsync();
+            Assert.Equal(new[] {secondId,p.EnvioId},saved.PlanTemporal!.OrdenEnvios);
+        }
+        else
+        {
+            Assert.Empty(await verify.HojasRuta.ToArrayAsync());
+            Assert.All(await verify.Envios.ToArrayAsync(),e=>Assert.Equal(EstadoEnvio.EnDeposito,e.Estado));
+        }
+    }
+
+    [Fact]
+    public async Task PlanningUsesAdmittedCoverageRevisionAfterLiveWindowsChange()
+    {
+        var data = await postgres.CreateDatabaseAsync();
+        using var factory = data.CreateApiFactory(); using var client = factory.CreateHttpClient();
+        var p = await Preparar(data, client);
+        await using (var db = data.CreateDbContext())
+        {
+            var zone = await db.ZonasCobertura.Include(z => z.Franjas).SingleAsync();
+            foreach (var slot in zone.Franjas.ToArray())
+                zone.CambiarFranja(slot.Id, slot.DiaSemanaIso, new TimeOnly(0,0), new TimeOnly(0,1), slot.Estado, zone.Version);
+            await db.SaveChangesAsync();
+        }
+        using var response = await client.PostAsJsonAsync("/api/rutas", Solicitud(p));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData(58, 0, 200)]
+    [InlineData(59, 0, 409)]
+    [InlineData(58, 1, 409)]
+    public async Task HistoricalCoverageRequiresArrivalAndWholeServiceInsideWindow(int seconds, int service, int status)
+    {
+        var data = await postgres.CreateDatabaseAsync();
+        using var factory = data.CreateApiFactory(); using var client = factory.CreateHttpClient();
+        var p = await Preparar(data, client);
+        await using var db = data.CreateDbContext();
+        var before = await db.EnvioEventos.CountAsync(e => e.EnvioId == p.EnvioId);
+        // Synthetic coverage ends 23:59:59 local, exclusive; date is deliberately UTC+1 day.
+        var arrival = new DateTimeOffset(FechaOperacion.AddDays(1).ToDateTime(new TimeOnly(2,59,seconds)), TimeSpan.Zero);
+        using var response = await client.PostAsJsonAsync("/api/rutas", new
+        { RepartidorAccesoId = p.AccesoId, p.VehiculoId, Fecha = FechaOperacion,
+            Paradas = new[] { new { p.EnvioId, LlegadaEstimadaUtc = arrival, ServicioMinutos = service } } });
+        Assert.Equal(status, (int)response.StatusCode);
+        if (status == 409)
+        {
+            Assert.Contains("franjas", await response.Content.ReadAsStringAsync());
+            Assert.Empty(await db.HojasRuta.ToArrayAsync());
+            Assert.Empty(await db.ParadasRuta.ToArrayAsync());
+            Assert.Equal(before, await db.EnvioEventos.CountAsync(e => e.EnvioId == p.EnvioId));
+            Assert.Equal(EstadoEnvio.EnDeposito, (await db.Envios.AsNoTracking().SingleAsync(e => e.Id == p.EnvioId)).Estado);
+        }
+    }
+
     [Fact]
     public async Task DosPlanificacionesConcurrentesSoloAsignanUnaVez()
     {
         var data = await postgres.CreateDatabaseAsync();
         using var factory = data.CreateApiFactory(); using var client = factory.CreateHttpClient();
         var preparado = await Preparar(data, client);
-        var respuestas = await Task.WhenAll(client.PostAsJsonAsync("/api/rutas", Solicitud(preparado)),
-            client.PostAsJsonAsync("/api/rutas", Solicitud(preparado)));
+        var otroRepartidor = await CrearRepartidorAlternativo(data, preparado.AccesoId);
+        using var vehicle = await client.PutAsJsonAsync("/api/reparto/vehiculos", new
+        { Matricula = "RACE123", PesoMaximoGramos = 100000m, VolumenMaximoCm3 = 100000m, Activo = true });
+        Assert.Equal(HttpStatusCode.OK, vehicle.StatusCode);
+        var otroVehiculo = (await vehicle.Content.ReadFromJsonAsync<VehiculoContract>())!.Id;
+        await using var db = data.CreateDbContext();
+        var operador = (await db.Envios.SingleAsync(e => e.Id == preparado.EnvioId)).OperadorId;
+        var eventosAntes = await db.EnvioEventos.CountAsync(e => e.EnvioId == preparado.EnvioId);
+        // A third transaction holds the shared operator lock until BOTH independent HTTP
+        // transactions have reached PostgreSQL and are waiting for it. No scheduling guess.
+        using var otherDispatcher = factory.CreateHttpClient();
+        await otherDispatcher.SetBearerForAccessAsync(data, otroRepartidor);
+        await using var gate = new Npgsql.NpgsqlConnection(data.ConnectionString);
+        await gate.OpenAsync();
+        await using var transaction = await gate.BeginTransactionAsync();
+        await using (var command = new Npgsql.NpgsqlCommand("SELECT 1 FROM public.\"Operadores\" WHERE \"Id\"=@id FOR UPDATE", gate, transaction))
+        { command.Parameters.AddWithValue("id", operador); await command.ExecuteScalarAsync(); }
+        var first = client.PostAsJsonAsync("/api/rutas", Solicitud(preparado));
+        var second = otherDispatcher.PostAsJsonAsync("/api/rutas", new
+        { RepartidorAccesoId = otroRepartidor, VehiculoId = otroVehiculo, Fecha = FechaOperacion,
+            Paradas = new[] { new { preparado.EnvioId, LlegadaEstimadaUtc = LlegadaEstimada } } });
+        var waiting = 0;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        while (waiting < 2)
+        {
+            await using var probe = new Npgsql.NpgsqlCommand("SELECT count(*)::int FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND wait_event_type='Lock' AND query LIKE '%Operadores%FOR UPDATE%'", gate, transaction);
+            waiting = (int)(await probe.ExecuteScalarAsync(timeout.Token))!;
+            if (waiting < 2) await Task.Delay(20, timeout.Token);
+            // pg_stat_activity snapshots must be refreshed within this long transaction.
+            await using var refresh = new Npgsql.NpgsqlCommand("SELECT pg_stat_clear_snapshot()", gate, transaction);
+            await refresh.ExecuteNonQueryAsync(timeout.Token);
+        }
+        await transaction.CommitAsync();
+        var respuestas = await Task.WhenAll(first, second);
         Assert.Equal(1, respuestas.Count(x => x.StatusCode == HttpStatusCode.OK));
         Assert.Equal(1, respuestas.Count(x => x.StatusCode == HttpStatusCode.Conflict));
         foreach (var respuesta in respuestas) respuesta.Dispose();
-        await using var db = data.CreateDbContext(); Assert.Single(await db.HojasRuta.ToArrayAsync());
+        Assert.Single(await db.HojasRuta.AsNoTracking().ToArrayAsync());
+        Assert.Single(await db.ParadasRuta.AsNoTracking().Where(p => p.EnvioId == preparado.EnvioId && p.Activa).ToArrayAsync());
+        Assert.Equal(eventosAntes + 1, await db.EnvioEventos.CountAsync(e => e.EnvioId == preparado.EnvioId));
+        // A retry cannot append an event or create a partial losing route.
+        using var retry = await client.PostAsJsonAsync("/api/rutas", Solicitud(preparado));
+        Assert.Equal(HttpStatusCode.Conflict, retry.StatusCode);
+        Assert.Equal(eventosAntes + 1, await db.EnvioEventos.CountAsync(e => e.EnvioId == preparado.EnvioId));
     }
 
     [Fact]

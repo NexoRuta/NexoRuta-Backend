@@ -18,7 +18,7 @@ namespace NexoRuta.Api.Controllers;
 public sealed class AuthController(
     IniciarSesionUseCase iniciarSesion,
     JwtTokenService tokens, IRegistroRepository registro,
-    IRecuperacionPassword recuperacion) : ControllerBase
+    IRecuperacionPassword recuperacion, ILogger<AuthController> logger) : ControllerBase
 {
     private const string MensajeSolicitudRecuperacion = "Si el correo pertenece a una cuenta, vas a recibir instrucciones para restablecer la contraseña.";
 
@@ -49,10 +49,13 @@ public sealed class AuthController(
             cancellationToken);
 
         if (sesion is null)
+        {
+            AuthDiagnostics.Rejected(HttpContext,logger,401,"login_rejected");
             return Unauthorized(new
             {
                 message = "Credenciales inválidas."
             });
+        }
 
         var (token, expiracion) = tokens.Generar(sesion);
 

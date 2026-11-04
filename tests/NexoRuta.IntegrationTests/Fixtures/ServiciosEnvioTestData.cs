@@ -30,7 +30,7 @@ internal static class ServiciosEnvioTestData
         return reglas;
     }
     public static async Task<Guid> PublicarServicioAsync(NexoRutaDbContext db, Guid operador, Guid usuario,
-        decimal importeBase = 100m, decimal porKg = 10m, decimal porM3 = 200m)
+        decimal importeBase = 100m, decimal porKg = 10m, decimal porM3 = 200m, bool incluirUrgente = false)
     {
         await using var tx = await db.BeginOrJoinAsync();
         var root = await db.TarifariosOperador.SingleOrDefaultAsync(t => t.OperadorId == operador);
@@ -41,13 +41,19 @@ internal static class ServiciosEnvioTestData
             var gf = NtsGeometryServices.Instance.CreateGeometryFactory(srid: 4326);
             var polygon = gf.CreateMultiPolygon([gf.CreatePolygon([new(-56.4,-35),new(-56,-35),new(-56,-34.7),new(-56.4,-34.7),new(-56.4,-35)])]);
             zona = ZonaCobertura.Crear(operador,"Cobertura sintética Montevideo",polygon,id:operador,
-                franjasIniciales:[new(DiaSemanaIso.Lunes,new TimeOnly(9,0),new TimeOnly(18,0))]);
+                franjasIniciales:Enumerable.Range(1,7).Select(d => new FranjaEntregaInicial((DiaSemanaIso)d, new TimeOnly(0,0), new TimeOnly(23,59,59))));
             zona.Activar(zona.Version); db.ZonasCobertura.Add(zona); await db.SaveChangesAsync();
+            var snapshot = JsonSerializer.Serialize(new { zonaHoraria = zona.ZonaHoraria,
+                franjas = zona.Franjas.Select(f => new { estado = f.Estado.ToString(), diaSemanaIso = (int)f.DiaSemanaIso,
+                    horaInicio = f.HoraInicio.ToString("HH:mm:ss"), horaFin = f.HoraFin.ToString("HH:mm:ss") }) });
+            db.Add(new ZonaCoberturaRevision(operador,zona.Id,zona.RevisionActual,zona.Version,DateTimeOffset.UtcNow,usuario,snapshot));
+            await db.SaveChangesAsync();
         }
         if (root is null) { root=TarifarioOperador.Crear(operador); db.TarifariosOperador.Add(root); await db.SaveChangesAsync(); }
         var version = VersionTarifario.CrearBorrador(operador,usuario);
         db.VersionesTarifario.Add(version); await db.SaveChangesAsync();
-        version.ReemplazarConfiguracion(0,[new(operador,ModalidadTarifaria.Estandar,importeBase,porKg,porM3,[])]);
+        ModalidadTarifaria[] modalidades = incluirUrgente ? [ModalidadTarifaria.Estandar, ModalidadTarifaria.Urgente] : [ModalidadTarifaria.Estandar];
+        version.ReemplazarConfiguracion(0, modalidades.Select(modalidad => new TarifaZonaModalidadConfiguracion(operador, modalidad, importeBase, porKg, porM3, [])));
         await db.SaveChangesAsync(); version.Publicar(version.VersionConcurrencia,root.UltimoNumeroPublicacion+1,usuario,new HashSet<Guid>{operador});
         await db.SaveChangesAsync(); root.Publicar(version); await db.SaveChangesAsync(); await tx.CommitAsync(); return version.Id;
     }

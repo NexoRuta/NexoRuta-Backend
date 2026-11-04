@@ -57,9 +57,9 @@ public sealed class Envio
         if (destino is EstadoEnvio.Entregado or EstadoEnvio.EntregaPendienteValidacion && EntregaFisicaEnUtc is null)
             throw new InvalidOperationException("Debe declararse el hecho físico antes de validar la entrega.");
         if (Version != versionEsperada) throw new InvalidOperationException("El envío cambió desde la última consulta.");
-        if (!Permite(Estado, destino) || destino == EstadoEnvio.Cancelado && EntregaFisicaEnUtc is not null)
+        if (destino == EstadoEnvio.Cancelado && EntregaFisicaEnUtc is not null)
             throw new InvalidOperationException("La transición no corresponde al estado actual del envío.");
-        Estado = destino;
+        AplicarEstado(destino);
         Version = checked(Version + 1);
     }
 
@@ -110,7 +110,7 @@ public sealed class Envio
             ? null
             : recibidoEnUtc.AddMinutes(plazoValidacionMinutos.Value);
         if (Estado != EstadoEnvio.Cancelado)
-            Estado = pruebaCompleta ? EstadoEnvio.Entregado : EstadoEnvio.EntregaPendienteValidacion;
+            AplicarEstado(pruebaCompleta ? EstadoEnvio.Entregado : EstadoEnvio.EntregaPendienteValidacion);
         Version = checked(Version + 1);
     }
 
@@ -121,7 +121,7 @@ public sealed class Envio
             throw new InvalidOperationException("La prueba requiere una entrega física pendiente y la versión actual.");
 
         var dentroDelPlazo = PlazoPruebaVenceEnUtc is null || recibidaEnUtc < PlazoPruebaVenceEnUtc;
-        if (pruebaCompleta && dentroDelPlazo) Estado = EstadoEnvio.Entregado;
+        if (pruebaCompleta && dentroDelPlazo) AplicarEstado(EstadoEnvio.Entregado);
         Version = checked(Version + 1);
         return pruebaCompleta && dentroDelPlazo;
     }
@@ -148,16 +148,10 @@ public sealed class Envio
         Version = checked(Version + 1);
     }
 
-    private static bool Permite(EstadoEnvio origen, EstadoEnvio destino) => (origen, destino) switch
+    private void AplicarEstado(EstadoEnvio destino)
     {
-        (EstadoEnvio.Admitido, EstadoEnvio.EnDeposito or EstadoEnvio.Cancelado) => true,
-        (EstadoEnvio.EnDeposito, EstadoEnvio.AsignadoRuta or EstadoEnvio.Extraviado or EstadoEnvio.Cancelado) => true,
-        (EstadoEnvio.AsignadoRuta, EstadoEnvio.EnTransito or EstadoEnvio.Extraviado or EstadoEnvio.Cancelado) => true,
-        (EstadoEnvio.EnTransito, EstadoEnvio.Entregado or EstadoEnvio.EntregaPendienteValidacion or EstadoEnvio.NoEntregado or EstadoEnvio.Extraviado or EstadoEnvio.Cancelado) => true,
-        (EstadoEnvio.NoEntregado, EstadoEnvio.Reprogramado or EstadoEnvio.EnDevolucion or EstadoEnvio.Cancelado) => true,
-        (EstadoEnvio.Reprogramado, EstadoEnvio.AsignadoRuta or EstadoEnvio.Cancelado) => true,
-        (EstadoEnvio.EnDevolucion, EstadoEnvio.Devuelto or EstadoEnvio.Extraviado or EstadoEnvio.Cancelado) => true,
-        (EstadoEnvio.EntregaPendienteValidacion, EstadoEnvio.Entregado or EstadoEnvio.EntregaSinValidacion) => true,
-        _ => false
-    };
+        if (!TransicionesEstadoEnvio.Permite(Estado, destino))
+            throw new InvalidOperationException("La transición no corresponde al estado actual del envío.");
+        Estado = destino;
+    }
 }

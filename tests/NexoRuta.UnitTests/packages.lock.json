@@ -45,6 +45,11 @@
         "resolved": "3.1.4",
         "contentHash": "5mj99LvCqrq3CNi06xYdyIAXOEh+5b33F2nErCzI5zWiDdLHXiPXEWFSUAF8zlIv0ZWqjZNCwHTQeAPYbF3pCg=="
       },
+      "BitMiracle.LibJpeg.NET": {
+        "type": "Transitive",
+        "resolved": "1.5.324",
+        "contentHash": "2lcsK3+JwJueFIOdii/Dz8bFI2OOWHFn1m1co050CPr6yBdQhAhO5Nq/zsj4f/oj7TBo29T7k0qHMsUJzgKJiw=="
+      },
       "Confluent.Kafka": {
         "type": "Transitive",
         "resolved": "2.15.1",
@@ -867,6 +872,7 @@
       "nexoruta.infrastructure": {
         "type": "Project",
         "dependencies": {
+          "BitMiracle.LibJpeg.NET": "[1.5.324, )",
           "Microsoft.AspNetCore.DataProtection.EntityFrameworkCore": "[10.0.12, )",
           "Microsoft.AspNetCore.Identity.EntityFrameworkCore": "[10.0.12, )",
           "Microsoft.EntityFrameworkCore.Relational": "[10.0.12, )",

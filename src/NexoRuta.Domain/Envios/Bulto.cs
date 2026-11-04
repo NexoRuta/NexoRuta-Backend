@@ -52,6 +52,12 @@ public sealed class Bulto
         AltoCentimetros = altoCentimetros;
     }
 
+    public void RegistrarCotejoDeposito()
+    {
+        if (Custodia != EstadoCustodiaBulto.Deposito) throw new InvalidOperationException("El recotejo requiere custodia de depósito.");
+        Version = checked(Version + 1);
+    }
+
     public void RecibirEnDeposito(bool devolucionPosterior = false)
     {
         if (Custodia == EstadoCustodiaBulto.Deposito) return;

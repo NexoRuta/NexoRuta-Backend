@@ -222,7 +222,7 @@ public sealed partial class OperacionesRepartoHttpTests(PostgresFixture postgres
             await cancelacion.SaveChangesAsync();
         }
         var entrega = await Aplicar(client, hoja, Operacion(Guid.NewGuid(), 4, "EntregaFisica", parada.EnvioId, parada.EnvioVersion));
-        var fotoId = Guid.NewGuid(); var bytes = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==");
+        var fotoId = Guid.NewGuid(); var bytes = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==");
         var uri = $"/api/mobile/jornadas/{hoja.JornadaId}/evidencias/{fotoId}";
         var evidencia = new { parada.EnvioId, Tipo = "Foto", Contenido = bytes };
         using var subir = await client.PutAsJsonAsync(uri, evidencia); Assert.Equal(HttpStatusCode.NoContent, subir.StatusCode);

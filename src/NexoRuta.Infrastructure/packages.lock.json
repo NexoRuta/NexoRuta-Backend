@@ -2,6 +2,12 @@
   "version": 1,
   "dependencies": {
     "net10.0": {
+      "BitMiracle.LibJpeg.NET": {
+        "type": "Direct",
+        "requested": "[1.5.324, )",
+        "resolved": "1.5.324",
+        "contentHash": "2lcsK3+JwJueFIOdii/Dz8bFI2OOWHFn1m1co050CPr6yBdQhAhO5Nq/zsj4f/oj7TBo29T7k0qHMsUJzgKJiw=="
+      },
       "Microsoft.AspNetCore.DataProtection.EntityFrameworkCore": {
         "type": "Direct",
         "requested": "[10.0.12, )",

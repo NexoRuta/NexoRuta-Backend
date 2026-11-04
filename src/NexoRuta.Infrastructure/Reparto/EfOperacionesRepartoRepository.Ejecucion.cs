@@ -55,6 +55,9 @@ public sealed partial class EfOperacionesRepartoRepository
             Exigir(hoja.Paradas.Where(p => p.Activa && !incompletos.Contains(p))
                 .All(p => envios.Single(e => e.Id == p.EnvioId).Estado == EstadoEnvio.AsignadoRuta),
                 "Un envío cambió durante la preparación de carga.");
+            Exigir(hoja.Paradas.Count(p => p.Activa) <= politica.MaximoParadas, "La ruta supera el máximo de paradas configurado.");
+            foreach (var parada in hoja.Paradas.Where(p => p.Activa && !incompletos.Contains(p)))
+                await RestriccionesTemporales.ValidarAsync(db, hoja.OperadorId, parada.EnvioId, parada.LlegadaEstimadaUtc, parada.ServicioMinutos, ct);
             foreach (var parada in incompletos)
             {
                 hoja.SuspenderParada(parada.EnvioId, "Carga incompleta: requiere revisión en depósito; no se cambió el estado comercial.");

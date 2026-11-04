@@ -214,6 +214,9 @@ public sealed partial class EfRutasRepository
         var propias = bultos.Where(b => b.EnvioId == envioId).ToArray();
         if (propias.Any(b => b.Custodia != EstadoCustodiaBulto.Deposito))
             throw new ConflictoRepartoException("La reasignación requiere todos los bultos físicamente recibidos en depósito; no transfiere custodia entre repartidores.");
+        foreach (var parada in destino.Paradas.Where(p => p.Activa))
+            await RestriccionesTemporales.ValidarAsync(db, operadorId, parada.EnvioId, parada.LlegadaEstimadaUtc, parada.ServicioMinutos, ct);
+        await RestriccionesTemporales.ValidarAsync(db, operadorId, envioId, datos.LlegadaEstimadaUtc, datos.ServicioMinutos ?? destino.PlanTemporal?.ServicioPredeterminadoMinutos, ct);
         var anteriores = await db.HojasRuta.Include(h => h.Paradas).Where(h => h.OperadorId == operadorId &&
             h.Paradas.Any(p => p.EnvioId == envioId && p.Activa)).ToArrayAsync(ct);
         var actual = anteriores.SingleOrDefault(h => h.Estado is EstadoHojaRuta.Despachada or EstadoHojaRuta.EnCurso);

@@ -107,7 +107,7 @@ public sealed class GeocodificacionFullStackBrowserTests(PostgresFixture postgre
                 if (!alta)
                 {
                 while(!File.Exists(Path.Combine(outputDirectory,"conflict.ready"))) {
-                    Assert.False(node.HasExited,"Browser exited before concurrency checkpoint");
+                    if (node.HasExited) Assert.Fail("Browser exited before concurrency checkpoint: " + await output + await error);
                     await Task.Delay(50,timeout.Token);
                 }
                 using var concurrent=await api.PutAsJsonAsync($"/api/envios/{shipment}/destino",new {
@@ -136,7 +136,13 @@ public sealed class GeocodificacionFullStackBrowserTests(PostgresFixture postgre
             else
             {
             var saved = await db.Direcciones.SingleAsync();
-            Assert.Equal(6, saved.Version); Assert.Equal(-34.91, saved.Latitud); Assert.Equal(-56.21, saved.Longitud);
+            using var marker = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "real-marker-result.json")));
+            var selected = marker.RootElement.GetProperty("finalPoint");
+            Assert.InRange(Math.Abs(selected.GetProperty("lat").GetDouble() + 34.91), 0, 0.00001);
+            Assert.InRange(Math.Abs(selected.GetProperty("lon").GetDouble() + 56.21), 0, 0.00001);
+            Assert.Equal(6, saved.Version);
+            Assert.Equal(selected.GetProperty("lat").GetDouble(), saved.Latitud);
+            Assert.Equal(selected.GetProperty("lon").GetDouble(), saved.Longitud);
             Assert.Equal("Cambio 123", saved.Descripcion); Assert.Equal(commerce.UsuarioId, saved.ConfirmadaPorUsuarioId);
             Assert.Equal(3, await db.Database.SqlQuery<int>($"SELECT count(*)::integer AS \"Value\" FROM public.\"UsoGeocodificacion\"").SingleAsync());
             Assert.Equal(new[] { "Primera", "Cambio", "Fallo" }, provider.Queries.ToArray());

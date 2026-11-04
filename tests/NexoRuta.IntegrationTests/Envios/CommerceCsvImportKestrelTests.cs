@@ -401,9 +401,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             using var vehicleJson = JsonDocument.Parse(await vehicleResponse.Content.ReadAsStringAsync());
             var vehicleId = vehicleJson.RootElement.GetProperty("id").GetGuid();
             await VerifyVehicleAsync(api, vehicleId);
-            using var received = await api.PostAsJsonAsync($"/api/deposito/envios/{shipmentId}/recepcion", new { Version = 0 });
-            Assert.True(received.StatusCode == HttpStatusCode.NoContent,
-                $"Deposit receipt failed: {(int)received.StatusCode} {await received.Content.ReadAsStringAsync()}");
+            await RecepcionTestData.RecibirInicialAsync(database, api, shipmentId);
 
             var fecha = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow,
                 TimeZoneInfo.FindSystemTimeZoneById("America/Montevideo")).DateTime);
@@ -452,7 +450,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             Assert.True(File.Exists(chromium), "A cached Chromium executable is required for this isolated browser check.");
             browser = await ChromiumPage.StartAsync(chromium, Path.Combine(tempRoot, "chrome-profile"), backofficeUrl + "/ingresar");
             await browser.LoginAsync(operatorEmail, AuthenticationTestData.Password, "/");
-            await browser.NavigateAsync($"{backofficeUrl}/rutas?fecha={fecha:yyyy-MM-dd}");
+            await browser.NavigateAsync($"{backofficeUrl}/rutas/{routeId:D}?fecha={fecha:yyyy-MM-dd}");
             await browser.WaitForAsync("document.body.innerText.includes('Requiere reprogramación a una ruta nueva')");
             Assert.False(await browser.EvaluateBooleanAsync("Array.from(document.querySelectorAll('button')).some(button=>button.innerText.includes('Reasignar a esa ruta'))"),
                 "A shipment awaiting reprogramming must not expose active-route reassignment.");
@@ -666,10 +664,8 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             Assert.Equal(HttpStatusCode.OK, targetVehicleResponse.StatusCode);
             using var targetVehicleJson = JsonDocument.Parse(await targetVehicleResponse.Content.ReadAsStringAsync());
 
-            using var received = await api.PostAsJsonAsync($"/api/deposito/envios/{shipmentId}/recepcion", new { Version = 0 });
-            Assert.Equal(HttpStatusCode.NoContent, received.StatusCode);
-            using var receivedCandidate = await api.PostAsJsonAsync($"/api/deposito/envios/{planningCandidateId}/recepcion", new { Version = 0 });
-            Assert.Equal(HttpStatusCode.NoContent, receivedCandidate.StatusCode);
+            await RecepcionTestData.RecibirInicialAsync(database, api, shipmentId);
+            await RecepcionTestData.RecibirInicialAsync(database, api, planningCandidateId);
             var fecha = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow,
                 TimeZoneInfo.FindSystemTimeZoneById("America/Montevideo")).DateTime).AddDays(-1);
             var fechaSeleccionada = fecha.AddDays(1);
@@ -864,10 +860,10 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
                 pushCountBefore = await db.OutboxMessages.CountAsync(x => x.EnvioId == shipmentId && x.Destino == OutboxDestino.PushFcm);
             }
 
-            await browser.NavigateAsync($"{backofficeUrl}/rutas?fecha={fecha:yyyy-MM-dd}&pestana=rutas&rutaSeleccionadaId={sourceRouteId:D}");
+            await browser.NavigateAsync($"{backofficeUrl}/rutas/{sourceRouteId:D}?fecha={fecha:yyyy-MM-dd}");
             await browser.WaitForAsync("document.querySelector('form select[name=destino]') !== null");
-            Assert.True(await browser.EvaluateBooleanAsync("new URLSearchParams(location.search).get('fecha') !== null && document.querySelector('#buscar-ruta')?.value === '' && document.querySelector('.nr-route-card.is-selected h3')?.innerText.includes('source courier') === true"),
-                "The reference screenshot should show the unfiltered daily route list and the selected source route.");
+            Assert.True(await browser.EvaluateBooleanAsync("new URLSearchParams(location.search).get('fecha') !== null && document.querySelector('.nr-route-detail-heading')?.innerText.includes('source courier') === true && document.querySelector('form select[name=destino]') !== null"),
+                "The detail should identify the requested source route and expose its contextual reassignment form.");
             await browser.SetViewportAsync(1513, 1039, mobile: false);
             Assert.True(await browser.EvaluateBooleanAsync("document.querySelector('#backofficeNavigation a.active')?.getAttribute('href')==='/rutas'"),
                 "Daily operation should reuse the shared Rutas navigation entry.");
@@ -881,7 +877,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             var routeFonts = string.Join(Environment.NewLine, new[]
             {
                 $"Route heading: {await browser.GetPlatformFontsAsync(".nr-routes-heading h1")}",
-                $"Route card: {await browser.GetPlatformFontsAsync(".nr-route-card h3")}",
+                $"Route card: {await browser.GetPlatformFontsAsync(".nr-route-detail-heading h2")}",
                 $"Stop identity: {await browser.GetPlatformFontsAsync(".nr-stops-table tbody tr td:nth-child(2)")}",
                 $"Stop state: {await browser.GetPlatformFontsAsync(".nr-shipment-state .nr-state-pill")}",
                 $"Stop actions: {await browser.GetPlatformFontsAsync(".nr-stops-table tbody tr td:last-child summary")}",
@@ -902,41 +898,52 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             await browser.CaptureScreenshotAsync(ScreenshotPath("shell-menu-movil-abierto-completo.png"), fullPage: true);
             await browser.ToggleBackofficeNavigationWithKeyboardAsync(open: false);
             await browser.WaitForAsync("document.querySelector('#backofficeNavigation')?.classList.contains('show')===false");
+            // The global decision count belongs to Depósito; route-specific actions stay in detail.
+            await browser.NavigateAsync($"{backofficeUrl}/deposito?fecha={fecha:yyyy-MM-dd}&envioSeleccionadoId={shipmentId:D}");
+            await browser.WaitForAsync("document.querySelector('#decisiones-operativas .nr-count-pill') !== null");
             var countMetrics = await browser.EvaluateStringAsync("JSON.stringify((()=>{const pill=document.querySelector('#decisiones-operativas .nr-section-heading .nr-count-pill');const style=pill&&getComputedStyle(pill);return {exists:Boolean(pill),className:pill?.className,whiteSpace:style?.whiteSpace,scrollWidth:pill?.scrollWidth,clientWidth:pill?.clientWidth,scrollHeight:pill?.scrollHeight,clientHeight:pill?.clientHeight,rect:pill&&{width:pill.getBoundingClientRect().width,height:pill.getBoundingClientRect().height},text:pill?.innerText};})())");
             Assert.True(await browser.EvaluateBooleanAsync("(()=>{const pill=document.querySelector('#decisiones-operativas .nr-section-heading .nr-count-pill');return Boolean(pill&&getComputedStyle(pill).whiteSpace==='nowrap'&&pill.scrollWidth<=pill.clientWidth+1);})()"),
                 $"The operational loss-availability count should remain on one readable line on mobile. {countMetrics}");
             await browser.CaptureScreenshotAsync(ScreenshotPath("operacion-diaria-320x900.png"));
             await browser.CaptureScreenshotAsync(ScreenshotPath("operacion-diaria-320x900-full.png"), fullPage: true);
+            await browser.NavigateAsync($"{backofficeUrl}/rutas/{sourceRouteId:D}?fecha={fecha:yyyy-MM-dd}");
+            await browser.WaitForAsync("document.querySelector('form select[name=destino]') !== null");
             Assert.True(await browser.EvaluateBooleanAsync("(()=>{const page=document.querySelector('.nr-routes-page');const family=getComputedStyle(page).fontFamily;const table=document.querySelector('.nr-stops-table');const row=table?.querySelector('tbody tr');const summary=row?.querySelector('td:last-child summary');const rendered=[...document.querySelectorAll('.nr-route-card h3,.nr-stops-table th,.nr-stops-table td,.nr-route-detail-panel button')];return family.includes('sans-serif')&&rendered.every(x=>getComputedStyle(x).fontFamily===family)&&Boolean(row&&row.innerText.includes('Versión del envío')&&row.querySelector('.nr-stop-shipment-id')&&row.querySelector('.nr-shipment-state .nr-state-pill')&&row.querySelector('.nr-package-chips .nr-state-pill')&&summary?.innerText.includes('Reasignar')&&summary.closest('details')?.querySelector('form select[name=destino]'));})()"),
                 "Daily operation should expose one semantic responsive stop row with shipment identity, state, custody and contextual actions.");
-            Assert.True(await browser.EvaluateBooleanAsync("(()=>{const row=document.querySelector('.nr-stops-table tbody tr');const wrap=document.querySelector('.nr-stops-table-wrap');const cells=[...row.cells];const bounds=e=>{const r=e.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth+1};return Boolean(row&&wrap&&document.documentElement.scrollWidth<=innerWidth&&wrap.scrollWidth<=wrap.clientWidth+1&&bounds(row)&&cells.every(bounds)&&row.innerText.includes('DEC07 browser reassignment recipient')&&row.innerText.includes('Envío')&&row.innerText.includes('17:30')&&row.innerText.includes('Asignado a ruta')&&row.innerText.includes('En depósito')&&row.innerText.includes('Reasignar')&&row.innerText.includes('Confirmar extravío'));})()"),
-                "At 320 CSS pixels, each stop card must keep recipient, shipment ID, order/time, shipment state, physical custody and authorized actions together without horizontal scrolling.");
+            Assert.Equal(shipmentId.ToString("D"), await browser.EvaluateStringAsync("document.querySelector('.nr-stop-shipment-id code')?.textContent.trim() || ''"));
+            var stopMetrics = await browser.EvaluateStringAsync("JSON.stringify((()=>{const r=document.querySelector('.nr-stops-table tbody tr'),w=document.querySelector('.nr-stops-table-wrap');return {text:r?.innerText,row:r?.getBoundingClientRect().toJSON(),cells:[...r.cells].map(c=>c.getBoundingClientRect().toJSON()),width:document.documentElement.scrollWidth,viewport:innerWidth,scrollWidth:w?.scrollWidth,clientWidth:w?.clientWidth};})())");
+            Assert.True(await browser.EvaluateBooleanAsync("(()=>{const row=document.querySelector('.nr-stops-table tbody tr');const wrap=document.querySelector('.nr-stops-table-wrap');const cells=[...row.cells];const bounds=e=>{const r=e.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth+1};return Boolean(row&&wrap&&document.documentElement.scrollWidth<=innerWidth&&wrap.scrollWidth<=wrap.clientWidth+1&&bounds(row)&&cells.every(bounds)&&row.innerText.includes('DEC07 browser reassignment recipient')&&row.innerText.includes('Identificador del envío')&&row.innerText.includes('17:30')&&row.innerText.includes('Asignado a ruta')&&row.innerText.includes('En depósito')&&row.innerText.includes('Reasignar')&&row.innerText.includes('Confirmar extravío'));})()"),
+                $"At 320 CSS pixels, each stop card must keep recipient, shipment ID, order/time, shipment state, physical custody and authorized actions together without horizontal scrolling. {stopMetrics}");
             await browser.CaptureScreenshotAsync(ScreenshotPath("operacion-diaria-320x900-parada-completa.png"), fullPage: true);
             Assert.True(await browser.ToggleFirstRouteActionWithSpaceAsync(),
                 "Contextual route actions should open through the keyboard on mobile.");
-            Assert.True(await browser.EvaluateBooleanAsync("(()=>{const d=[...document.querySelectorAll('.nr-stops-table tbody tr details')].find(x=>x.innerText.includes('Reasignar'));if(!d?.open)return false;const f=d.querySelector('form'),s=f?.querySelector('select[name=destino]'),h=f?.querySelector('input[name=hora]'),m=f?.querySelector('textarea[name=motivo]');if(!s||!h||!m)return false;s.value=[...s.options].find(o=>o.value)?.value||'';h.value='17:30';m.value='Reasignación de prueba visual';return s.value!==''&&f.checkValidity()&&document.documentElement.scrollWidth<=innerWidth&&[s,h,m].every(e=>{const r=e.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth+1;});})()"),
-                "The existing reassignment form should remain keyboard reachable, valid and within a 320 CSS-pixel viewport.");
+            var reassignmentFits = await browser.EvaluateBooleanAsync("(()=>{const d=[...document.querySelectorAll('.nr-stops-table tbody tr details')].find(x=>x.innerText.includes('Reasignar'));if(!d?.open)return false;const f=d.querySelector('form'),s=f?.querySelector('select[name=destino]'),h=f?.querySelector('input[name=hora]'),m=f?.querySelector('textarea[name=motivo]');if(!s||!h||!m)return false;s.value=[...s.options].find(o=>o.value)?.value||'';h.value='17:30';m.value='Reasignación de prueba visual';return s.value!==''&&f.checkValidity()&&document.documentElement.scrollWidth<=innerWidth&&[s,h,m].every(e=>{const r=e.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth+1;});})()");
+            var reassignmentMetrics = await browser.EvaluateStringAsync("JSON.stringify((()=>{const d=[...document.querySelectorAll('.nr-stops-table tbody tr details')].find(x=>x.innerText.includes('Reasignar')),f=d?.querySelector('form');return {open:d?.open,width:document.documentElement.scrollWidth,viewport:innerWidth,fields:f&&[...f.elements].map(e=>({name:e.name,value:e.type==='hidden'?null:e.value,valid:e.checkValidity(),message:e.validationMessage,rect:e.getBoundingClientRect().toJSON()}))};})())");
+            await browser.CaptureScreenshotAsync(ScreenshotPath("reassign-form-diagnostic.png"), fullPage:true);
+            Assert.True(reassignmentFits, $"The existing reassignment form should remain keyboard reachable, valid and within a 320 CSS-pixel viewport. {reassignmentMetrics}");
             await browser.CaptureScreenshotAsync(ScreenshotPath("operacion-diaria-320x900-reasignar-abierta.png"), fullPage: true);
-            await browser.NavigateAsync($"{backofficeUrl}/rutas?fecha={fecha:yyyy-MM-dd}&pestana=rutas&rutaSeleccionadaId={sourceRouteId:D}");
+            await browser.NavigateAsync($"{backofficeUrl}/rutas/{sourceRouteId:D}?fecha={fecha:yyyy-MM-dd}");
             await browser.WaitForAsync("document.querySelector('.nr-stops-table tbody tr details form textarea[name=MotivoExtravio]') !== null");
             await browser.SetViewportAsync(320, 900, mobile: true);
             Assert.True(await browser.EvaluateBooleanAsync("(()=>{const d=[...document.querySelectorAll('.nr-stops-table tbody tr details')].find(x=>x.innerText.includes('Confirmar extravío'));if(!d)return false;d.open=true;const f=d.querySelector('form'),m=f.querySelector('textarea[name=MotivoExtravio]');m.value='Inspección visual, sin enviar';return !f.checkValidity()&&document.documentElement.scrollWidth<=innerWidth&&[...f.querySelectorAll('textarea,input,button')].every(e=>{const r=e.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth+1;});})()"),
                 "The unsubmitted loss confirmation form must expose its required validation and fit the narrow viewport.");
             await browser.CaptureScreenshotAsync(ScreenshotPath("operacion-diaria-320x900-extravio-abierto.png"), fullPage: true);
             await browser.SetViewportAsync(1513, 1039, mobile: false);
+            await browser.ClickLinkContainingKeyboardAsync("Volver a rutas del día");
+            await browser.WaitForAsync("location.pathname === '/rutas' && document.querySelector('#buscar-ruta') !== null");
             Assert.True(await browser.EvaluateBooleanAsync("(()=>{const a=document.querySelector('a[aria-label=\"Día siguiente\"]');if(!a)return false;a.click();return true;})()"));
             await browser.WaitForAsync($"new URLSearchParams(location.search).get('fecha') === '{fecha.AddDays(1).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}'");
-            await browser.NavigateAsync($"{backofficeUrl}/rutas?fecha={fecha:yyyy-MM-dd}&pestana=rutas&rutaSeleccionadaId={sourceRouteId:D}");
+            await browser.NavigateAsync($"{backofficeUrl}/rutas/{sourceRouteId:D}?fecha={fecha:yyyy-MM-dd}");
             await browser.WaitForAsync("document.querySelector('form select[name=destino]') !== null");
 
-            await browser.NavigateAsync($"{backofficeUrl}/rutas?fecha={fecha:yyyy-MM-dd}&pestana=rutas&buscarRuta=DEC07&filtroRuta=Todas&rutaSeleccionadaId={sourceRouteId:D}");
-            await browser.WaitForAsync("document.querySelector('form select[name=destino]') !== null");
-            Assert.True(await browser.EvaluateBooleanAsync("new URLSearchParams(location.search).get('fecha') !== null && document.querySelector('#buscar-ruta')?.value === 'DEC07' && document.querySelector('.nr-route-card.is-selected h3')?.innerText.includes('source courier') === true"),
-                "The selected route, search and date context should be rendered from the current URL.");
+            await browser.NavigateAsync($"{backofficeUrl}/rutas?fecha={fecha:yyyy-MM-dd}&buscarRuta=DEC07&filtroRuta=Todas");
+            await browser.WaitForAsync("document.querySelector('.nr-route-card-list') !== null");
+            Assert.True(await browser.EvaluateBooleanAsync("new URLSearchParams(location.search).get('fecha') !== null && document.querySelector('#buscar-ruta')?.value === 'DEC07' && Array.from(document.querySelectorAll('.nr-route-card h3')).some(e=>e.innerText.includes('source courier'))"),
+                "The route list should retain the requested search/date and show the source route.");
             await browser.ClickLinkContainingKeyboardAsync("Despachadas");
             await browser.WaitForAsync("new URLSearchParams(location.search).get('filtroRuta') === 'Despachada' && document.querySelector('.nr-route-list-panel > header span')?.innerText === '1 de 2'");
-            Assert.True(await browser.EvaluateBooleanAsync("document.querySelector('#buscar-ruta')?.value === 'DEC07' && document.querySelector('.nr-route-card.is-selected h3')?.innerText.includes('source courier') === true"),
-                "Changing the route filter should retain its search and selected-route context.");
+            Assert.True(await browser.EvaluateBooleanAsync("document.querySelector('#buscar-ruta')?.value === 'DEC07' && Array.from(document.querySelectorAll('.nr-route-card h3')).some(e=>e.innerText.includes('source courier'))"),
+                "Changing the route filter should retain its search/date and keep the matching source route available.");
             await browser.ClickLinkContainingKeyboardAsync("Todas");
             await browser.WaitForAsync("new URLSearchParams(location.search).get('filtroRuta') === 'Todas' && document.querySelector('.nr-route-list-panel > header span')?.innerText === '2 de 2'");
             await browser.SetViewportAsync(320, 900, mobile: true);
@@ -944,11 +951,13 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
                 "Backoffice routes horizontally overflow at 320 CSS pixels.");
             await browser.SetViewportAsync(1513, 1039, mobile: false);
             Assert.True(await browser.EvaluateBooleanAsync($"(()=>{{const a=document.querySelector('.nr-route-card[href*=\\\"{targetRouteId:D}\\\"]');if(!a)return false;a.click();return true;}})()"));
-            await browser.WaitForAsync($"new URLSearchParams(location.search).get('rutaSeleccionadaId') === '{targetRouteId:D}'");
-            Assert.True(await browser.EvaluateBooleanAsync($"document.querySelector('#buscar-ruta')?.value === 'DEC07' && document.querySelector('.nr-route-card.is-selected h3')?.innerText.includes('destination courier') === true"),
-                "Selecting a route should preserve the search/date context and update the detail panel.");
+            await browser.WaitForAsync($"location.pathname === '/rutas/{targetRouteId:D}'");
+            Assert.True(await browser.EvaluateBooleanAsync($"new URLSearchParams(location.search).get('buscarRuta') === 'DEC07' && document.querySelector('.nr-route-detail-heading')?.innerText.includes('destination courier') === true"),
+                "Selecting a route should preserve search/date and navigate to the matching detail page.");
+            await browser.ClickLinkContainingKeyboardAsync("Volver a rutas del día");
+            await browser.WaitForAsync("location.pathname === '/rutas' && document.querySelector('.nr-route-card-list') !== null");
             Assert.True(await browser.EvaluateBooleanAsync($"(()=>{{const a=document.querySelector('.nr-route-card[href*=\\\"{sourceRouteId:D}\\\"]');if(!a)return false;a.click();return true;}})()"));
-            await browser.WaitForAsync($"new URLSearchParams(location.search).get('rutaSeleccionadaId') === '{sourceRouteId:D}'");
+            await browser.WaitForAsync($"location.pathname === '/rutas/{sourceRouteId:D}'");
             await browser.EvaluateBooleanAsync("(()=>{const s=document.querySelector('form select[name=destino]');if(!s)return false;s.closest('details').open=true;return true;})()");
             await browser.VerifyKeyboardFocusAsync();
 
@@ -984,10 +993,15 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             Assert.True(submittedTwice, "The form must mark its first submit and suppress a repeated submit.");
             await browser.WaitForAsync("document.querySelector('.nr-routes-alert.is-success')?.innerText.includes('custodia física no cambió') === true");
 
-            await browser.NavigateAsync($"{backofficeUrl}/rutas?fecha={fecha:yyyy-MM-dd}&pestana=deposito");
-            await browser.WaitForAsync($"document.querySelector('.nr-receipt-card input[name=envioId][value=\\\"{receiptShipmentId:D}\\\"]') !== null");
-            await browser.ClickReceiptForShipmentKeyboardAsync(receiptShipmentId);
-            await browser.WaitForAsync("document.querySelector('.nr-routes-alert.is-success')?.innerText.includes('Recepción de los bultos confirmada en depósito') === true");
+            await browser.NavigateAsync($"{backofficeUrl}/deposito?fecha={fecha:yyyy-MM-dd}&envioSeleccionadoId={receiptShipmentId:D}");
+            await browser.WaitForAsync("document.querySelector('.nr-selected-shipment a[href^=\"/deposito/recepcion\"]') !== null");
+            var receiptHref = await browser.EvaluateStringAsync("document.querySelector('.nr-selected-shipment a[href^=\"/deposito/recepcion\"]')?.getAttribute('href') || ''");
+            Assert.StartsWith("/deposito/recepcion?codigo=", receiptHref, StringComparison.Ordinal);
+            await browser.NavigateAsync(backofficeUrl + receiptHref);
+            await browser.WaitForAsync("document.querySelector('#cotejar-bulto') !== null");
+            Assert.Contains("físicamente presente", await browser.EvaluateStringAsync("document.querySelector('#cotejar-bulto')?.innerText || ''"));
+            await browser.ClickButtonContainingKeyboardAsync("Confirmar recepción y cotejo");
+            await browser.WaitForAsync("document.querySelector('[role=status]')?.innerText.includes('Recepción completa') === true");
             await using (var afterBrowserReceipt = database.CreateDbContext())
             {
                 var receivedShipment = await afterBrowserReceipt.Envios.SingleAsync(x => x.Id == receiptShipmentId);
@@ -1155,8 +1169,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             using var vehicleJson = JsonDocument.Parse(await vehicleResponse.Content.ReadAsStringAsync());
             var vehicleId = vehicleJson.RootElement.GetProperty("id").GetGuid();
             await VerifyVehicleAsync(api, vehicleId);
-            using var received = await api.PostAsJsonAsync($"/api/deposito/envios/{shipmentId}/recepcion", new { Version = 0 });
-            Assert.Equal(HttpStatusCode.NoContent, received.StatusCode);
+            await RecepcionTestData.RecibirInicialAsync(database, api, shipmentId);
 
             var date = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow,
                 TimeZoneInfo.FindSystemTimeZoneById("America/Montevideo")).DateTime);
@@ -1230,7 +1243,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             Assert.True(File.Exists(chromium), "A cached Chromium executable is required for this isolated browser check.");
             browser = await ChromiumPage.StartAsync(chromium, Path.Combine(tempRoot, "chrome-profile"), backofficeUrl + "/ingresar");
             await browser.LoginAsync(dispatcherEmail, AuthenticationTestData.Password, "/");
-            await browser.NavigateAsync($"{backofficeUrl}/rutas?fecha={date:yyyy-MM-dd}");
+            await browser.NavigateAsync($"{backofficeUrl}/rutas/{routeId:D}?fecha={date:yyyy-MM-dd}");
             await browser.WaitForAsync("document.body.innerText.includes('No se puede reprogramar ni realizar otra tentativa')");
             Assert.True(await browser.EvaluateBooleanAsync("document.querySelector('textarea[name=MotivoDevolucion][maxlength=\\\"500\\\"]') !== null"));
             Assert.True(await browser.EvaluateBooleanAsync("document.querySelector('input[name=ConfirmarDevolucion][required]') !== null"));
@@ -1266,14 +1279,14 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
 
             adminBrowser = await ChromiumPage.StartAsync(chromium, Path.Combine(tempRoot, "chrome-admin-profile"), backofficeUrl + "/ingresar");
             await adminBrowser.LoginAsync(operatorEmail, AuthenticationTestData.Password, "/");
-            await adminBrowser.NavigateAsync($"{backofficeUrl}/rutas?fecha={date:yyyy-MM-dd}");
+            await adminBrowser.NavigateAsync($"{backofficeUrl}/deposito?fecha={date:yyyy-MM-dd}&envioSeleccionadoId={shipmentId:D}");
             await adminBrowser.WaitForAsync("document.querySelector('form[action*=\\\"ConfirmarExtravio\\\"]') !== null");
             Assert.True(await adminBrowser.EvaluateBooleanAsync(
                 "document.querySelector('form[action*=\\\"ConfirmarExtravio\\\"] textarea[name=MotivoExtravio][required]') !== null"));
             await adminBrowser.DisposeAsync();
             adminBrowser = null;
 
-            await browser.NavigateAsync($"{backofficeUrl}/rutas?fecha={date:yyyy-MM-dd}");
+            await browser.NavigateAsync($"{backofficeUrl}/deposito?fecha={date:yyyy-MM-dd}&envioSeleccionadoId={shipmentId:D}");
             await browser.WaitForAsync("document.body.innerText.includes('Confirmar extravío')");
             Assert.True(await browser.EvaluateBooleanAsync("document.querySelector('form[action*=\\\"ConfirmarExtravio\\\"] textarea[name=MotivoExtravio][maxlength=\\\"500\\\"][required]') !== null"));
             Assert.True(await browser.EvaluateBooleanAsync("document.querySelector('form[action*=\\\"ConfirmarExtravio\\\"] input[name=ConfirmarExtravio][required]') !== null"));
@@ -1607,7 +1620,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             await EvaluateAsync("document.querySelector('form.nr-creation-form button[type=submit]').click();true");
             await WaitForAsync("document.querySelector('.nr-price-review') !== null");
             await EvaluateAsync("document.querySelector('form.nr-creation-form button[type=submit]').click();true");
-            await WaitForAsync("document.querySelector('.nr-admission-success') !== null");
+            await WaitForAsync("/^\\/envios\\/[0-9a-f-]{36}$/i.test(location.pathname) && new URLSearchParams(location.search).get('creado') === 'true' && document.querySelector('h1')?.innerText === 'Detalle del envío' && document.body.innerText.includes('BROWSER-INDIVIDUAL')");
         }
 
         public async Task FillReturnAndSetStaleVersionAsync(string reason)
@@ -1771,11 +1784,11 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
 
         public async Task<bool> ToggleFirstRouteActionWithSpaceAsync()
         {
-            var focused = await EvaluateAsync("(()=>{const summary=document.querySelector('.nr-route-detail-panel .nr-context-action > summary');if(!summary)return false;summary.scrollIntoView({block:'center'});summary.focus();return document.activeElement===summary;})()");
+            var focused = await EvaluateAsync("(()=>{const summary=document.querySelector('.nr-stops-table td:last-child .nr-context-action > summary');if(!summary)return false;summary.scrollIntoView({block:'center'});summary.focus();return document.activeElement===summary;})()");
             if (focused.ValueKind != JsonValueKind.True) return false;
             await CallAsync("Input.dispatchKeyEvent", new { type = "keyDown", key = " ", code = "Space", text = " ", unmodifiedText = " ", windowsVirtualKeyCode = 32 });
             await CallAsync("Input.dispatchKeyEvent", new { type = "keyUp", key = " ", code = "Space", windowsVirtualKeyCode = 32 });
-            return await EvaluateBooleanAsync("document.querySelector('.nr-route-detail-panel .nr-context-action')?.open === true");
+            return await EvaluateBooleanAsync("document.querySelector('.nr-stops-table td:last-child .nr-context-action')?.open === true");
         }
 
         public async Task ScrollResultsIntoViewAsync()

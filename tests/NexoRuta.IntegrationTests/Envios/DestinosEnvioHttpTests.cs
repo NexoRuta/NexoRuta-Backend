@@ -51,7 +51,7 @@ public sealed class DestinosEnvioHttpTests(PostgresFixture postgres) : IClassFix
         var direccion = await db.Direcciones.AsNoTracking().SingleAsync(); Assert.Equal(comercio.UsuarioId, direccion.ConfirmadaPorUsuarioId);
         Assert.Equal("Seleccionada 123", direccion.Descripcion); Assert.Equal(-34.901, direccion.Latitud); Assert.Equal(-56.201, direccion.Longitud); Assert.Equal(2, direccion.Version);
         await client.SetBearerForAccessAsync(data, op.Id);
-        using var recepcion = await client.PostAsJsonAsync($"/api/deposito/envios/{envio.Id}/recepcion", new { Version = 0 }); Assert.Equal(HttpStatusCode.NoContent, recepcion.StatusCode);
+        await RecepcionTestData.RecibirInicialAsync(data, client, envio.Id);
         await client.SetBearerForAccessAsync(data, comercio.Id);
         using var posterior = await client.PutAsJsonAsync(url, new { Version = 1, Latitud = -34.1, Longitud = -56.1 }); Assert.Equal(HttpStatusCode.Conflict, posterior.StatusCode);
         using var buscarPosterior = await client.PostAsync(url + "/propuestas", null); Assert.Equal(HttpStatusCode.Conflict, buscarPosterior.StatusCode);
@@ -84,8 +84,7 @@ public sealed class DestinosEnvioHttpTests(PostgresFixture postgres) : IClassFix
         await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE public.\"Direcciones\" SET \"Latitud\"=NULL,\"Longitud\"=NULL,\"ConfirmadaEnUtc\"=NULL,\"ConfirmadaPorUsuarioId\"=NULL,\"Version\"=0 WHERE \"Id\"={envio.DireccionId}");
 
         await client.SetBearerForAccessAsync(data, operador.Id);
-        using var recepcion = await client.PostAsJsonAsync($"/api/deposito/envios/{envio.Id}/recepcion", new { Version = 0 });
-        Assert.Equal(HttpStatusCode.NoContent, recepcion.StatusCode);
+        await RecepcionTestData.RecibirInicialAsync(data, client, envio.Id);
         db.ChangeTracker.Clear();
         Assert.Equal(EstadoEnvio.EnDeposito, (await db.Envios.AsNoTracking().SingleAsync()).Estado);
         Assert.Equal(EstadoCustodiaBulto.Deposito, (await db.Bultos.AsNoTracking().SingleAsync()).Custodia);

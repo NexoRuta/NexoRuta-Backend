@@ -16,7 +16,7 @@ namespace NexoRuta.IntegrationTests.Reparto;
 public sealed partial class OperacionesRepartoHttpTests
 {
     private static readonly byte[] FotoPrueba = Convert.FromBase64String(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==");
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==");
 
     [Fact]
     public async Task FinJornadaNoBloqueaPruebaCompletaRecibidaAntesDelVencimiento()

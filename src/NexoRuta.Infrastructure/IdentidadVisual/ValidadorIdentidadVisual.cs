@@ -1,6 +1,7 @@
 using System.Net.Mail;
 using System.Text.RegularExpressions;
 using StbImageSharp;
+using System.IO.Compression;
 
 namespace NexoRuta.Infrastructure.IdentidadVisual;
 
@@ -33,6 +34,12 @@ public static partial class ValidadorIdentidadVisual
         if (contenido.Length is 0 or > MaximoLogoBytes)
             throw new ArgumentException("El logo debe tener entre 1 byte y 1 MiB.", nameof(contenido));
 
+        var imagen = ValidarImagen(contenido, MaximoDimensionLogo, MaximoPixelesLogo);
+        return new LogoIdentidadVisual(contenido.ToArray(), imagen.Tipo, imagen.Ancho, imagen.Alto);
+    }
+
+    internal static (string Tipo, int Ancho, int Alto) ValidarImagen(byte[] contenido, int maximoDimension, int maximoPixeles)
+    {
         var tipo = TipoImagen(contenido);
         if (tipo is null)
             throw new ArgumentException("El logo debe ser una imagen PNG o JPEG estática válida.", nameof(contenido));
@@ -47,14 +54,17 @@ public static partial class ValidadorIdentidadVisual
             using var stream = new MemoryStream(contenido, writable: false);
             var info = ImageInfo.FromStream(stream)
                 ?? throw new ArgumentException("El archivo no contiene una imagen válida.", nameof(contenido));
-            if (info.Width is < 1 or > MaximoDimensionLogo || info.Height is < 1 or > MaximoDimensionLogo
-                || (long)info.Width * info.Height > MaximoPixelesLogo)
+            if (info.Width < 1 || info.Width > maximoDimension || info.Height < 1 || info.Height > maximoDimension
+                || (long)info.Width * info.Height > maximoPixeles)
                 throw new ArgumentException("El logo no puede superar 2048 × 2048 píxeles.", nameof(contenido));
+
+            if (tipo == "image/png")
+                LimitarDescompresionPng(contenido, (long)info.Width * info.Height * 8 + 14L * info.Height);
 
             // Header-only parsing is insufficient: decode every pixel before persisting untrusted bytes.
             stream.Position = 0;
             _ = ImageResult.FromStream(stream);
-            return new LogoIdentidadVisual(contenido.ToArray(), tipo, info.Width, info.Height);
+            return (tipo, info.Width, info.Height);
         }
         catch (ArgumentException) { throw; }
         catch (Exception exception) when (exception is not OutOfMemoryException)
@@ -182,6 +192,30 @@ public static partial class ValidadorIdentidadVisual
                 checksum = (checksum & 1) != 0 ? (checksum >> 1) ^ 0xedb88320u : checksum >> 1;
         }
         return ~checksum;
+    }
+
+    private static void LimitarDescompresionPng(byte[] bytes, long maximo)
+    {
+        using var compressed = new MemoryStream();
+        for (var offset = 8; offset < bytes.Length;)
+        {
+            var length = checked((int)System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(offset, 4)));
+            if (bytes.AsSpan(offset + 4, 4).SequenceEqual("IDAT"u8))
+                compressed.Write(bytes, offset + 8, length);
+            offset += length + 12;
+        }
+        compressed.Position = 0;
+        using var inflater = new ZLibStream(compressed, CompressionMode.Decompress);
+        Span<byte> buffer = stackalloc byte[8192];
+        long expanded = 0;
+        int count;
+        // Bound actual inflation too: stb's PNG inflater can grow beyond the declared pixel dimensions.
+        while ((count = inflater.Read(buffer)) != 0)
+        {
+            expanded += count;
+            if (expanded > maximo) throw new ArgumentException("Los datos PNG superan las dimensiones declaradas.", nameof(bytes));
+        }
+        if (expanded == 0) throw new ArgumentException("La imagen PNG no contiene píxeles.", nameof(bytes));
     }
 
     [GeneratedRegex("^\\+?[0-9(). -]+$", RegexOptions.CultureInvariant)]

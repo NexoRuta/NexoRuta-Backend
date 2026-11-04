@@ -11,10 +11,9 @@ public sealed partial class EfOperacionesRepartoRepository
         Guid archivoId, string tipo, byte[] contenido, CancellationToken ct)
     {
         if (archivoId == Guid.Empty || envioId == Guid.Empty || tipo is not ("Foto" or "Firma")
-            || contenido is null || contenido.Length is < 16 or > 2097152
-            || !(contenido.AsSpan().StartsWith(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 })
-                || contenido.AsSpan().StartsWith(new byte[] { 255, 216, 255 })))
+            || contenido is null || contenido.Length is < 16 or > 2097152)
             throw new ArgumentException("La evidencia debe ser una foto o firma PNG/JPEG de hasta 2 MiB.");
+        EvidenciaImagenValidator.Validar(contenido);
         var hash = Convert.ToHexString(SHA256.HashData(contenido));
         await using var tx = await db.BeginOrJoinAsync(ct);
         await ContextoYBloqueo(operadorId, ct);

@@ -89,7 +89,7 @@ public sealed class CrearEnvioUseCase(IEnviosRepository repository, IUsuarioActu
                 UsuarioEmail: prepared.Admission.Contexto.UsuarioEmail,
                 OperadorNombre: prepared.Admission.Operador.Nombre,
                 ComercioNombre: prepared.Admission.Comercio.Nombre),
-            Bultos: prepared.Bultos.Select(b => new BultoDetalle(b.Codigo, b.PesoGramos,
+            Bultos: prepared.Bultos.Select(b => new BultoDetalle(b.Id, b.Codigo, b.PesoGramos,
                 b.LargoCentimetros, b.AnchoCentimetros, b.AltoCentimetros)
                 { Custodia = b.Custodia.ToString() }).ToArray(),
             CreadoEnUtc: prepared.Envio.CreadoEnUtc, Tarifa: tarifa);

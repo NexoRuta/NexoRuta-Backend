@@ -59,6 +59,11 @@
         "resolved": "3.1.4",
         "contentHash": "5mj99LvCqrq3CNi06xYdyIAXOEh+5b33F2nErCzI5zWiDdLHXiPXEWFSUAF8zlIv0ZWqjZNCwHTQeAPYbF3pCg=="
       },
+      "BitMiracle.LibJpeg.NET": {
+        "type": "Transitive",
+        "resolved": "1.5.324",
+        "contentHash": "2lcsK3+JwJueFIOdii/Dz8bFI2OOWHFn1m1co050CPr6yBdQhAhO5Nq/zsj4f/oj7TBo29T7k0qHMsUJzgKJiw=="
+      },
       "Microsoft.AspNetCore.Authentication.JwtBearer": {
         "type": "Transitive",
         "resolved": "10.0.12",
@@ -551,6 +556,11 @@
           "OpenTelemetry.Api": "[1.19.0, 2.0.0)"
         }
       },
+      "PdfPig": {
+        "type": "Transitive",
+        "resolved": "0.1.8",
+        "contentHash": "lrqrQPAwziQV2E5uImAg1i3SpxDn5XdJ8q3sjRBgEdx1quq1ZftnKNyfp3sTY0J7OxpA14ryGBSSUdoGLGCHjw=="
+      },
       "Pipelines.Sockets.Unofficial": {
         "type": "Transitive",
         "resolved": "2.2.8",
@@ -661,6 +671,11 @@
           "xunit.extensibility.core": "[2.9.3]"
         }
       },
+      "ZXing.Net": {
+        "type": "Transitive",
+        "resolved": "0.16.11",
+        "contentHash": "OZfAVu88hl87BffQ+rlWCj/vLvAhhCK4QnFaoveeF/MY8SjHNSYBQ3qyUEWlPKNgBQGh1syXhCDg10vUnCsqkg=="
+      },
       "nexoruta.api": {
         "type": "Project",
         "dependencies": {
@@ -672,7 +687,9 @@
           "OpenTelemetry.Extensions.Hosting": "[1.19.0, )",
           "OpenTelemetry.Instrumentation.AspNetCore": "[1.19.0, )",
           "OpenTelemetry.Instrumentation.Http": "[1.19.0, )",
-          "OpenTelemetry.Instrumentation.Runtime": "[1.19.0, )"
+          "OpenTelemetry.Instrumentation.Runtime": "[1.19.0, )",
+          "PdfPig": "[0.1.8, )",
+          "ZXing.Net": "[0.16.11, )"
         }
       },
       "nexoruta.application": {
@@ -691,6 +708,7 @@
       "nexoruta.infrastructure": {
         "type": "Project",
         "dependencies": {
+          "BitMiracle.LibJpeg.NET": "[1.5.324, )",
           "Microsoft.AspNetCore.DataProtection.EntityFrameworkCore": "[10.0.12, )",
           "Microsoft.AspNetCore.Identity.EntityFrameworkCore": "[10.0.12, )",
           "Microsoft.EntityFrameworkCore.Relational": "[10.0.12, )",

@@ -82,6 +82,23 @@
           "OpenTelemetry.Api": "[1.19.0, 2.0.0)"
         }
       },
+      "PdfPig": {
+        "type": "Direct",
+        "requested": "[0.1.8, )",
+        "resolved": "0.1.8",
+        "contentHash": "lrqrQPAwziQV2E5uImAg1i3SpxDn5XdJ8q3sjRBgEdx1quq1ZftnKNyfp3sTY0J7OxpA14ryGBSSUdoGLGCHjw=="
+      },
+      "ZXing.Net": {
+        "type": "Direct",
+        "requested": "[0.16.11, )",
+        "resolved": "0.16.11",
+        "contentHash": "OZfAVu88hl87BffQ+rlWCj/vLvAhhCK4QnFaoveeF/MY8SjHNSYBQ3qyUEWlPKNgBQGh1syXhCDg10vUnCsqkg=="
+      },
+      "BitMiracle.LibJpeg.NET": {
+        "type": "Transitive",
+        "resolved": "1.5.324",
+        "contentHash": "2lcsK3+JwJueFIOdii/Dz8bFI2OOWHFn1m1co050CPr6yBdQhAhO5Nq/zsj4f/oj7TBo29T7k0qHMsUJzgKJiw=="
+      },
       "Humanizer.Core": {
         "type": "Transitive",
         "resolved": "2.14.1",
@@ -502,6 +519,7 @@
       "nexoruta.infrastructure": {
         "type": "Project",
         "dependencies": {
+          "BitMiracle.LibJpeg.NET": "[1.5.324, )",
           "Microsoft.AspNetCore.DataProtection.EntityFrameworkCore": "[10.0.12, )",
           "Microsoft.AspNetCore.Identity.EntityFrameworkCore": "[10.0.12, )",
           "Microsoft.EntityFrameworkCore.Relational": "[10.0.12, )",
