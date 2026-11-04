@@ -308,7 +308,7 @@ public sealed partial class PushOutboxTests
         _ = await db.Database.SqlQuery<string>($"SELECT set_config({name}, {value}, true) AS \"Value\"").SingleAsync();
 
     private static readonly byte[] MatrixEvidenceBytes = Convert.FromBase64String(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==");
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==");
 
     private sealed record EstadoMatrizCancelacion(long Version, DateTimeOffset? EntregaFisicaEnUtc,
         DateTimeOffset? EntregaFisicaRecibidaEnUtc, DateTimeOffset? PlazoPruebaVenceEnUtc,
