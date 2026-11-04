@@ -15,6 +15,7 @@ public sealed class RedisTestServer : IAsyncDisposable
     private const string NativeVersion = "7.2.16";
 
     private readonly IContainer? container;
+    private readonly int? stableHostPort;
     private readonly bool native;
     private readonly string? nativeDirectory;
     private readonly string? nativeExecutable;
@@ -22,9 +23,10 @@ public sealed class RedisTestServer : IAsyncDisposable
     private Process? nativeProcess;
     private bool running;
 
-    private RedisTestServer(IContainer container)
+    private RedisTestServer(IContainer container, int? stableHostPort = null)
     {
         this.container = container;
+        this.stableHostPort = stableHostPort;
     }
 
     private RedisTestServer(string executable, int port, string directory)
@@ -36,7 +38,9 @@ public sealed class RedisTestServer : IAsyncDisposable
     }
 
     public string ConnectionString => container is not null
-        ? $"{container.Hostname}:{container.GetMappedPublicPort(RedisPort)}"
+        ? stableHostPort is int port
+            ? $"127.0.0.1:{port}"
+            : $"{container.Hostname}:{container.GetMappedPublicPort(RedisPort)}"
         : $"127.0.0.1:{nativePort},abortConnect=false,connectRetry=1,connectTimeout=1000";
 
     public static async Task<RedisTestServer> CreateAsync(
@@ -46,13 +50,14 @@ public sealed class RedisTestServer : IAsyncDisposable
         var mode = Environment.GetEnvironmentVariable("NEXORUTA_TEST_REDIS_MODE") ?? "docker";
         if (mode == "docker")
         {
-            var container = stableHostPort
+            var mappedHostPort = stableHostPort ? GetAvailableHostPort() : (int?)null;
+            IContainer container = mappedHostPort is int hostPortValue
                 ? new ContainerBuilder(ContainerImage)
-                    .WithPortBinding(RedisPort, GetAvailableHostPort())
+                    .WithPortBinding(RedisPort, hostPortValue)
                     .WithWaitStrategy(Wait.ForUnixContainer().UntilCommandIsCompleted("redis-cli", "ping"))
                     .Build()
                 : new RedisBuilder(ContainerImage).Build();
-            var server = new RedisTestServer(container);
+            var server = new RedisTestServer(container, mappedHostPort);
             try
             {
                 await server.StartCoreAsync(cancellationToken);
