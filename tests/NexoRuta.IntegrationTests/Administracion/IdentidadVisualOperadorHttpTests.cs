@@ -255,8 +255,7 @@ public sealed class IdentidadVisualOperadorHttpTests(PostgresFixture postgres) :
         Assert.Equal(1, queries.SnapshotReads);
 
         await redis.StartAsync();
-        using (var probe = await ConnectionMultiplexer.ConnectAsync(redisConnectionString))
-            Assert.True(probe.IsConnected);
+        await WaitForRedisReadyAsync(redisConnectionString);
 
         queries.Reset();
         using (var recoveredMiss = await client.GetAsync("/api/configuracion/identidad-visual"))
@@ -282,8 +281,7 @@ public sealed class IdentidadVisualOperadorHttpTests(PostgresFixture postgres) :
         Assert.Equal(1, queries.SnapshotReads);
 
         await redis.StartAsync();
-        using (var probe = await ConnectionMultiplexer.ConnectAsync(redisConnectionString))
-            Assert.True(probe.IsConnected);
+        await WaitForRedisReadyAsync(redisConnectionString);
         queries.Reset();
         using (var afterRestartMiss = await client.GetAsync("/api/configuracion/identidad-visual"))
             Assert.Equal(HttpStatusCode.OK, afterRestartMiss.StatusCode);
@@ -610,6 +608,32 @@ public sealed class IdentidadVisualOperadorHttpTests(PostgresFixture postgres) :
         await using var function = new NpgsqlCommand(
             "DROP FUNCTION IF EXISTS public.nfr07_reject_identity_commit()", connection);
         await function.ExecuteNonQueryAsync();
+    }
+
+    private static async Task WaitForRedisReadyAsync(string connectionString)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(20);
+        Exception? lastError = null;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            try
+            {
+                using var probe = await ConnectionMultiplexer.ConnectAsync(connectionString);
+                if (probe.IsConnected)
+                {
+                    await probe.GetDatabase().PingAsync();
+                    return;
+                }
+            }
+            catch (RedisException exception)
+            {
+                lastError = exception;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(250));
+        }
+
+        Assert.True(false, $"Redis did not accept PING after restarting within 20 seconds. {lastError}");
     }
 
     private static MultipartFormDataContent Form(int version, string? name = null, string? email = null,
