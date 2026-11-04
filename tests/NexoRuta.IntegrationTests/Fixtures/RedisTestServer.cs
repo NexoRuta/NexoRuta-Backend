@@ -10,8 +10,10 @@ public sealed class RedisTestServer : IAsyncDisposable
 {
     public const string ContainerImage = "redis:7.2.16-alpine3.21";
     private const string NativeVersion = "7.2.16";
+    // Published Docker ports reach Redis through the bridge, not its loopback interface.
+    // This disposable fixture must accept those clients just like the standard RedisBuilder.
     private const string RestartableRedisCommand =
-        "redis-server --bind 0.0.0.0 --protected-mode yes --port 6379 --daemonize yes --save '' " +
+        "redis-server --bind 0.0.0.0 --protected-mode no --port 6379 --daemonize yes --save '' " +
         "--appendonly no --maxmemory 32mb --maxmemory-policy allkeys-lru --dir /tmp --logfile /tmp/redis.log " +
         "&& exec tail -f /dev/null";
 
@@ -98,6 +100,17 @@ public sealed class RedisTestServer : IAsyncDisposable
 
     public Task StartAsync(CancellationToken cancellationToken = default)
         => StartCoreAsync(cancellationToken);
+
+    public async Task<string> GetRestartDiagnosticsAsync(CancellationToken cancellationToken = default)
+    {
+        if (container is null || !restartableContainer)
+            return "Restart diagnostics are unavailable for this Redis test server.";
+
+        var result = await container.ExecAsync(
+            new[] { "sh", "-c", "cat /tmp/redis.log 2>/dev/null; echo '--- processes ---'; ps" },
+            cancellationToken);
+        return $"exit={result.ExitCode}\n{result.Stdout}\n{result.Stderr}";
+    }
 
     private async Task StartCoreAsync(CancellationToken cancellationToken)
     {
@@ -202,7 +215,7 @@ public sealed class RedisTestServer : IAsyncDisposable
     private static string[] RedisServerArguments()
         =>
         [
-            "redis-server", "--bind", "0.0.0.0", "--protected-mode", "yes", "--port", "6379",
+            "redis-server", "--bind", "0.0.0.0", "--protected-mode", "no", "--port", "6379",
             "--daemonize", "yes", "--save", "", "--appendonly", "no", "--maxmemory", "32mb",
             "--maxmemory-policy", "allkeys-lru", "--dir", "/tmp", "--logfile", "/tmp/redis.log"
         ];

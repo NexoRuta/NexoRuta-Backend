@@ -256,7 +256,7 @@ public sealed class IdentidadVisualOperadorHttpTests(PostgresFixture postgres) :
 
         await redis.StartAsync();
         Assert.Equal(redisConnectionString, redis.ConnectionString);
-        await WaitForRedisReadyAsync(redisConnectionString);
+        await WaitForRedisReadyAsync(redis, redisConnectionString);
 
         queries.Reset();
         using (var recoveredMiss = await client.GetAsync("/api/configuracion/identidad-visual"))
@@ -283,7 +283,7 @@ public sealed class IdentidadVisualOperadorHttpTests(PostgresFixture postgres) :
 
         await redis.StartAsync();
         Assert.Equal(redisConnectionString, redis.ConnectionString);
-        await WaitForRedisReadyAsync(redisConnectionString);
+        await WaitForRedisReadyAsync(redis, redisConnectionString);
         queries.Reset();
         using (var afterRestartMiss = await client.GetAsync("/api/configuracion/identidad-visual"))
             Assert.Equal(HttpStatusCode.OK, afterRestartMiss.StatusCode);
@@ -612,7 +612,7 @@ public sealed class IdentidadVisualOperadorHttpTests(PostgresFixture postgres) :
         await function.ExecuteNonQueryAsync();
     }
 
-    private static async Task WaitForRedisReadyAsync(string connectionString)
+    private static async Task WaitForRedisReadyAsync(RedisTestServer redis, string connectionString)
     {
         var deadline = DateTimeOffset.UtcNow.AddSeconds(20);
         Exception? lastError = null;
@@ -635,7 +635,8 @@ public sealed class IdentidadVisualOperadorHttpTests(PostgresFixture postgres) :
             await Task.Delay(TimeSpan.FromMilliseconds(250));
         }
 
-        Assert.Fail($"Redis did not accept PING after restarting within 20 seconds. {lastError}");
+        var diagnostics = await redis.GetRestartDiagnosticsAsync();
+        Assert.Fail($"Redis did not accept PING after restarting within 20 seconds. Endpoint={connectionString}. {lastError}{Environment.NewLine}{diagnostics}");
     }
 
     private static MultipartFormDataContent Form(int version, string? name = null, string? email = null,
