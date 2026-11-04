@@ -166,7 +166,10 @@ public sealed class RedisTestServer : IAsyncDisposable
         if (container is not null)
         {
             if (restartableContainer)
+            {
                 _ = await container.ExecAsync(new[] { "redis-cli", "SHUTDOWN", "NOSAVE" }, cancellationToken);
+                await WaitUntilRedisStoppedAsync(cancellationToken);
+            }
             else
                 await container.StopAsync(cancellationToken);
         }
@@ -178,6 +181,22 @@ public sealed class RedisTestServer : IAsyncDisposable
             process.Dispose();
         }
         running = false;
+    }
+
+    private async Task WaitUntilRedisStoppedAsync(CancellationToken cancellationToken)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(10);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var probe = await container!.ExecAsync(new[] { "redis-cli", "PING" }, cancellationToken);
+            if (probe.ExitCode != 0 || !string.Equals(probe.Stdout.Trim(), "PONG", StringComparison.Ordinal))
+                return;
+
+            await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken);
+        }
+
+        throw new TimeoutException("Redis remained available after the test container shutdown command.");
     }
 
     private static string[] RedisServerArguments()
