@@ -2,8 +2,6 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
-using DotNet.Testcontainers.Builders;
-using DotNet.Testcontainers.Containers;
 using Testcontainers.Redis;
 
 namespace NexoRuta.IntegrationTests.Fixtures;
@@ -11,22 +9,26 @@ namespace NexoRuta.IntegrationTests.Fixtures;
 public sealed class RedisTestServer : IAsyncDisposable
 {
     public const string ContainerImage = "redis:7.2.16-alpine3.21";
-    private const ushort RedisPort = 6379;
     private const string NativeVersion = "7.2.16";
+    private const string RestartableRedisCommand =
+        "redis-server --bind 0.0.0.0 --protected-mode yes --port 6379 --daemonize yes --save '' " +
+        "--appendonly no --maxmemory 32mb --maxmemory-policy allkeys-lru --dir /tmp --logfile /tmp/redis.log " +
+        "&& exec tail -f /dev/null";
 
-    private readonly IContainer? container;
-    private readonly int? stableHostPort;
+    private readonly RedisContainer? container;
+    private readonly bool restartableContainer;
     private readonly bool native;
     private readonly string? nativeDirectory;
     private readonly string? nativeExecutable;
     private readonly int nativePort;
     private Process? nativeProcess;
+    private bool containerStarted;
     private bool running;
 
-    private RedisTestServer(IContainer container, int? stableHostPort = null)
+    private RedisTestServer(RedisContainer container, bool restartableContainer)
     {
         this.container = container;
-        this.stableHostPort = stableHostPort;
+        this.restartableContainer = restartableContainer;
     }
 
     private RedisTestServer(string executable, int port, string directory)
@@ -37,27 +39,26 @@ public sealed class RedisTestServer : IAsyncDisposable
         nativeDirectory = directory;
     }
 
-    public string ConnectionString => container is not null
-        ? stableHostPort is int port
-            ? $"127.0.0.1:{port}"
-            : $"{container.Hostname}:{container.GetMappedPublicPort(RedisPort)}"
-        : $"127.0.0.1:{nativePort},abortConnect=false,connectRetry=1,connectTimeout=1000";
+    public string ConnectionString => container?.GetConnectionString()
+        ?? $"127.0.0.1:{nativePort},abortConnect=false,connectRetry=1,connectTimeout=1000";
 
-    public static async Task<RedisTestServer> CreateAsync(
-        bool stableHostPort = false,
-        CancellationToken cancellationToken = default)
+    public static Task<RedisTestServer> CreateAsync(CancellationToken cancellationToken = default)
+        => CreateCoreAsync(restartableContainer: false, cancellationToken);
+
+    public static Task<RedisTestServer> CreateRestartableAsync(CancellationToken cancellationToken = default)
+        => CreateCoreAsync(restartableContainer: true, cancellationToken);
+
+    private static async Task<RedisTestServer> CreateCoreAsync(
+        bool restartableContainer,
+        CancellationToken cancellationToken)
     {
         var mode = Environment.GetEnvironmentVariable("NEXORUTA_TEST_REDIS_MODE") ?? "docker";
         if (mode == "docker")
         {
-            var mappedHostPort = stableHostPort ? GetAvailableHostPort() : (int?)null;
-            IContainer container = mappedHostPort is int hostPortValue
-                ? new ContainerBuilder(ContainerImage)
-                    .WithPortBinding(RedisPort, hostPortValue)
-                    .WithWaitStrategy(Wait.ForUnixContainer().UntilCommandIsCompleted("redis-cli", "ping"))
-                    .Build()
-                : new RedisBuilder(ContainerImage).Build();
-            var server = new RedisTestServer(container, mappedHostPort);
+            var builder = new RedisBuilder(ContainerImage);
+            if (restartableContainer)
+                builder = builder.WithEntrypoint("/bin/sh", "-c").WithCommand(RestartableRedisCommand);
+            var server = new RedisTestServer(builder.Build(), restartableContainer);
             try
             {
                 await server.StartCoreAsync(cancellationToken);
@@ -95,13 +96,6 @@ public sealed class RedisTestServer : IAsyncDisposable
         }
     }
 
-    private static int GetAvailableHostPort()
-    {
-        using var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        return ((IPEndPoint)listener.LocalEndpoint).Port;
-    }
-
     public Task StartAsync(CancellationToken cancellationToken = default)
         => StartCoreAsync(cancellationToken);
 
@@ -110,7 +104,17 @@ public sealed class RedisTestServer : IAsyncDisposable
         if (running) return;
         if (container is not null)
         {
-            await container.StartAsync(cancellationToken);
+            if (restartableContainer && containerStarted)
+            {
+                var result = await container.ExecAsync(RedisServerArguments(), cancellationToken);
+                if (result.ExitCode != 0)
+                    throw new InvalidOperationException($"Could not restart Redis in its test container: {result.Stderr}");
+            }
+            else
+            {
+                await container.StartAsync(cancellationToken);
+                containerStarted = true;
+            }
         }
         else if (native)
         {
@@ -161,7 +165,10 @@ public sealed class RedisTestServer : IAsyncDisposable
         if (!running) return;
         if (container is not null)
         {
-            await container.StopAsync(cancellationToken);
+            if (restartableContainer)
+                _ = await container.ExecAsync(new[] { "redis-cli", "SHUTDOWN", "NOSAVE" }, cancellationToken);
+            else
+                await container.StopAsync(cancellationToken);
         }
         else if (nativeProcess is { } process)
         {
@@ -172,6 +179,14 @@ public sealed class RedisTestServer : IAsyncDisposable
         }
         running = false;
     }
+
+    private static string[] RedisServerArguments()
+        =>
+        [
+            "redis-server", "--bind", "0.0.0.0", "--protected-mode", "yes", "--port", "6379",
+            "--daemonize", "yes", "--save", "", "--appendonly", "no", "--maxmemory", "32mb",
+            "--maxmemory-policy", "allkeys-lru", "--dir", "/tmp", "--logfile", "/tmp/redis.log"
+        ];
 
     private static async Task VerifyNativeVersionAsync(string executable, CancellationToken cancellationToken)
     {

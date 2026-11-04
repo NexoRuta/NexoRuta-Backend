@@ -229,7 +229,7 @@ public sealed class IdentidadVisualOperadorHttpTests(PostgresFixture postgres) :
         using var seedClient = bootstrapApi.CreateHttpClient();
         var actors = await SeedActorsAsync(database);
         var runtime = await RlsRestrictedHttpFlowTests.RestrictApiAsync(database);
-        await using var redis = await RedisTestServer.CreateAsync(stableHostPort: true);
+        await using var redis = await RedisTestServer.CreateRestartableAsync();
         var redisConnectionString = redis.ConnectionString;
         await redis.StopAsync();
 
