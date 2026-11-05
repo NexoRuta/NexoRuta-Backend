@@ -1,6 +1,6 @@
 namespace NexoRuta.Domain.Tarifas;
 
-public enum ModalidadTarifaria { Estandar, Urgente }
+public enum ModalidadTarifaria { Estandar, Urgente, Retiro }
 public enum TipoAjusteTarifario { RecargoFijo, RecargoPorcentual, BonificacionFija, BonificacionPorcentual }
 public enum MonedaTarifaria { UYU }
 public enum EstadoVersionTarifario { Borrador, Publicada }

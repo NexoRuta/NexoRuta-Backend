@@ -143,6 +143,17 @@ public sealed class KafkaEnvioCreadoPublisher : IDisposable
         }
     }
 
+    public async Task PublicarAvisoComercioAsync(OutboxClaim message, CancellationToken ct)
+    {
+        if (message.VersionContrato != 2 || message.Tipo is not ("BultoActualizado" or "OperacionActualizada") || message.Destino != "Kafka")
+            throw new InvalidDataException("Unregistered commerce notification.");
+        var delivery = await producer.Value.ProduceAsync(CommerceNoticeConsumer.Topic, new Message<string, string>
+        {
+            Key = message.EnvioId!.Value.ToString("D"), Value = message.Payload,
+            Headers = new Headers { { "eventId", Encoding.UTF8.GetBytes(message.Id.ToString("D")) }, { "eventVersion", Encoding.UTF8.GetBytes("2") }, { "eventType", Encoding.UTF8.GetBytes(message.Tipo) } }
+        }, ct);
+        if (delivery.Status != PersistenceStatus.Persisted) throw new InvalidOperationException("Commerce notice not confirmed persisted.");
+    }
     public void Dispose()
     {
         if (!producer.IsValueCreated) return;

@@ -7,6 +7,8 @@ namespace NexoRuta.Api.Features.Envios.Contracts.Requests;
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed class CrearEnvioRequest
 {
+    public SolicitudRetiroRequest? Retiro { get; set; }
+
     [Required(ErrorMessage = "Seleccioná un operador para el envío.")]
     public Guid? OperadorId { get; set; }
 
@@ -52,6 +54,15 @@ public sealed class ServicioEnvioRequest
     [Required] public Guid? ZonaId { get; set; }
     [Required, Range(-90d, 90d)] public double? Latitud { get; set; }
     [Required, Range(-180d, 180d)] public double? Longitud { get; set; }
-    [Required, RegularExpression("^(Estandar|Urgente)$")]
+    [Required, RegularExpression("^(Estandar|Urgente|Retiro)$")]
     public string Modalidad { get; set; } = "Estandar";
+}
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed class SolicitudRetiroRequest
+{
+    [Required] public Guid SolicitudId { get; set; }
+    [Required, StringLength(500, MinimumLength = 1)] public string Motivo { get; set; } = "";
+    [Required] public DateTimeOffset DesdeUtc { get; set; }
+    [Required] public DateTimeOffset HastaUtc { get; set; }
 }

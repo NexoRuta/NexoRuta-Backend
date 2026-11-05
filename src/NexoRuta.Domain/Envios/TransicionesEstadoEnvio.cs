@@ -14,6 +14,13 @@ public static class TransicionesEstadoEnvio
         (EstadoEnvio.Reprogramado, EstadoEnvio.AsignadoRuta or EstadoEnvio.Cancelado) => true,
         (EstadoEnvio.EnDevolucion, EstadoEnvio.Devuelto or EstadoEnvio.Extraviado or EstadoEnvio.Cancelado) => true,
         (EstadoEnvio.EntregaPendienteValidacion, EstadoEnvio.Entregado or EstadoEnvio.EntregaSinValidacion) => true,
+        (EstadoEnvio.EnTransito, EstadoEnvio.EntregadoParcialmente) => true,
+        (EstadoEnvio.EntregadoParcialmente, EstadoEnvio.Entregado or EstadoEnvio.EntregaPendienteValidacion or EstadoEnvio.EntregaSinValidacion) => true,
+        (EstadoEnvio.Admitido, EstadoEnvio.RetiroSolicitado) => true,
+        (EstadoEnvio.RetiroSolicitado or EstadoEnvio.RetiroFallido, EstadoEnvio.RetiroAsignado or EstadoEnvio.Cancelado) => true,
+        (EstadoEnvio.RetiroAsignado, EstadoEnvio.Retirado or EstadoEnvio.RetiroFallido or EstadoEnvio.Cancelado) => true,
+        (EstadoEnvio.Retirado, EstadoEnvio.RetiroEnDeposito) => true,
+        (EstadoEnvio.RetiroEnDeposito, EstadoEnvio.EntregadoComercio) => true,
         _ => false
     };
 }

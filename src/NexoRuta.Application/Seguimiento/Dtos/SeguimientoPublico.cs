@@ -11,4 +11,5 @@ public sealed record IdentidadVisualPublica(
     byte[]? LogoContenido,
     string? LogoTipoContenido);
 
-public sealed record SeguimientoPublico(EstadoEnvio Estado, IdentidadVisualPublica Identidad);
+public sealed record SeguimientoPublico(EstadoEnvio Estado, IdentidadVisualPublica Identidad)
+{ public int TotalBultos { get; init; } public int BultosEntregados { get; init; } public int BultosDevueltos { get; init; } public bool EsRetiro { get; init; } }

@@ -30,6 +30,10 @@ public static class RlsSqlFunctionContract
     public static IReadOnlyList<(string Identifier, string Arguments, string Result, string RuntimeRole)> Functions { get; } =
         Array.AsReadOnly<(string Identifier, string Arguments, string Result, string RuntimeRole)>(
         [
+            ("nexoruta_app.apply_partial_visit_fee", "uuid, uuid", "void", "nexoruta_api"),
+            ("nexoruta_app.configure_pickup", "uuid, uuid, text, timestamp with time zone, timestamp with time zone, text", "void", "nexoruta_api"),
+            ("nexoruta_app.public_parcel_progress", "text", "TABLE(\"Total\" integer, \"Entregados\" integer, \"Devueltos\" integer, \"EsRetiro\" boolean)", "nexoruta_api"),
+            ("nexoruta_app.receive_commerce_notice", "uuid, jsonb", "boolean", "nexoruta_worker"),
             ("nexoruta_app.public_cancellation_email", "text", "text", "nexoruta_api"),
             ("nexoruta_app.issue_public_cancel_code", "text, text, uuid, uuid, text", "text", "nexoruta_api"),
             ("nexoruta_app.confirm_public_cancellation", "text, text, uuid, uuid, uuid", "text", "nexoruta_api"),

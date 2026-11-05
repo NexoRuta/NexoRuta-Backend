@@ -6,5 +6,6 @@ public enum EstadoCustodiaBulto
     Deposito,
     Repartidor,
     PendienteDeposito,
+    Comercio,
     Destinatario
 }

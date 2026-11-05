@@ -816,6 +816,9 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                         .HasMaxLength(30)
                         .HasColumnType("character varying(30)");
 
+                    b.Property<DateTimeOffset?>("EntregadoEnUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<Guid>("EnvioId")
                         .HasColumnType("uuid");
 
@@ -823,12 +826,26 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                         .HasPrecision(12, 2)
                         .HasColumnType("numeric(12,2)");
 
+                    b.Property<string>("MotivoNoEntrega")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
                     b.Property<Guid>("OperadorId")
                         .HasColumnType("uuid");
 
                     b.Property<decimal>("PesoGramos")
                         .HasPrecision(12, 2)
                         .HasColumnType("numeric(12,2)");
+
+                    b.Property<DateTimeOffset?>("PruebaVenceEnUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Resultado")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasDefaultValue("Pendiente");
 
                     b.Property<Guid?>("RutaCustodiaId")
                         .HasColumnType("uuid");
@@ -936,16 +953,35 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset?>("EntregaFisicaRecibidaEnUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<bool>("EsRetiro")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("Estado")
                         .IsRequired()
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
+
+                    b.Property<DateTimeOffset?>("FranjaRetiroDesdeUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("FranjaRetiroHastaUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("MotivoRetiro")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
 
                     b.Property<Guid>("OperadorId")
                         .HasColumnType("uuid");
 
                     b.Property<DateTimeOffset?>("PlazoPruebaVenceEnUtc")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("SolicitudRetiroHuella")
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("SolicitudRetiroId")
+                        .HasColumnType("uuid");
 
                     b.Property<long>("Version")
                         .IsConcurrencyToken()
@@ -963,6 +999,10 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                     b.HasIndex("PlazoPruebaVenceEnUtc")
                         .HasDatabaseName("IX_Envios_ProofValidationDeadline")
                         .HasFilter("\"Estado\" = 'EntregaPendienteValidacion' AND \"PlazoPruebaVenceEnUtc\" IS NOT NULL");
+
+                    b.HasIndex("ComercioId", "SolicitudRetiroId")
+                        .IsUnique()
+                        .HasFilter("\"SolicitudRetiroId\" IS NOT NULL");
 
                     b.HasIndex("OperadorId", "DestinatarioId");
 
@@ -1141,6 +1181,9 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                     b.Property<int?>("NumeroVersionPublicada")
                         .HasColumnType("integer");
 
+                    b.Property<bool>("PermiteEntregaParcial")
+                        .HasColumnType("boolean");
+
                     b.Property<int?>("PlazoEstandarMinutos")
                         .HasColumnType("integer");
 
@@ -1154,11 +1197,20 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
 
+                    b.Property<string>("PoliticaPendientesParcial")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
                     b.Property<Guid?>("PublicadaPorUsuarioId")
                         .HasColumnType("uuid");
 
                     b.Property<DateTimeOffset?>("PublicadaUtc")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("RecargoNuevaVisitaUyu")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)");
 
                     b.Property<long>("VersionConcurrencia")
                         .IsConcurrencyToken()
@@ -1560,6 +1612,10 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                     b.Property<bool>("Activa")
                         .HasColumnType("boolean");
 
+                    b.PrimitiveCollection<Guid[]>("BultoIds")
+                        .IsRequired()
+                        .HasColumnType("uuid[]");
+
                     b.Property<DateTimeOffset>("LlegadaEstimadaUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -1572,6 +1628,10 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
 
                     b.Property<int>("Orden")
                         .HasColumnType("integer");
+
+                    b.Property<string>("ResultadoVisita")
+                        .IsRequired()
+                        .HasColumnType("text");
 
                     b.Property<int?>("ServicioMinutos")
                         .HasColumnType("integer");
@@ -1803,7 +1863,7 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("CK_TarifasZonaModalidad_Amounts", "\"ImporteBaseUyu\" >= 0 AND \"PrecioPorKilogramoUyu\" >= 0 AND \"PrecioPorMetroCubicoUyu\" >= 0");
 
-                            t.HasCheckConstraint("CK_TarifasZonaModalidad_Modality", "\"Modalidad\" IN ('Estandar', 'Urgente')");
+                            t.HasCheckConstraint("CK_TarifasZonaModalidad_Modality", "\"Modalidad\" IN ('Estandar', 'Urgente', 'Retiro')");
                         });
                 });
 
@@ -2532,7 +2592,7 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
 
                     b.ToTable("OutboxMessages", null, t =>
                         {
-                            t.HasCheckConstraint("CK_OutboxMessages_Contract", "(\"Tipo\" = 'GenerarSeguimiento' AND \"VersionContrato\" = 1 AND \"Destino\" = 'RabbitMq' AND \"Ambito\" = 'Envio' AND \"EstadoEntrega\" IS NULL) OR (\"Tipo\" = 'EnvioCreado' AND \"VersionContrato\" = 1 AND \"Destino\" = 'Kafka' AND \"Ambito\" = 'Envio' AND \"EstadoEntrega\" IS NULL) OR (\"Tipo\" = 'RepartoModificado' AND \"VersionContrato\" = 1 AND \"Destino\" = 'PushFcm' AND \"Ambito\" = 'Envio' AND \"EstadoEntrega\" IS NULL) OR (\"Tipo\" = 'CodigoCancelacionEmail' AND \"VersionContrato\" = 1 AND \"Destino\" = 'RabbitMq' AND \"Ambito\" = 'Envio' AND \"EstadoEntrega\" IS NULL) OR (\"Tipo\" = 'PasswordRecoveryEmail' AND \"VersionContrato\" = 1 AND \"Destino\" = 'RabbitMq' AND \"Ambito\" = 'Identidad' AND \"EstadoEntrega\" IN ('Pending', 'Delivered', 'Expired', 'Failed')) OR (\"Tipo\" = 'PasswordRecoveryRequested' AND \"VersionContrato\" = 1 AND \"Destino\" = 'Kafka' AND \"Ambito\" = 'Identidad' AND \"EstadoEntrega\" IS NULL)");
+                            t.HasCheckConstraint("CK_OutboxMessages_Contract", "(\"Tipo\" = 'GenerarSeguimiento' AND \"VersionContrato\" = 1 AND \"Destino\" = 'RabbitMq' AND \"Ambito\" = 'Envio' AND \"EstadoEntrega\" IS NULL) OR (\"Tipo\" = 'EnvioCreado' AND \"VersionContrato\" = 1 AND \"Destino\" = 'Kafka' AND \"Ambito\" = 'Envio' AND \"EstadoEntrega\" IS NULL) OR (\"Tipo\" = 'RepartoModificado' AND \"VersionContrato\" = 1 AND \"Destino\" = 'PushFcm' AND \"Ambito\" = 'Envio' AND \"EstadoEntrega\" IS NULL) OR (\"Tipo\" = 'CodigoCancelacionEmail' AND \"VersionContrato\" = 1 AND \"Destino\" = 'RabbitMq' AND \"Ambito\" = 'Envio' AND \"EstadoEntrega\" IS NULL) OR (\"Tipo\" = 'PasswordRecoveryEmail' AND \"VersionContrato\" = 1 AND \"Destino\" = 'RabbitMq' AND \"Ambito\" = 'Identidad' AND \"EstadoEntrega\" IN ('Pending', 'Delivered', 'Expired', 'Failed')) OR (\"Tipo\" = 'PasswordRecoveryRequested' AND \"VersionContrato\" = 1 AND \"Destino\" = 'Kafka' AND \"Ambito\" = 'Identidad' AND \"EstadoEntrega\" IS NULL) OR (\"Tipo\" IN ('BultoActualizado','OperacionActualizada') AND \"VersionContrato\" = 2 AND \"Destino\" = 'Kafka' AND \"Ambito\" = 'Envio' AND \"EstadoEntrega\" IS NULL)");
 
                             t.HasCheckConstraint("CK_OutboxMessages_Priority", "\"Prioridad\" IN ('Baja', 'Normal', 'Alta')");
 
@@ -2859,6 +2919,9 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("EnvioId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid>("BultoId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Documento")
                         .HasMaxLength(40)
                         .HasColumnType("character varying(40)");
@@ -2888,7 +2951,7 @@ namespace NexoRuta.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("RutaId")
                         .HasColumnType("uuid");
 
-                    b.HasKey("OperadorId", "EnvioId");
+                    b.HasKey("OperadorId", "EnvioId", "BultoId");
 
                     b.HasIndex("OperadorId", "RutaId");
 

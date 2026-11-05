@@ -18,6 +18,19 @@ public sealed class CrearEnvioUseCase(IEnviosRepository repository, IUsuarioActu
         CancellationToken cancellationToken = default)
     {
         var admission = await ObtenerAdmisionAsync(command.OperadorId, cancellationToken);
+        if (command.Retiro is { } solicitud)
+        {
+            await repository.BloquearSolicitudRetiroAsync(admission.Comercio.Id, solicitud.SolicitudId, cancellationToken);
+            var anterior = (await repository.ListarAsync(null, admission.Comercio.Id, cancellationToken)).SingleOrDefault(e => e.SolicitudRetiroId == solicitud.SolicitudId);
+            if (anterior is not null)
+            {
+                if (anterior.SolicitudRetiroHuella != Huella(command)) throw new ArgumentException("La identidad de solicitud ya fue usada con otros datos.");
+                return new(anterior.Id, anterior.Origen, anterior.Bultos, anterior.CreadoEnUtc, anterior.Tarifa!);
+            }
+            if (solicitud.DesdeUtc < DateTimeOffset.UtcNow || solicitud.HastaUtc - solicitud.DesdeUtc > TimeSpan.FromDays(7))
+                throw new ArgumentException("La franja del retiro debe ser futura y no exceder siete días.");
+        }
+        else if (command.Servicio.Modalidad == "Retiro") throw new ArgumentException("La modalidad Retiro requiere una solicitud y su franja.");
         var prepared = CrearAgregado(admission, command);
         var tarifa = await repository.GuardarAsync(prepared.Envio, prepared.Destinatario, prepared.Direccion, prepared.Bultos, command.Servicio, cancellationToken);
         return Resultado(prepared, tarifa);
@@ -70,6 +83,12 @@ public sealed class CrearEnvioUseCase(IEnviosRepository repository, IUsuarioActu
             destinatarioId: destinatario.Id,
             direccionId: direccion.Id,
             versionReglasId: admission.VersionReglas);
+        if (command.Retiro is { } solicitud)
+        {
+            if (command.Servicio.Modalidad != "Retiro") throw new ArgumentException("El retiro requiere su tarifa propia.");
+            envio.ConfigurarRetiro(solicitud.SolicitudId, solicitud.Motivo, solicitud.DesdeUtc, solicitud.HastaUtc, Huella(command));
+            envio.CambiarEstado(EstadoEnvio.RetiroSolicitado, envio.Version);
+        }
         if (command.Bultos is null || command.Bultos.Count == 0 || command.Bultos.Any(b => b is null))
             throw new ArgumentException("El envío requiere al menos un bulto.");
         var bultos = command.Bultos.Select(b => new Bulto(admission.Operador.OperadorId, envio.Id,
@@ -93,6 +112,8 @@ public sealed class CrearEnvioUseCase(IEnviosRepository repository, IUsuarioActu
                 b.LargoCentimetros, b.AnchoCentimetros, b.AltoCentimetros)
                 { Custodia = b.Custodia.ToString() }).ToArray(),
             CreadoEnUtc: prepared.Envio.CreadoEnUtc, Tarifa: tarifa);
+
+    private static string Huella(CrearEnvioCommand command) => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(command)));
 
     private sealed record Admission(
         NexoRuta.Application.Administracion.Context.ContextoUsuario Contexto,

@@ -6,9 +6,10 @@ public sealed record ReglasEnvioResponse(Guid VersionId, int NumeroVersion, int 
     bool RequiereFirma, bool RequiereFoto, bool RequiereNombre, bool RequiereDocumento,
     IReadOnlyList<MotivoNoEntregaResponse> Motivos)
 {
+    public bool PermiteEntregaParcial { get; init; }
     public static ReglasEnvioResponse Desde(ReglasEnvioDatos x) => new(x.VersionId, x.NumeroVersion, x.MaximoIntentos,
         x.IntervaloEntreIntentosMinutos, x.PoliticaDevolucionAlAgotarIntentos,
         x.RequiereFirma, x.RequiereFoto, x.RequiereNombre, x.RequiereDocumento,
-        x.Motivos.Select(m => new MotivoNoEntregaResponse(m.Codigo, m.Descripcion)).ToArray());
+        x.Motivos.Select(m => new MotivoNoEntregaResponse(m.Codigo, m.Descripcion)).ToArray()) { PermiteEntregaParcial = x.PermiteEntregaParcial };
 }
 public sealed record MotivoNoEntregaResponse(string Codigo, string Descripcion);

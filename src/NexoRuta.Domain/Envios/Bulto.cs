@@ -14,6 +14,39 @@ public sealed class Bulto
     public Guid? AccesoCustodioId { get; private set; }
     public Guid? RutaCustodiaId { get; private set; }
     public long Version { get; private set; }
+    public ResultadoBulto Resultado { get; private set; }
+    public string? MotivoNoEntrega { get; private set; }
+    public DateTimeOffset? EntregadoEnUtc { get; private set; }
+    public DateTimeOffset? PruebaVenceEnUtc { get; private set; }
+
+    public void RegistrarResultado(ResultadoBulto destino, long versionEsperada, string? motivo = null,
+        DateTimeOffset? entregadoEn = null, DateTimeOffset? vence = null)
+    {
+        if (Version != versionEsperada || !TransicionesResultadoBulto.Permite(Resultado, destino))
+            throw new InvalidOperationException("El resultado del bulto cambió o la transición no está permitida.");
+        if (TransicionesResultadoBulto.EntregaFisica(destino) && Custodia != EstadoCustodiaBulto.Destinatario)
+            throw new InvalidOperationException("El resultado de entrega requiere custodia física en destino.");
+        Resultado = destino; MotivoNoEntrega = motivo;
+        EntregadoEnUtc ??= entregadoEn?.ToUniversalTime(); PruebaVenceEnUtc ??= vence;
+        Version++;
+    }
+    public void RegistrarPendiente(string motivo, long versionEsperada)
+    {
+        if (Version != versionEsperada || Resultado != ResultadoBulto.Pendiente || string.IsNullOrWhiteSpace(motivo))
+            throw new InvalidOperationException("El pendiente requiere su versión y un motivo.");
+        MotivoNoEntrega = motivo; Version++;
+    }
+    public void Retirar(Guid accesoId, Guid rutaId)
+    {
+        if (accesoId == Guid.Empty || rutaId == Guid.Empty || Custodia != EstadoCustodiaBulto.SinRecepcion)
+            throw new InvalidOperationException("El retiro requiere un bulto aún bajo custodia del comprador.");
+        Custodia = EstadoCustodiaBulto.Repartidor; AccesoCustodioId = accesoId; RutaCustodiaId = rutaId; Version++;
+    }
+    public void EntregarAlComercio()
+    {
+        if (Custodia != EstadoCustodiaBulto.Deposito) throw new InvalidOperationException("El bulto debe estar recibido en depósito.");
+        Custodia = EstadoCustodiaBulto.Comercio; Version++;
+    }
 
     public Bulto(
         Guid operadorId,

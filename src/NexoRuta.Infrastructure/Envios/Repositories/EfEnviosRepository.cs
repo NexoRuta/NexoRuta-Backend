@@ -18,6 +18,13 @@ namespace NexoRuta.Infrastructure.Envios.Repositories;
 
 public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
 {
+    public async Task BloquearSolicitudRetiroAsync(Guid comercioId, Guid solicitudId, CancellationToken ct)
+    {
+        if (db.Database.CurrentTransaction is null) throw new InvalidOperationException("La solicitud requiere una transacción de autorización.");
+        var clave = $"retiro:{comercioId:N}:{solicitudId:N}";
+        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({clave},0))", ct);
+    }
+
     public async Task<IEnviosImportTransaction> IniciarImportacionAsync(CancellationToken cancellationToken = default)
     {
         var transaction = await db.BeginOrJoinAsync(cancellationToken);
@@ -79,6 +86,9 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
         await CrearEnBaseAsync(envio, destinatario, direccion, bultos, null, cancellationToken);
         await TarifasAdmision.GuardarAsync(db, envio, servicio, cargo, cancellationToken);
         await ConfirmarDestinoInicialAsync(envio, servicio, cancellationToken);
+        if (envio.EsRetiro)
+            await db.Database.ExecuteSqlInterpolatedAsync($"SELECT nexoruta_app.configure_pickup({envio.Id},{envio.SolicitudRetiroId},{envio.MotivoRetiro},{envio.FranjaRetiroDesdeUtc},{envio.FranjaRetiroHastaUtc},{envio.SolicitudRetiroHuella})", cancellationToken);
+
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return cargo;
@@ -181,6 +191,7 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
                 cancellationToken);
         }
 
+
         var trackingRequested = OutboxMessage.ForShipment(
             operatorId: envio.OperadorId,
             shipmentId: envio.Id,
@@ -239,6 +250,7 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
                 DestinoConfirmado = direccion.ConfirmadaEnUtc != null,
                 Estado = envio.Estado.ToString(),
                 envio.Version,
+                envio.EsRetiro, envio.MotivoRetiro, envio.FranjaRetiroDesdeUtc, envio.FranjaRetiroHastaUtc, envio.SolicitudRetiroId, envio.SolicitudRetiroHuella,
                 envio.CreadoEnUtc
             }).ToListAsync(cancellationToken);
 
@@ -257,7 +269,7 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
                 Detail = new BultoDetalle(
                 Id: x.Id, Codigo: x.Codigo, PesoGramos: x.PesoGramos, LargoCentimetros: x.LargoCentimetros,
                 AnchoCentimetros: x.AnchoCentimetros, AltoCentimetros: x.AltoCentimetros)
-                { Custodia = x.Custodia.ToString() }
+                { Custodia = x.Custodia.ToString(), Resultado = x.Resultado.ToString(), MotivoNoEntrega = x.MotivoNoEntrega }
             })
             .ToListAsync(cancellationToken);
         var packagesByShipment = packages.ToLookup(x => x.EnvioId, x => x.Detail);
@@ -279,6 +291,8 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
             CreadoEnUtc: x.CreadoEnUtc)
         {
             Tarifa = tarifas.GetValueOrDefault(x.Id),
+            EsRetiro = x.EsRetiro, MotivoRetiro = x.MotivoRetiro, FranjaRetiroDesdeUtc = x.FranjaRetiroDesdeUtc,
+            FranjaRetiroHastaUtc = x.FranjaRetiroHastaUtc, SolicitudRetiroId = x.SolicitudRetiroId, SolicitudRetiroHuella = x.SolicitudRetiroHuella,
             DestinoConfirmado = x.DestinoConfirmado,
             ReferenciaExterna = referencesByShipment.GetValueOrDefault(x.Id),
             DestinatarioEmail = x.DestinatarioEmail

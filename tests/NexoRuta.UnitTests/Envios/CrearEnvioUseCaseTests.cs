@@ -212,6 +212,7 @@ public sealed class CrearEnvioUseCaseTests
 
     private sealed class FakeEnviosRepository : IEnviosRepository
     {
+        public Task BloquearSolicitudRetiroAsync(Guid comercioId, Guid solicitudId, CancellationToken ct) => Task.CompletedTask;
         public Guid? VersionReglas { get; init; } = Guid.CreateVersion7();
         public Task<Guid?> ObtenerVersionReglasParaAdmisionAsync(Guid operadorId, CancellationToken cancellationToken = default)
             => Task.FromResult(VersionReglas);

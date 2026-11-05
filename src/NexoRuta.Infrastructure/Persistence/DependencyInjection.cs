@@ -190,6 +190,7 @@ public static class DependencyInjection
         services.AddScoped<NexoRuta.Application.Reparto.UseCases.GestionarRutasUseCase>();
         services.AddScoped<NexoRuta.Application.Reparto.Repositories.IOperacionesRepartoRepository, NexoRuta.Infrastructure.Reparto.EfOperacionesRepartoRepository>();
         services.AddScoped<NexoRuta.Application.Reparto.UseCases.EjecutarRepartoUseCase>();
+        services.AddScoped<NexoRuta.Application.Notificaciones.Repositories.IAvisosComercioRepository, NexoRuta.Infrastructure.Notificaciones.EfAvisosComercioRepository>();
         services.AddScoped<NexoRuta.Application.Notificaciones.Repositories.INotificacionesRepartoRepository, NexoRuta.Infrastructure.Notificaciones.EfNotificacionesRepartoRepository>();
         services.AddScoped<NexoRuta.Infrastructure.Notificaciones.CifradorRegistroPush>();
         services.AddScoped<NexoRuta.Application.Notificaciones.UseCases.NotificacionesRepartoUseCase>();

@@ -50,11 +50,13 @@ public sealed class EfEnlacesSeguimientoRepository(
             "SELECT * FROM " + RlsSqlFunctionContract.PublicTracking + "({0})", token)
             .SingleOrDefaultAsync(cancellationToken);
         if (result is null || !Enum.TryParse<EstadoEnvio>(result.Estado, out var state)) return null;
+        var progreso = await db.Database.SqlQuery<ProgresoPublico>($"SELECT * FROM nexoruta_app.public_parcel_progress({token})").SingleOrDefaultAsync(cancellationToken);
         return new SeguimientoPublico(state, new IdentidadVisualPublica(result.NombreOperador,
             result.CorreoPublico, result.TelefonoPublico, result.ColorPrimario, result.ColorSecundario,
-            result.LogoContenido, result.LogoTipoContenido));
+            result.LogoContenido, result.LogoTipoContenido)) { TotalBultos = progreso?.Total ?? 0, BultosEntregados = progreso?.Entregados ?? 0, BultosDevueltos = progreso?.Devueltos ?? 0, EsRetiro = progreso?.EsRetiro ?? false };
     }
 
+    private sealed record ProgresoPublico(int Total, int Entregados, int Devueltos, bool EsRetiro);
     private sealed record PublicTrackingState(string Estado);
     private sealed record PublicTrackingIdentity(string Estado, string NombreOperador, string? CorreoPublico,
         string? TelefonoPublico, string? ColorPrimario, string? ColorSecundario, byte[]? LogoContenido,

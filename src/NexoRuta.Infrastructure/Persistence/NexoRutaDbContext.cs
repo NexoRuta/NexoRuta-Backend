@@ -364,6 +364,8 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
             entity.HasAlternateKey(x => new { x.ComercioId, x.Id });
             entity.Property(x => x.CreadoEnUtc).HasDefaultValueSql("now()").IsRequired();
             entity.Property(x => x.Estado).HasConversion<string>().HasMaxLength(32).IsRequired();
+            entity.Property(x => x.MotivoRetiro).HasMaxLength(500);
+            entity.HasIndex(x => new { x.ComercioId, x.SolicitudRetiroId }).IsUnique().HasFilter("\"SolicitudRetiroId\" IS NOT NULL");
             entity.Property(x => x.Version).IsConcurrencyToken();
             entity.HasOne<VersionReglasOperativas>().WithMany()
                 .HasForeignKey(x => new { x.OperadorId, x.VersionReglasId })
@@ -401,6 +403,8 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
         modelBuilder.Entity<Bulto>(entity =>
         {
             entity.Property(x => x.Custodia).HasConversion<string>().HasMaxLength(30);
+            entity.Property(x => x.Resultado).HasConversion<string>().HasMaxLength(32).HasDefaultValue(ResultadoBulto.Pendiente);
+            entity.Property(x => x.MotivoNoEntrega).HasMaxLength(40);
             entity.Property(x => x.Version).IsConcurrencyToken();
             entity.HasOne<NexoRuta.Domain.Reparto.HojaRuta>().WithMany()
                 .HasForeignKey(x => new { x.OperadorId, x.RutaCustodiaId })
@@ -434,7 +438,8 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
                     "(\"Tipo\" = 'RepartoModificado' AND \"VersionContrato\" = 1 AND \"Destino\" = 'PushFcm' AND \"Ambito\" = 'Envio' AND \"EstadoEntrega\" IS NULL) OR " +
                     "(\"Tipo\" = 'CodigoCancelacionEmail' AND \"VersionContrato\" = 1 AND \"Destino\" = 'RabbitMq' AND \"Ambito\" = 'Envio' AND \"EstadoEntrega\" IS NULL) OR " +
                     "(\"Tipo\" = 'PasswordRecoveryEmail' AND \"VersionContrato\" = 1 AND \"Destino\" = 'RabbitMq' AND \"Ambito\" = 'Identidad' AND \"EstadoEntrega\" IN ('Pending', 'Delivered', 'Expired', 'Failed')) OR " +
-                    "(\"Tipo\" = 'PasswordRecoveryRequested' AND \"VersionContrato\" = 1 AND \"Destino\" = 'Kafka' AND \"Ambito\" = 'Identidad' AND \"EstadoEntrega\" IS NULL)");
+                    "(\"Tipo\" = 'PasswordRecoveryRequested' AND \"VersionContrato\" = 1 AND \"Destino\" = 'Kafka' AND \"Ambito\" = 'Identidad' AND \"EstadoEntrega\" IS NULL) OR " +
+                    "(\"Tipo\" IN ('BultoActualizado','OperacionActualizada') AND \"VersionContrato\" = 2 AND \"Destino\" = 'Kafka' AND \"Ambito\" = 'Envio' AND \"EstadoEntrega\" IS NULL)");
                 table.HasCheckConstraint("CK_OutboxMessages_Priority", "\"Prioridad\" IN ('Baja', 'Normal', 'Alta')");
                 table.HasCheckConstraint("CK_OutboxMessages_State", "\"Estado\" IN ('Pendiente', 'Procesando', 'Publicado', 'Error')");
             });
@@ -732,7 +737,7 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
         {
             entity.ToTable("TarifasZonaModalidad", table =>
             {
-                table.HasCheckConstraint("CK_TarifasZonaModalidad_Modality", "\"Modalidad\" IN ('Estandar', 'Urgente')");
+                table.HasCheckConstraint("CK_TarifasZonaModalidad_Modality", "\"Modalidad\" IN ('Estandar', 'Urgente', 'Retiro')");
                 table.HasCheckConstraint("CK_TarifasZonaModalidad_Amounts",
                     "\"ImporteBaseUyu\" >= 0 AND \"PrecioPorKilogramoUyu\" >= 0 AND \"PrecioPorMetroCubicoUyu\" >= 0");
             });
@@ -818,6 +823,8 @@ public sealed class NexoRutaDbContext(DbContextOptions<NexoRutaDbContext> option
             entity.Property(x => x.Estado).HasConversion<string>().HasMaxLength(16).IsRequired();
             entity.Property(x => x.VersionConcurrencia).HasDefaultValue(0L).IsConcurrencyToken().ValueGeneratedNever();
             entity.Property(x => x.PoliticaDevolucionAlAgotarIntentos).HasConversion<string>().HasMaxLength(32);
+            entity.Property(x => x.PoliticaPendientesParcial).HasConversion<string>().HasMaxLength(32);
+            entity.Property(x => x.RecargoNuevaVisitaUyu).HasPrecision(12, 2);
             entity.Property(x => x.CreadaUtc).IsRequired();
             entity.HasIndex(x => x.OperadorId).IsUnique()
                 .HasFilter("\"Estado\" = 'Borrador'")

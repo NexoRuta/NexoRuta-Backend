@@ -3,6 +3,18 @@ using NexoRuta.Application.Reparto.Exceptions;
 namespace NexoRuta.Application.Reparto.UseCases;
 public sealed partial class GestionarRutasUseCase
 {
+    public async Task<bool> DevolverBultosComercioAsync(Guid id, long version, CancellationToken ct)
+    {
+        var actor = await usuario.ObtenerAsync(ct);
+        if (actor.OperadorId is null || actor.ComercioId is not null) throw new RepartoNoPermitidoException();
+        return await rutas.DevolverBultosComercioAsync(actor.OperadorId.Value, id, version, ct);
+    }
+    public async Task<bool> EntregarComercioAsync(Guid id, long version, CancellationToken ct)
+    {
+        var actor = await usuario.ObtenerAsync(ct);
+        if (actor.OperadorId is null || actor.ComercioId is not null) throw new RepartoNoPermitidoException();
+        return await rutas.EntregarComercioAsync(actor.OperadorId.Value, id, version, ct);
+    }
     public async Task<ConsultaRecepcionDatos?> ConsultarRecepcionAsync(string codigo, CancellationToken ct)
     {
         var actor = await usuario.ObtenerAsync(ct);

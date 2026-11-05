@@ -85,7 +85,8 @@ public sealed class EnviosController(
         request.OperadorId!.Value, request.DestinatarioNombre, request.DestinatarioEmail, request.Direccion,
         request.Bultos.Select(b => new BultoDeclarado(b.Codigo, b.PesoGramos, b.LargoCentimetros, b.AnchoCentimetros, b.AltoCentimetros)).ToArray(),
         new ServicioEnvioDeclarado(request.Servicio.ZonaId!.Value, request.Servicio.Latitud!.Value,
-            request.Servicio.Longitud!.Value, request.Servicio.Modalidad) { VersionTarifarioEsperada = request.Servicio.VersionTarifarioEsperada });
+            request.Servicio.Longitud!.Value, request.Servicio.Modalidad) { VersionTarifarioEsperada = request.Servicio.VersionTarifarioEsperada })
+        { Retiro = request.Retiro is { } r ? new SolicitudRetiro(r.SolicitudId, r.Motivo, r.DesdeUtc, r.HastaUtc) : null };
 
     [HttpGet("envios/{id:guid}/tarifa")]
     [Authorize(Policy = "envios.consultar")]
@@ -109,6 +110,7 @@ public sealed class EnviosController(
             TarifaEnvioResponse.Desde(r.Calculo), r.Servicio.Latitud, r.Servicio.Longitud, r.VersionZona, r.RevisionZona)).ToArray());
     }
 
+    [HttpPost("retiros")]
     [HttpPost("envios")]
     [Authorize(Policy = "envios.crear")]
     [Authorize(Policy = nameof(TipoAccesoUsuario.Comercio))]
@@ -122,6 +124,8 @@ public sealed class EnviosController(
         [FromBody] CrearEnvioRequest request,
         CancellationToken cancellationToken)
     {
+        if (Request.Path.Value?.EndsWith("/retiros", StringComparison.OrdinalIgnoreCase) == true && request.Retiro is null)
+            return BadRequest(new { message = "La solicitud de retiro requiere identidad, motivo y franja." });
         try
         {
             var created = await crearEnvio.EjecutarAsync(

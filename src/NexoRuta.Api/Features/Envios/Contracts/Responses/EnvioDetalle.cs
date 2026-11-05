@@ -16,6 +16,10 @@ public sealed record EnvioDetalle(
     DateTimeOffset CreadoEnUtc)
 {
     public TarifaEnvioResponse? Tarifa { get; init; }
+    public bool EsRetiro { get; init; }
+    public string? MotivoRetiro { get; init; }
+    public DateTimeOffset? FranjaRetiroDesdeUtc { get; init; }
+    public DateTimeOffset? FranjaRetiroHastaUtc { get; init; }
     public bool DestinoConfirmado { get; init; }
     public string? ReferenciaExterna { get; init; }
     public string DestinatarioEmail { get; init; } = string.Empty;
@@ -38,9 +42,10 @@ public sealed record EnvioDetalle(
             PesoGramos: bulto.PesoGramos,
             LargoCentimetros: bulto.LargoCentimetros,
             AnchoCentimetros: bulto.AnchoCentimetros,
-            AltoCentimetros: bulto.AltoCentimetros) { Custodia = bulto.Custodia }).ToArray())
+            AltoCentimetros: bulto.AltoCentimetros) { Custodia = bulto.Custodia, Resultado = bulto.Resultado, MotivoNoEntrega = bulto.MotivoNoEntrega }).ToArray())
     {
         Tarifa = envio.Tarifa is null ? null : TarifaEnvioResponse.Desde(envio.Tarifa),
+        EsRetiro = envio.EsRetiro, MotivoRetiro = envio.MotivoRetiro, FranjaRetiroDesdeUtc = envio.FranjaRetiroDesdeUtc, FranjaRetiroHastaUtc = envio.FranjaRetiroHastaUtc,
         DestinoConfirmado = envio.DestinoConfirmado,
         ReferenciaExterna = envio.ReferenciaExterna,
         DestinatarioEmail = envio.DestinatarioEmail

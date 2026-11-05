@@ -5,6 +5,9 @@ public sealed class VersionReglasOperativas
     private readonly List<RequisitoPruebaEntrega> requisitosPrueba = [];
     private readonly List<MotivoNoEntregaVersion> motivos = [];
 
+    public bool PermiteEntregaParcial { get; private set; }
+    public PoliticaPendientesParcial PoliticaPendientesParcial { get; private set; }
+    public decimal RecargoNuevaVisitaUyu { get; private set; }
     public Guid Id { get; private set; }
     public Guid OperadorId { get; private set; }
     public EstadoVersionReglasOperativas Estado { get; private set; }
@@ -61,6 +64,9 @@ public sealed class VersionReglasOperativas
 
         var version = new VersionReglasOperativas
         {
+            PermiteEntregaParcial = copiarDesde?.PermiteEntregaParcial ?? false,
+            PoliticaPendientesParcial = copiarDesde?.PoliticaPendientesParcial ?? default,
+            RecargoNuevaVisitaUyu = copiarDesde?.RecargoNuevaVisitaUyu ?? 0,
             Id = id ?? Guid.CreateVersion7(),
             OperadorId = operadorId,
             Estado = EstadoVersionReglasOperativas.Borrador,
@@ -116,6 +122,13 @@ public sealed class VersionReglasOperativas
         if (motivos.Any(item => !newCodes.Contains(item.Codigo)))
             throw new ArgumentException("Los códigos existentes no se eliminan; retire su disponibilidad.", nameof(configuracion.Motivos));
 
+        if (!Enum.IsDefined(configuracion.PoliticaPendientesParcial) || configuracion.RecargoNuevaVisitaUyu < 0
+            || configuracion.RecargoNuevaVisitaUyu > 999999999m || decimal.Round(configuracion.RecargoNuevaVisitaUyu, 2) != configuracion.RecargoNuevaVisitaUyu
+            || configuracion.PoliticaPendientesParcial == PoliticaPendientesParcial.NuevaVisitaConRecargo && configuracion.RecargoNuevaVisitaUyu <= 0)
+            throw new ArgumentException("La política de pendientes requiere un recargo válido cuando corresponde.");
+        PermiteEntregaParcial = configuracion.PermiteEntregaParcial;
+        PoliticaPendientesParcial = configuracion.PoliticaPendientesParcial;
+        RecargoNuevaVisitaUyu = configuracion.RecargoNuevaVisitaUyu;
         var retainedRequirements = requirements.ToHashSet();
         var newRequirements = requirements.Where(type => requisitosPrueba.All(item => item.Tipo != type))
             .Select(type => RequisitoPruebaEntrega.Crear(OperadorId, Id, type)).ToList();

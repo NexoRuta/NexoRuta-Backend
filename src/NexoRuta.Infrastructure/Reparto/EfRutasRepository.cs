@@ -67,7 +67,7 @@ public sealed partial class EfRutasRepository(NexoRutaDbContext db, TimeProvider
         var ids = datos.Paradas.Select(x => x.EnvioId).ToArray();
         var envios = await db.Envios.Where(x => x.OperadorId == operadorId && ids.Contains(x.Id)).ToArrayAsync(ct);
         if (envios.Length != ids.Length) throw new ConflictoRepartoException("Algún envío no pertenece al operador.");
-        if (envios.Any(x => x.Estado is not (EstadoEnvio.EnDeposito or EstadoEnvio.Reprogramado)))
+        if (envios.Any(x => x.Estado is not (EstadoEnvio.EnDeposito or EstadoEnvio.Reprogramado or EstadoEnvio.EntregadoParcialmente or EstadoEnvio.RetiroSolicitado or EstadoEnvio.RetiroFallido)))
             throw new ConflictoRepartoException("Solo pueden planificarse envíos en depósito o reprogramados.");
         if (await db.ParadasRuta.AnyAsync(x => x.OperadorId == operadorId && ids.Contains(x.EnvioId) && x.Activa, ct))
             throw new ConflictoRepartoException("Algún envío ya pertenece a otra ruta activa.");
@@ -75,11 +75,11 @@ public sealed partial class EfRutasRepository(NexoRutaDbContext db, TimeProvider
         if (await db.Direcciones.CountAsync(x => x.OperadorId == operadorId && direcciones.Contains(x.Id)
                 && x.ConfirmadaEnUtc != null && x.Latitud != null && x.Longitud != null, ct) != direcciones.Distinct().Count())
             throw new ConflictoRepartoException("El comercio debe confirmar todos los destinos antes de planificar.");
-        var bultos = await db.Bultos.Where(x => x.OperadorId == operadorId && ids.Contains(x.EnvioId)).ToArrayAsync(ct);
+        var bultos = await db.Bultos.Where(x => x.OperadorId == operadorId && ids.Contains(x.EnvioId) && x.Resultado == ResultadoBulto.Pendiente).ToArrayAsync(ct);
         if (envios.Any(x => !bultos.Any(b => b.EnvioId == x.Id))) throw new ConflictoRepartoException("Todos los envíos deben tener bultos.");
-        if (bultos.Any(x => x.Custodia != EstadoCustodiaBulto.Deposito))
+        if (bultos.Any(x => x.Custodia != (envios.Single(e => e.Id == x.EnvioId).EsRetiro ? EstadoCustodiaBulto.SinRecepcion : EstadoCustodiaBulto.Deposito)))
             throw new ConflictoRepartoException("La planificación requiere que todos los bultos estén recibidos físicamente en depósito.");
-        if (CapacidadCarga.Exceso(vehiculo, bultos) is { } exceso) throw new ConflictoRepartoException(exceso);
+        if (CapacidadCarga.ExcesoRecorrido(vehiculo, datos.Paradas.Select(p => (p.EnvioId, envios.Single(e => e.Id == p.EnvioId).EsRetiro)), bultos) is { } exceso) throw new ConflictoRepartoException(exceso);
         var hoja = new HojaRuta(operadorId, datos.RepartidorAccesoId, vehiculo, datos.Fecha, politica.Version);
         var zona = TimeZoneInfo.FindSystemTimeZoneById(politica.ZonaHoraria);
         var baseActual = await db.BasesOperativas.AsNoTracking().SingleOrDefaultAsync(b => b.OperadorId == operadorId, ct);
@@ -93,8 +93,9 @@ public sealed partial class EfRutasRepository(NexoRutaDbContext db, TimeProvider
                 throw new ArgumentException("Las llegadas manuales no pueden preceder la fecha operativa ni la salida planificada.");
             await RestriccionesTemporales.ValidarAsync(db, operadorId, parada.EnvioId, parada.LlegadaEstimadaUtc, parada.ServicioMinutos ?? baseActual?.ServicioPredeterminadoMinutos, ct);
             hoja.AgregarParada(parada.EnvioId, parada.LlegadaEstimadaUtc, parada.ServicioMinutos ?? baseActual?.ServicioPredeterminadoMinutos);
+            hoja.Paradas.Single(p => p.EnvioId == parada.EnvioId).FijarBultos(bultos.Where(b => b.EnvioId == parada.EnvioId).Select(b => b.Id));
             var envio = envios.Single(x => x.Id == parada.EnvioId);
-            envio.CambiarEstado(EstadoEnvio.AsignadoRuta, envio.Version);
+            envio.CambiarEstado(envio.EsRetiro ? EstadoEnvio.RetiroAsignado : EstadoEnvio.AsignadoRuta, envio.Version);
         }
         hoja.CapturarPlanTemporal(baseActual, datos.SalidaPlanificadaEnUtc, politica.ZonaHoraria);
         db.HojasRuta.Add(hoja); await db.SaveChangesAsync(ct);
@@ -122,14 +123,16 @@ public sealed partial class EfRutasRepository(NexoRutaDbContext db, TimeProvider
             || !await db.Vehiculos.AnyAsync(x => x.OperadorId == operadorId && x.Id == hoja.VehiculoId && x.Activo, ct))
             throw new ConflictoRepartoException("Repartidor o vehículo deshabilitados.");
         var ids = hoja.Paradas.Where(x => x.Activa).Select(x => x.EnvioId).ToArray();
-        if (ids.Length == 0 || await db.Bultos.AnyAsync(x => x.OperadorId == operadorId && ids.Contains(x.EnvioId) && x.Custodia != EstadoCustodiaBulto.Deposito, ct)
-            || await db.Envios.CountAsync(x => x.OperadorId == operadorId && ids.Contains(x.Id) && x.Estado == EstadoEnvio.AsignadoRuta, ct) != ids.Length)
+        var enviosActivos = await db.Envios.Where(e => e.OperadorId == operadorId && ids.Contains(e.Id)).ToArrayAsync(ct);
+        var pendientesActivos = await db.Bultos.Where(b => b.OperadorId == operadorId && ids.Contains(b.EnvioId) && b.Resultado == ResultadoBulto.Pendiente).ToArrayAsync(ct);
+        if (ids.Length == 0 || pendientesActivos.Any(b => b.Custodia != (enviosActivos.Single(e => e.Id == b.EnvioId).EsRetiro ? EstadoCustodiaBulto.SinRecepcion : EstadoCustodiaBulto.Deposito))
+            || enviosActivos.Any(e => e.Estado is not (EstadoEnvio.AsignadoRuta or EstadoEnvio.EntregadoParcialmente or EstadoEnvio.RetiroAsignado)))
             throw new ConflictoRepartoException("Todos los envíos deben seguir asignados y sus bultos recibidos físicamente en depósito.");
         var vehiculo = await db.Vehiculos.SingleAsync(x => x.OperadorId == operadorId && x.Id == hoja.VehiculoId, ct);
         if (vehiculo.VerificacionInicialEnUtc is null)
             throw new ConflictoRepartoException("El vehículo requiere verificar su disponibilidad inicial en el panel de flota antes de despachar.");
-        var bultos = await db.Bultos.Where(x => x.OperadorId == operadorId && ids.Contains(x.EnvioId)).ToArrayAsync(ct);
-        if (CapacidadCarga.Exceso(vehiculo, bultos) is { } exceso) throw new ConflictoRepartoException(exceso);
+        var bultos = await db.Bultos.Where(x => x.OperadorId == operadorId && ids.Contains(x.EnvioId) && x.Resultado == ResultadoBulto.Pendiente).ToArrayAsync(ct);
+        await ValidarCapacidadMixta(hoja, vehiculo, ct);
         if (ids.Length > politica.MaximoParadas) throw new ConflictoRepartoException("La ruta supera el máximo de paradas configurado.");
         foreach (var parada in hoja.Paradas.Where(p => p.Activa))
             await RestriccionesTemporales.ValidarAsync(db, operadorId, parada.EnvioId, parada.LlegadaEstimadaUtc, parada.ServicioMinutos, ct);
@@ -139,6 +142,7 @@ public sealed partial class EfRutasRepository(NexoRutaDbContext db, TimeProvider
         RegistrarHechoFlota(actor, vehiculo.Id, "despacho", new(ocupacion.Id, ocupacion.Id, 0, "Autorización operativa de despacho."),
             new(ocupacion.Id, vehiculo.Id, hoja.Id, ocupacion.Id, ocupacion.Version, "despacho", ocupacion.AdquiridaEnUtc!.Value));
         await db.SaveChangesAsync(ct);
+        foreach (var envioId in ids) await db.Database.ExecuteSqlInterpolatedAsync($"SELECT nexoruta_app.apply_partial_visit_fee({envioId},{hoja.Id})", ct);
         var salida = await Datos(hoja, ct); await tx.CommitAsync(ct); return salida;
     }
 
@@ -167,7 +171,7 @@ public sealed partial class EfRutasRepository(NexoRutaDbContext db, TimeProvider
         if (envio.Version != version) throw new ConflictoRepartoException("El envío cambió antes de recibirlo.");
         if (envio.Estado == EstadoEnvio.Admitido)
             throw new ConflictoRepartoException("La primera recepción requiere escanear y cotejar cada bulto en Depósito.");
-        var bultos = await db.Bultos.Where(x => x.OperadorId == operadorId && x.EnvioId == envioId).ToArrayAsync(ct);
+        var bultos = await db.Bultos.Where(x => x.OperadorId == operadorId && x.EnvioId == envioId && (x.Resultado == ResultadoBulto.Pendiente || x.Resultado == ResultadoBulto.EnDevolucion)).ToArrayAsync(ct);
         var pendientes = bultos.Where(b => b.Custodia == EstadoCustodiaBulto.Repartidor).ToArray();
         var cierres = await (from o in db.OperacionesJornada.AsNoTracking()
             join h in db.HojasRuta on o.RutaId equals h.Id
@@ -184,10 +188,20 @@ public sealed partial class EfRutasRepository(NexoRutaDbContext db, TimeProvider
             if (bulto.Custodia == EstadoCustodiaBulto.Repartidor)
                 bulto.RecibirTrasIncidenciaDeCierre(bulto.AccesoCustodioId!.Value, bulto.RutaCustodiaId!.Value);
             else bulto.RecibirEnDeposito();
+        if (envio.EsRetiro && envio.Estado == EstadoEnvio.Retirado)
+        {
+            await db.SetShipmentHistoryContextAsync("RecepcionRetiro", envio.Id, envio.Id, reloj.GetUtcNow(), cancellationToken: ct);
+            envio.CambiarEstado(EstadoEnvio.RetiroEnDeposito, envio.Version);
+            await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return true;
+        }
         var cambiaEstado = envio.Estado == EstadoEnvio.EnDevolucion;
-        if (cambiaEstado) envio.CambiarEstado(EstadoEnvio.Devuelto, version);
+        if (cambiaEstado)
+        {
+            foreach (var b in bultos.Where(b => b.Resultado == ResultadoBulto.EnDevolucion)) b.RegistrarResultado(ResultadoBulto.Devuelto, b.Version, b.MotivoNoEntrega);
+            envio.CambiarEstado(EstadoEnvio.Devuelto, version);
+        }
         else if (envio.Estado is not (EstadoEnvio.Reprogramado or EstadoEnvio.Cancelado or EstadoEnvio.AsignadoRuta
-            or EstadoEnvio.EnDeposito or EstadoEnvio.NoEntregado or EstadoEnvio.EnTransito))
+            or EstadoEnvio.EnDeposito or EstadoEnvio.NoEntregado or EstadoEnvio.EnTransito or EstadoEnvio.EntregadoParcialmente))
             throw new ConflictoRepartoException("El estado del envío no admite recepción.");
         if (cambiaEstado)
         {
@@ -228,6 +242,12 @@ public sealed partial class EfRutasRepository(NexoRutaDbContext db, TimeProvider
             return ResumenIntentosEntrega.Calcular(intentosAplicados.Where(a => a.EnvioId == x.Envio.Id)
                 .Select(a => a.Payload), version.IntervaloEntreIntentosMinutos!.Value);
         });
+        foreach (var detalle in envios.Where(e => e.Envio.Estado == EstadoEnvio.EntregadoParcialmente))
+        {
+            var pendientes = bultos.Where(b => b.EnvioId == detalle.Envio.Id && b.Resultado == ResultadoBulto.Pendiente).ToArray();
+            var porBulto = await IntentosPorBulto.Calcular(db, hoja.OperadorId, detalle.Envio.Id, pendientes, reglas[detalle.Envio.VersionReglasId].IntervaloEntreIntentosMinutos!.Value, ct);
+            resumenesIntentos[detalle.Envio.Id] = porBulto.Values.MaxBy(i => i.Cantidad) ?? new(0, null, null);
+        }
         var paradas = hoja.Paradas.OrderBy(x => x.Orden).Select(p =>
         {
             var detalle = envios.Single(x => x.Envio.Id == p.EnvioId);
@@ -235,10 +255,10 @@ public sealed partial class EfRutasRepository(NexoRutaDbContext db, TimeProvider
                 detalle.Envio.Estado.ToString(), detalle.Envio.Version, detalle.Destinatario, detalle.Direccion.Descripcion,
                 detalle.Direccion.Latitud ?? throw new InvalidOperationException("El destino no está confirmado."),
                 detalle.Direccion.Longitud ?? throw new InvalidOperationException("El destino no está confirmado."),
-                bultos.Where(b => b.EnvioId == p.EnvioId).Select(b => new BultoRutaDatos(b.Id, b.Codigo, b.PesoGramos,
-                    b.LargoCentimetros * b.AnchoCentimetros * b.AltoCentimetros, b.Custodia.ToString(), b.Version)).ToArray(),
+                bultos.Where(b => b.EnvioId == p.EnvioId && (p.BultoIds.Length == 0 || p.BultoIds.Contains(b.Id))).Select(b => new BultoRutaDatos(b.Id, b.Codigo, b.PesoGramos,
+                    b.LargoCentimetros * b.AnchoCentimetros * b.AltoCentimetros, b.Custodia.ToString(), b.Version) { Resultado = b.Resultado.ToString(), EnEstaRuta = b.RutaCustodiaId == hoja.Id }).ToArray(),
                 ReglasDatos(reglas[detalle.Envio.VersionReglasId]), resumenesIntentos[p.EnvioId].Cantidad,
-                resumenesIntentos[p.EnvioId].ProximoIntentoElegibleUtc, p.ServicioMinutos);
+                resumenesIntentos[p.EnvioId].ProximoIntentoElegibleUtc, p.ServicioMinutos) { EsRetiro = detalle.Envio.EsRetiro, ResultadoVisita = p.ResultadoVisita };
         }).ToArray();
         var cierres = await db.OperacionesJornada.AsNoTracking().Where(o => o.OperadorId == hoja.OperadorId && o.RutaId == hoja.Id
             && o.Tipo == "FinJornada" && o.Resultado == "Aplicada").Select(o => o.IncidenciasCierre).ToArrayAsync(ct);
@@ -264,7 +284,7 @@ public sealed partial class EfRutasRepository(NexoRutaDbContext db, TimeProvider
         v.RequisitosPrueba.Any(p => p.Tipo == TipoPruebaEntrega.Fotografia),
         v.RequisitosPrueba.Any(p => p.Tipo == TipoPruebaEntrega.NombreReceptor),
         v.RequisitosPrueba.Any(p => p.Tipo == TipoPruebaEntrega.DocumentoReceptor),
-        v.Motivos.Where(m => m.Disponible).OrderBy(m => m.Codigo).Select(m => new MotivoNoEntregaDatos(m.Codigo, m.Descripcion)).ToArray());
+        v.Motivos.Where(m => m.Disponible).OrderBy(m => m.Codigo).Select(m => new MotivoNoEntregaDatos(m.Codigo, m.Descripcion)).ToArray()) { PermiteEntregaParcial = v.PermiteEntregaParcial };
     private static IncidenciaCierreDatos[] LeerIncidencias(string json) =>
         JsonSerializer.Deserialize<IncidenciaCierreDatos[]>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
     private Task Contexto(Guid op, CancellationToken ct) => db.Database.ExecuteSqlInterpolatedAsync($"SELECT set_config('nexoruta.operador_id', {op.ToString()}, true)", ct);

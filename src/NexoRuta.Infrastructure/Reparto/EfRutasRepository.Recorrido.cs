@@ -55,12 +55,18 @@ public sealed partial class EfRutasRepository
             var final=SelectorPosicion.Elegir(mejor is not null?new[]{mejor}:rechazada is not null?new[]{rechazada}:[],ahora,inicio,(opcionesRouting??new()).Gps,minimaProyeccion);
             posicion=final.Posicion;motivo=final.Motivo=="SinPosicion"&&invalida?"GpsInvalido":final.Motivo;
         }
-        // An unsuccessful delivery is not an automatic retry: the current execution authorizes only EnTransito.
-        // Delivered, pending evidence, failed/return/cancelled shipments and suspended stops are not future visits.
-        var ids=c.Pedido.Paradas.Select(x=>x.EnvioId).ToArray();
-        var pendientes=await db.Envios.AsNoTracking().Where(e=>e.OperadorId==h.OperadorId&&ids.Contains(e.Id)
-            &&e.Estado==EstadoEnvio.EnTransito&&e.EntregaFisicaEnUtc==null).Select(e=>e.Id).ToArrayAsync(ct);
-        var pedido=c.Pedido with {SalidaPlanificadaEnUtc=ahora,Paradas=c.Pedido.Paradas.Where(p=>p.Activa&&pendientes.Contains(p.EnvioId)).OrderBy(p=>p.Orden).ToArray()};
+        // The active visit and its parcel snapshot define remaining work. A shipment's
+        // first delivery timestamp is historical and does not resolve a later visit.
+        var ids = c.Pedido.Paradas.Select(x => x.EnvioId).ToArray();
+        var envios = await db.Envios.AsNoTracking().Where(e => e.OperadorId == h.OperadorId && ids.Contains(e.Id)).ToArrayAsync(ct);
+        var bultos = await db.Bultos.AsNoTracking().Where(b => b.OperadorId == h.OperadorId && ids.Contains(b.EnvioId)).ToArrayAsync(ct);
+        var pendientes = h.Paradas.Where(p => p.Activa && p.ResultadoVisita == "Pendiente"
+            && envios.Any(e => e.Id == p.EnvioId && (e.EsRetiro ? e.Estado == EstadoEnvio.RetiroAsignado
+                : e.Estado is EstadoEnvio.EnTransito or EstadoEnvio.EntregadoParcialmente
+                    && bultos.Any(b => b.EnvioId == e.Id && b.Resultado == ResultadoBulto.Pendiente
+                        && (p.BultoIds.Length == 0 || p.BultoIds.Contains(b.Id)))))).Select(p => p.EnvioId).ToHashSet();
+        var pedido = c.Pedido with { SalidaPlanificadaEnUtc = ahora,
+            Paradas = c.Pedido.Paradas.Where(p => p.Activa && pendientes.Contains(p.EnvioId)).OrderBy(p => p.Orden).ToArray() };
         var ultimo=await db.Set<EstimacionRegistro>().Where(x=>x.OperadorId==h.OperadorId&&x.RutaId==h.Id).MaxAsync(x=>(long?)x.NumeroVersion,ct)??0;
         var exito=await db.Set<EstimacionRegistro>().Where(x=>x.OperadorId==h.OperadorId&&x.RutaId==h.Id&&x.Motivo=="Calculada").MaxAsync(x=>(long?)x.NumeroVersion,ct)??0;
         return c with {Pedido=pedido,Recorrido=new(o?.Id,posicion,motivo,ultimo,exito,(opcionesRouting??new()).Gps,h.RepartidorAccesoId,h.JornadaId,h.VehiculoId,h.SalidaEnUtc,o?.AdquiridaEnUtc)};
