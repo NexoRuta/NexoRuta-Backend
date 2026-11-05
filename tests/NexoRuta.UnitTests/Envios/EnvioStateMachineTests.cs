@@ -28,7 +28,21 @@ public sealed class EnvioStateMachineTests
         (EstadoEnvio.EnTransito, EstadoEnvio.Cancelado),
         (EstadoEnvio.NoEntregado, EstadoEnvio.Cancelado),
         (EstadoEnvio.Reprogramado, EstadoEnvio.Cancelado),
-        (EstadoEnvio.EnDevolucion, EstadoEnvio.Cancelado)
+        (EstadoEnvio.EnDevolucion, EstadoEnvio.Cancelado),
+        (EstadoEnvio.EnTransito, EstadoEnvio.EntregadoParcialmente),
+        (EstadoEnvio.EntregadoParcialmente, EstadoEnvio.Entregado),
+        (EstadoEnvio.EntregadoParcialmente, EstadoEnvio.EntregaPendienteValidacion),
+        (EstadoEnvio.EntregadoParcialmente, EstadoEnvio.EntregaSinValidacion),
+        (EstadoEnvio.Admitido, EstadoEnvio.RetiroSolicitado),
+        (EstadoEnvio.RetiroSolicitado, EstadoEnvio.RetiroAsignado),
+        (EstadoEnvio.RetiroSolicitado, EstadoEnvio.Cancelado),
+        (EstadoEnvio.RetiroFallido, EstadoEnvio.RetiroAsignado),
+        (EstadoEnvio.RetiroFallido, EstadoEnvio.Cancelado),
+        (EstadoEnvio.RetiroAsignado, EstadoEnvio.Retirado),
+        (EstadoEnvio.RetiroAsignado, EstadoEnvio.RetiroFallido),
+        (EstadoEnvio.RetiroAsignado, EstadoEnvio.Cancelado),
+        (EstadoEnvio.Retirado, EstadoEnvio.RetiroEnDeposito),
+        (EstadoEnvio.RetiroEnDeposito, EstadoEnvio.EntregadoComercio)
     ];
 
     [Fact]
@@ -42,6 +56,11 @@ public sealed class EnvioStateMachineTests
             var expected = Allowed.Contains((origin, destination));
             var before = shipment.Version;
 
+            if (origin == EstadoEnvio.EntregadoParcialmente && destination is EstadoEnvio.AsignadoRuta or EstadoEnvio.EnTransito or EstadoEnvio.Reprogramado)
+            {
+                shipment.CambiarEstado(destination, before);
+                Assert.Equal(origin, shipment.Estado); Assert.Equal(before + 1, shipment.Version); continue;
+            }
             if (expected)
             {
                 if (origin == EstadoEnvio.EnTransito && destination is EstadoEnvio.Entregado or EstadoEnvio.EntregaPendienteValidacion)
@@ -115,6 +134,31 @@ public sealed class EnvioStateMachineTests
                 var expired = DateTimeOffset.Parse("2026-10-27T12:00:00Z");
                 shipment.DeclararEntregaFisica(expired, expired, null, false, shipment.Version);
                 Move(EstadoEnvio.EntregaSinValidacion);
+                break;
+            case EstadoEnvio.EntregadoParcialmente:
+                Move(EstadoEnvio.EnDeposito); Move(EstadoEnvio.AsignadoRuta); Move(EstadoEnvio.EnTransito);
+                var b1 = new Bulto(shipment.OperadorId, shipment.Id, "STATE-B1", 1, 1, 1, 1);
+                var b2 = new Bulto(shipment.OperadorId, shipment.Id, "STATE-B2", 1, 1, 1, 1);
+                var acceso = Guid.NewGuid(); var ruta = Guid.NewGuid(); b1.RecibirEnDeposito(); b1.Cargar(acceso, ruta); b1.Entregar(acceso, ruta);
+                b1.RegistrarResultado(ResultadoBulto.Entregado, b1.Version, entregadoEn: DateTimeOffset.UtcNow);
+                shipment.ActualizarResultadoBultos([b1,b2], DateTimeOffset.UtcNow);
+                break;
+            case EstadoEnvio.RetiroSolicitado:
+            case EstadoEnvio.RetiroAsignado:
+            case EstadoEnvio.RetiroFallido:
+            case EstadoEnvio.Retirado:
+            case EstadoEnvio.RetiroEnDeposito:
+            case EstadoEnvio.EntregadoComercio:
+                shipment.ConfigurarRetiro(Guid.NewGuid(), "Cambio sintético", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddHours(1), new string('A',64));
+                Move(EstadoEnvio.RetiroSolicitado);
+                if (state == EstadoEnvio.RetiroSolicitado) break;
+                Move(EstadoEnvio.RetiroAsignado);
+                if (state == EstadoEnvio.RetiroAsignado) break;
+                if (state == EstadoEnvio.RetiroFallido) { Move(EstadoEnvio.RetiroFallido); break; }
+                Move(EstadoEnvio.Retirado);
+                if (state == EstadoEnvio.Retirado) break;
+                Move(EstadoEnvio.RetiroEnDeposito);
+                if (state == EstadoEnvio.EntregadoComercio) Move(EstadoEnvio.EntregadoComercio);
                 break;
             case EstadoEnvio.Cancelado:
                 Move(EstadoEnvio.Cancelado);

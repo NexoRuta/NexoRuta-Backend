@@ -29,12 +29,13 @@ public sealed class Envio
         if (EsRetiro || bultos.Count == 0 || bultos.Any(b => b.EnvioId != Id || b.OperadorId != OperadorId))
             throw new InvalidOperationException("La agregación requiere los bultos de esta entrega.");
         var destino = AgregacionBultos.Derivar(bultos.Select(b => b.Resultado).ToArray(), Estado);
-        if (bultos.Any(b => TransicionesResultadoBulto.EntregaFisica(b.Resultado)))
+        if (EntregaFisicaEnUtc is null && bultos.Any(b => TransicionesResultadoBulto.EntregaFisica(b.Resultado)))
         {
             EntregaFisicaEnUtc ??= bultos.Where(b => b.EntregadoEnUtc != null).Min(b => b.EntregadoEnUtc);
             EntregaFisicaRecibidaEnUtc ??= recibidoEnUtc;
+            // The shipment deadline belongs to the first physical declaration. Later visits use parcel deadlines.
+            PlazoPruebaVenceEnUtc ??= bultos.Where(b => b.Resultado == ResultadoBulto.EntregaPendienteValidacion).Min(b => b.PruebaVenceEnUtc);
         }
-        PlazoPruebaVenceEnUtc ??= bultos.Where(b => b.Resultado == ResultadoBulto.EntregaPendienteValidacion).Min(b => b.PruebaVenceEnUtc);
         if (destino != Estado) AplicarEstado(destino);
         Version++;
     }

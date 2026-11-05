@@ -24,7 +24,7 @@ public sealed partial class EfOperacionesRepartoRepository(NexoRutaDbContext db,
     {
         if (operacion.Id == Guid.Empty || operacion.Secuencia < 1 || operacion.OcurridaEn == default
             || !Tipos.Contains(operacion.Tipo) || operacion.Datos.ValueKind != JsonValueKind.Object
-            || operacion.Datos.GetRawText().Length > 114688)
+            || System.Text.Encoding.UTF8.GetByteCount(operacion.Datos.GetRawText()) > 29_999_000)
             throw new ArgumentException("La operación está incompleta o excede el tamaño admitido.");
         var requiereEnvio = operacion.Tipo is "EntregaBultos" or "RetirarBultos" or "RetiroFallido" or "CargarBulto" or "EntregaFisica" or "EvidenciaEntrega" or "IntentoFallido";
         if (requiereEnvio ? operacion.EnvioId is null || operacion.EnvioId == Guid.Empty : operacion.EnvioId is not null)
@@ -33,7 +33,7 @@ public sealed partial class EfOperacionesRepartoRepository(NexoRutaDbContext db,
         try { datos = operacion.Datos.Deserialize<DatosOperacionReparto>(Json) ?? throw new JsonException(); }
         catch (JsonException) { throw new ArgumentException("Los datos de la operación no corresponden al contrato."); }
         ValidarDatos(datos);
-        if (datos.ResultadosBultos is { } resultados && (resultados.Length is < 1 or > 500
+        if (datos.ResultadosBultos is { } resultados && (resultados.Length < 1
             || resultados.Any(r => r.BultoId == Guid.Empty || r.Version < 0 || r.Motivo?.Length > 40)
             || resultados.Select(r => r.BultoId).Distinct().Count() != resultados.Length))
             throw new ArgumentException("Los resultados de bulto son inválidos o están repetidos.");
@@ -56,7 +56,17 @@ public sealed partial class EfOperacionesRepartoRepository(NexoRutaDbContext db,
         await db.SetShipmentHistoryContextAsync("OperacionJornada", operacion.Id, operacion.Id,
             operacion.OcurridaEn, operacion.Tipo, ct);
         var resultado = "Aplicada"; string? detalle = null;
-        try { detalle = await Ejecutar(hoja, operacion, datos, ct); }
+        try
+        {
+            if (datos.ResuelveOperacionId is { } resuelta)
+            {
+                var rechazo = await db.OperacionesJornada.AsNoTracking().SingleOrDefaultAsync(x => x.Id == resuelta, ct);
+                Exigir(operacion.Tipo == "RetirarBultos" && rechazo is not null && rechazo.Resultado == "Conflicto"
+                    && rechazo.Tipo == operacion.Tipo && rechazo.EnvioId == operacion.EnvioId && rechazo.RutaId == hoja.Id
+                    && rechazo.AccesoId == accesoId, "La resolución debe referenciar un retiro rechazado de esta misma visita.");
+            }
+            detalle = await Ejecutar(hoja, operacion, datos, ct);
+        }
         catch (ConflictoRepartoException ex)
         {
             // No guardar modificaciones parciales; conservar el hecho y su prueba como conflicto.
@@ -100,7 +110,7 @@ public sealed partial class EfOperacionesRepartoRepository(NexoRutaDbContext db,
     private static void Exigir(bool condicion, string mensaje) { if (!condicion) throw new ConflictoRepartoException(mensaje); }
     private static void ValidarDatos(DatosOperacionReparto x)
     {
-        if (x.Nombre?.Length > 160 || x.Documento?.Length > 40 || x.Motivo?.Length > 500 || x.BultoIds?.Length > 500
+        if (x.Nombre?.Length > 160 || x.Documento?.Length > 40 || x.Motivo?.Length > 500
             || x.BultoIds is { } ids && (ids.Any(id => id == Guid.Empty) || ids.Distinct().Count() != ids.Length)
             || x.Latitud is { } lat && (!double.IsFinite(lat) || lat is < -90 or > 90)
             || x.Longitud is { } lon && (!double.IsFinite(lon) || lon is < -180 or > 180)

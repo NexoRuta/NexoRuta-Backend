@@ -44,7 +44,7 @@ public sealed partial class EfOperacionesRepartoRepository
             }
             envio.CambiarEstado(EstadoEnvio.Retirado, envio.Version); parada.Completar(); return "Retiro registrado; custodia del repartidor hasta la recepción física.";
         }
-        Exigir(!envio.EsRetiro && envio.Estado is EstadoEnvio.EnTransito or EstadoEnvio.EntregadoParcialmente or EstadoEnvio.EntregaPendienteValidacion,
+        Exigir(!envio.EsRetiro && envio.Estado is EstadoEnvio.EnTransito or EstadoEnvio.EntregadoParcialmente or EstadoEnvio.EntregaPendienteValidacion or EstadoEnvio.EntregaSinValidacion,
             "El envío no admite resultados de entrega.");
         var intentos = await IntentosPorBulto.Calcular(db, hoja.OperadorId, envio.Id, propios, reglas.IntervaloEntreIntentosMinutos!.Value, ct);
         if (!evidencia)

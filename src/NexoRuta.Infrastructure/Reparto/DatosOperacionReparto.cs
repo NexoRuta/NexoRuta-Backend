@@ -4,6 +4,7 @@ namespace NexoRuta.Infrastructure.Reparto;
 internal sealed class DatosOperacionReparto
 {
     public ResultadoBultoOperacion[]? ResultadosBultos { get; init; }
+    public Guid? ResuelveOperacionId { get; init; }
     public Guid? BultoId { get; init; }
     public Guid[]? BultoIds { get; init; }
     public string? Nombre { get; init; }
