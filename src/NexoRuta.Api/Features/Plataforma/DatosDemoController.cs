@@ -4,6 +4,7 @@ using NexoRuta.Api.Features.Plataforma.Contracts;
 using NexoRuta.Application.Administracion.Context;
 using NexoRuta.Domain.Administracion;
 using NexoRuta.Infrastructure.Persistence;
+using NexoRuta.Application.Reparto.Dtos;
 
 namespace NexoRuta.Api.Features.Plataforma;
 
@@ -30,5 +31,25 @@ public sealed class DatosDemoController(DatosDemoSeeder seeder) : ControllerBase
         var (yaEstabaSembrado, estado) = await seeder.SembrarAsync(actor, ct);
         var response = DatosDemoStatusResponse.Desde(estado);
         return yaEstabaSembrado ? Conflict(response) : Ok(response);
+    }
+
+    [HttpPost("load-fixture")]
+    [ProducesResponseType<SembrarFixtureCargaResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> SembrarFixtureCarga(SembrarFixtureCargaRequest request, CancellationToken ct)
+    {
+        if (HttpContext.Items[typeof(ContextoPlataforma)] is not ContextoPlataforma actor)
+            return Forbid();
+        try
+        {
+            var cuentas = await seeder.SembrarFixtureCargaAsync(actor,
+                request.Cuentas.Select(x => new CredencialFixtureCarga(x.Email, x.Password)).ToArray(), ct);
+            return Ok(new SembrarFixtureCargaResponse(cuentas.Select(x =>
+                new CuentaFixtureCargaResponse(x.Email, x.JornadaId, x.Operaciones)).ToArray()));
+        }
+        catch (ArgumentException error)
+        {
+            return BadRequest(new { message = error.Message });
+        }
     }
 }

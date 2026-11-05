@@ -1,9 +1,11 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using NexoRuta.Application.Administracion.Context;
 using NexoRuta.Application.Administracion.Repositories;
+using NexoRuta.Application.Administracion.UseCases;
 using NexoRuta.Application.Envios.Repositories;
 using NexoRuta.Application.Reparto.Dtos;
 using NexoRuta.Application.Reparto.Repositories;
@@ -12,6 +14,7 @@ using NexoRuta.Domain.Administracion;
 using NexoRuta.Domain.Envios;
 using NexoRuta.Domain.Tarifas;
 using NexoRuta.Domain.ZonasCobertura;
+using NexoRuta.Application.ZonasCobertura.Repositories;
 using NexoRuta.Application.Envios.Commands;
 using NetTopologySuite;
 using NexoRuta.Domain.ReglasOperativas;
@@ -27,7 +30,11 @@ public sealed class DatosDemoSeeder(
     IRepartidoresRepository repartidores,
     IConfiguracionRepartoRepository configuracionReparto,
     IRutasRepository rutas,
-    IConfiguration configuration)
+    IConfiguration configuration,
+    IPermisosUsuarioRepository permisosUsuario,
+    IUsuariosOrganizacionRepository usuariosOrganizacion,
+    IRolesRepository roles,
+    IZonasCoberturaRepository zonasCobertura)
 {
     private static readonly TimeZoneInfo ZonaHoraria = TimeZoneInfo.FindSystemTimeZoneById("America/Montevideo");
     private static readonly string[] NombresOperadores = [
@@ -43,6 +50,11 @@ public sealed class DatosDemoSeeder(
     private static readonly string[] Calles = [
         "Av. 18 de Julio", "Bvar. España", "Canelones", "Av. Rivera", "Colonia", "Convención", "Maldonado", "Durazno",
         "Av. Italia", "Luis A. de Herrera", "Gaboto", "Rambla República del Perú"];
+
+    private const string CuentaPropietariaCarga = "opt06-fixture-owner@nexoruta.test";
+    private const string CuentaComercioCarga = "opt06-fixture-commerce@nexoruta.test";
+    private const string CodigoRolCarga = "opt06-load-driver";
+    private static readonly JsonSerializerOptions JsonOperacion = new(JsonSerializerDefaults.Web);
 
     public async Task<EstadoDatosDemo> ObtenerEstadoAsync(CancellationToken ct)
     {
@@ -212,6 +224,227 @@ public sealed class DatosDemoSeeder(
         return (false, EstadoDatosDemo.Desde(resultado));
     }
 
+    public async Task<IReadOnlyList<CuentaFixtureCargaSembrada>> SembrarFixtureCargaAsync(
+        ContextoPlataforma actor, IReadOnlyList<CredencialFixtureCarga> cuentas, CancellationToken ct)
+    {
+        if (db.Database.CurrentTransaction is null)
+            throw new InvalidOperationException("El fixture de carga requiere la transacciÃ³n autenticada de la plataforma.");
+        if (cuentas.Count is < 1 or > 5 || cuentas.Select(x => x.Email).Distinct(StringComparer.OrdinalIgnoreCase).Count() != cuentas.Count)
+            throw new ArgumentException("Cada lote debe contener entre una y cinco cuentas sintÃ©ticas Ãºnicas.");
+        foreach (var cuenta in cuentas)
+        {
+            if (!Regex.IsMatch(cuenta.Email, @"^opt06-load-(?:00[1-9]|0[1-4][0-9]|050)@nexoruta\.test$", RegexOptions.IgnoreCase)
+                || cuenta.Password.Length < 12)
+                throw new ArgumentException("El fixture solo admite las cuentas opt06-load-001..050@nexoruta.test y contraseÃ±as vÃ¡lidas.");
+        }
+
+        await db.ApplyAsync(RlsActorContext.From(actor), ct);
+        await db.Database.ExecuteSqlRawAsync(
+            "SELECT pg_advisory_xact_lock(hashtextextended('nexoruta:opt06:load-fixture', 0))", ct);
+        var operador = await ObtenerOrganizacionFixtureAsync(TipoAccesoUsuario.Operador, CuentaPropietariaCarga,
+            "Operador sintÃ©tico OPT-06", ct)
+            ?? await CrearOrganizacionFixtureAsync(TipoAccesoUsuario.Operador, "Operador sintÃ©tico OPT-06",
+                CuentaPropietariaCarga, actor, ct);
+        var comercio = await ObtenerOrganizacionFixtureAsync(TipoAccesoUsuario.Comercio, CuentaComercioCarga,
+            "Comercio sintÃ©tico OPT-06", ct)
+            ?? await CrearOrganizacionFixtureAsync(TipoAccesoUsuario.Comercio, "Comercio sintÃ©tico OPT-06",
+                CuentaComercioCarga, actor, ct);
+
+        await db.ApplyAsync(RlsActorContext.From(operador.Contexto), ct);
+        var rolCarga = await db.Roles.SingleOrDefaultAsync(x => x.OperadorId == operador.Id && x.Codigo == CodigoRolCarga, ct);
+        if (rolCarga is null)
+        {
+            rolCarga = new Rol(CodigoRolCarga, "Repartidor de pruebas OPT-06", operador.Id, null);
+            await roles.CrearAsync(rolCarga, ct);
+        }
+
+        if (!await roles.ActualizarPermisosAsync(operador.Contexto, rolCarga.Id, ["reparto.ejecutar"], ct))
+            throw new InvalidOperationException("OPT-06 role permissions could not be assigned.");
+
+        if (await configuracionReparto.ObtenerAsync(operador.Id, ct) is null)
+            await configuracionReparto.GuardarAsync(operador.Id,
+                new(0, ZonaHoraria.Id, 50, RequiereFotoIntento: false, BloquearDiscrepanciasCarga: true), ct);
+        if (!await db.ReglasOperativasOperadores.AnyAsync(x => x.OperadorId == operador.Id, ct))
+            await PublicarReglasAsync(operador, DateTimeOffset.UtcNow, ct);
+        if (!await db.ZonasCobertura.AnyAsync(x => x.OperadorId == operador.Id, ct))
+            await PublicarServicioDemoAsync(operador, ct, calendarioCompleto: true);
+        var versionReglasId = await db.ReglasOperativasOperadores.AsNoTracking()
+            .Where(x => x.OperadorId == operador.Id).Select(x => x.VersionVigenteId)
+            .SingleAsync(ct) ?? throw new InvalidOperationException("No se publicaron reglas operativas para el fixture OPT-06.");
+
+        var resultado = new List<CuentaFixtureCargaSembrada>(cuentas.Count);
+        foreach (var credencial in cuentas)
+        {
+            ct.ThrowIfCancellationRequested();
+            var repartidor = await ObtenerOCrearCuentaCargaAsync(operador, rolCarga, credencial, ct);
+            await db.ApplyAsync(RlsActorContext.From(operador.Contexto), ct);
+            var perfil = await db.Repartidores.SingleOrDefaultAsync(x => x.OperadorId == operador.Id
+                && x.AccesoId == repartidor.AccesoId, ct);
+            var numeroCuenta = credencial.Email.Split('@')[0]["opt06-load-".Length..];
+            var nombre = $"Repartidor OPT-06 {numeroCuenta}";
+            if (perfil is null)
+                await repartidores.GuardarAsync(operador.Id, repartidor.AccesoId, nombre, activo: true, version: null, ct);
+            else if (!perfil.Activo)
+                await repartidores.GuardarAsync(operador.Id, repartidor.AccesoId, nombre, activo: true, perfil.Version, ct);
+
+            var matricula = $"OTL{numeroCuenta[^3..]}";
+            var vehiculos = await configuracionReparto.VehiculosAsync(operador.Id, ct);
+            var vehiculo = vehiculos.SingleOrDefault(x => x.Matricula == matricula)
+                ?? await configuracionReparto.GuardarVehiculoAsync(operador.Id,
+                    new(Guid.Empty, matricula, 350_000, 12_000_000, Activo: true, Version: 0), ct)
+                ?? throw new InvalidOperationException("No se pudo crear el vehÃ­culo sintÃ©tico OPT-06.");
+            if (!vehiculo.Activo)
+                vehiculo = await configuracionReparto.GuardarVehiculoAsync(operador.Id,
+                    vehiculo with { Activo = true }, ct)
+                    ?? throw new InvalidOperationException("OPT-06 synthetic vehicle could not be activated.");
+            await db.ApplyAsync(RlsActorContext.From(operador.Contexto), ct);
+            var entidadVehiculo = await db.Vehiculos.SingleAsync(x => x.OperadorId == operador.Id && x.Id == vehiculo.Id, ct);
+            if (entidadVehiculo.VerificacionInicialEnUtc is null)
+                await rutas.ConfirmarFlotaAsync(operador.Contexto, vehiculo.Id, "verificar-inicial",
+                    new(Guid.CreateVersion7(), null, vehiculo.Version, "VerificaciÃ³n explÃ­cita del vehÃ­culo sintÃ©tico OPT-06."), ct);
+
+            resultado.Add(await ObtenerOCrearJornadaFixtureAsync(operador, comercio, repartidor, vehiculo, versionReglasId, ct));
+        }
+        return resultado;
+    }
+
+    private async Task<OrganizacionDemo?> ObtenerOrganizacionFixtureAsync(TipoAccesoUsuario tipo, string email,
+        string nombreFallback, CancellationToken ct)
+    {
+        var usuario = await db.Usuarios.AsNoTracking().SingleOrDefaultAsync(x => x.Email == email, ct);
+        if (usuario is null) return null;
+        var acceso = await db.AccesosUsuario.AsNoTracking().SingleOrDefaultAsync(x => x.UsuarioId == usuario.Id
+            && x.EsPropietario && x.TipoOrganizacion == tipo, ct)
+            ?? throw new InvalidOperationException("La identidad reservada para el fixture OPT-06 tiene un acceso incompatible.");
+        var rol = await db.Roles.AsNoTracking().SingleAsync(x => x.Id == acceso.RolId, ct);
+        var nombre = tipo == TipoAccesoUsuario.Operador
+            ? await db.Operadores.AsNoTracking().Where(x => x.Id == acceso.OperadorId).Select(x => x.Nombre).SingleAsync(ct)
+            : await db.Comercios.AsNoTracking().Where(x => x.Id == acceso.ComercioId).Select(x => x.Nombre).SingleAsync(ct);
+        var contexto = new ContextoUsuario(acceso.Id, usuario.Id, acceso.OperadorId, acceso.ComercioId, usuario.Email!,
+            acceso.OperadorId is null ? null : nombre, acceso.ComercioId is null ? null : nombre,
+            rol.Id, rol.Codigo, acceso.VersionSesion);
+        return new(acceso.OrganizacionId, nombreFallback, usuario.Email!, usuario.Id, acceso.Id, rol.Id, contexto);
+    }
+
+    private async Task<OrganizacionDemo> CrearOrganizacionFixtureAsync(TipoAccesoUsuario tipo, string nombre,
+        string email, ContextoPlataforma actor, CancellationToken ct)
+    {
+        await db.ApplyAsync(RlsActorContext.From(actor), ct);
+        await plataforma.CrearAsync(tipo, nombre, email, CrearPasswordAleatoria(), ct);
+        return await ObtenerOrganizacionFixtureAsync(tipo, email, nombre, ct)
+            ?? throw new InvalidOperationException("No se pudo recuperar la organizaciÃ³n sintÃ©tica OPT-06 luego de crearla.");
+    }
+
+    private async Task<ContextoUsuario> ObtenerOCrearCuentaCargaAsync(OrganizacionDemo operador, Rol rol,
+        CredencialFixtureCarga credencial, CancellationToken ct)
+    {
+        await db.ApplyAsync(RlsActorContext.From(operador.Contexto), ct);
+        var usuario = await db.Usuarios.AsNoTracking().SingleOrDefaultAsync(x => x.Email == credencial.Email, ct);
+        if (usuario is null)
+        {
+            var creado = await new CrearUsuarioUseCase(new UsuarioActualDemo(operador.Contexto), permisosUsuario,
+                usuariosOrganizacion, roles).EjecutarAsync(credencial.Email, credencial.Password, rol.Id, ct);
+            usuario = await db.Usuarios.AsNoTracking().SingleAsync(x => x.Id == creado.UsuarioId, ct);
+        }
+        var acceso = await db.AccesosUsuario.SingleOrDefaultAsync(x => x.UsuarioId == usuario.Id
+            && x.OperadorId == operador.Id, ct)
+            ?? throw new InvalidOperationException("La cuenta sintÃ©tica OPT-06 pertenece a otra organizaciÃ³n.");
+        if (acceso.EsPropietario)
+            throw new InvalidOperationException("Una cuenta de carga OPT-06 no puede tener rol propietario.");
+        if (acceso.RolId != rol.Id && !await roles.AsignarAsync(operador.Contexto, acceso.Id, rol.Id,
+            puedeAsignarRolProtegido: false, ct))
+            throw new InvalidOperationException("No se pudo aplicar el rol mÃ­nimo a una cuenta sintÃ©tica OPT-06.");
+        if (!acceso.Activo)
+        {
+            acceso.CambiarEstado(true);
+            await db.SaveChangesAsync(ct);
+        }
+        return new ContextoUsuario(acceso.Id, usuario.Id, operador.Id, null, usuario.Email!, operador.Nombre,
+            null, rol.Id, rol.Codigo, acceso.VersionSesion);
+    }
+
+    private async Task<CuentaFixtureCargaSembrada> ObtenerOCrearJornadaFixtureAsync(OrganizacionDemo operador,
+        OrganizacionDemo comercio, ContextoUsuario repartidor, VehiculoDatos vehiculo, Guid versionReglasId,
+        CancellationToken ct)
+    {
+        await db.ApplyAsync(RlsActorContext.From(operador.Contexto), ct);
+        var hoja = await db.HojasRuta.Where(x => x.OperadorId == operador.Id
+            && x.RepartidorAccesoId == repartidor.AccesoId
+            && (x.Estado == EstadoHojaRuta.Despachada || x.Estado == EstadoHojaRuta.EnCurso))
+            .OrderByDescending(x => x.Fecha).FirstOrDefaultAsync(ct);
+        var ahora = DateTimeOffset.UtcNow;
+        var reloj = new RelojDemo(ahora);
+        var rutasDemo = new EfRutasRepository(db, reloj);
+        if (hoja is null)
+        {
+            var hoy = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(ahora, ZonaHoraria).DateTime);
+            var cuenta = int.Parse(repartidor.UsuarioEmail["opt06-load-".Length..^"@nexoruta.test".Length]);
+            var ordinal = 100_000 + await db.Envios.CountAsync(x => x.OperadorId == operador.Id, ct) * 50 + cuenta;
+            var envio = await CrearEnvioAsync(comercio, operador, versionReglasId, ordinal,
+                $"Destinatario OPT-06 {ordinal}", $"Av. 18 de Julio {1000 + ordinal % 500}, Montevideo",
+                ahora.AddMinutes(-10), ct);
+            await db.ApplyAsync(RlsActorContext.From(operador.Contexto), ct);
+            var recepcion = await rutas.CotejarBultoAsync(operador.Contexto, envio.Bulto.Id,
+                new(Guid.CreateVersion7(), envio.Envio.Version, envio.Bulto.Version, true,
+                    envio.Bulto.PesoGramos, envio.Bulto.LargoCentimetros, envio.Bulto.AnchoCentimetros,
+                    envio.Bulto.AltoCentimetros, "Cotejo sintÃ©tico OPT-06."), ct);
+            if (recepcion?.Recepcion.EstadoEnvio != "EnDeposito")
+                throw new InvalidOperationException("No se pudo admitir el envÃ­o sintÃ©tico OPT-06 en depÃ³sito.");
+            var plan = await rutas.PlanificarAsync(operador.Id, new(repartidor.AccesoId, vehiculo.Id, hoy,
+                [new(envio.Envio.Id, ahora.AddMinutes(10))]), ct);
+            hoja = await db.HojasRuta.SingleAsync(x => x.OperadorId == operador.Id && x.Id == plan.Id, ct);
+            if (await rutasDemo.DespacharAsync(operador.Contexto, hoja.Id, hoja.Version, ct) is null)
+                throw new InvalidOperationException("No se pudo despachar la jornada sintÃ©tica OPT-06.");
+        }
+        else if (hoja.Estado == EstadoHojaRuta.Despachada
+            && await rutasDemo.DespacharAsync(operador.Contexto, hoja.Id, hoja.Version, ct) is null)
+            throw new InvalidOperationException("No se pudo iniciar la jornada sintÃ©tica OPT-06 pendiente de despacho.");
+
+        var jornada = new EjecutarRepartoUseCase(new UsuarioActualDemo(repartidor), repartidores,
+            new EfOperacionesRepartoRepository(db, reloj, configuration));
+        var existentes = await db.OperacionesJornada.AsNoTracking().Where(x => x.OperadorId == operador.Id
+            && x.RutaId == hoja.Id).OrderBy(x => x.Secuencia).ToArrayAsync(ct);
+        if (!existentes.Any(x => x.Secuencia == 1))
+        {
+            reloj.AvanzarA(ahora.AddSeconds(2));
+            var inicio = await jornada.AplicarAsync(hoja.JornadaId,
+                new(Guid.CreateVersion7(), 1, "InicioJornada", null, null, ahora,
+                    JsonSerializer.SerializeToElement(new { })), ct);
+            if (inicio?.Resultado != "Aplicada")
+                throw new InvalidOperationException("No se pudo registrar el inicio de la jornada sintÃ©tica OPT-06.");
+        }
+
+        existentes = await db.OperacionesJornada.AsNoTracking().Where(x => x.OperadorId == operador.Id
+            && x.RutaId == hoja.Id).OrderBy(x => x.Secuencia).ToArrayAsync(ct);
+        var ultima = existentes.Select(x => x.Secuencia).DefaultIfEmpty(0).Max();
+        for (var secuencia = ultima + 1; secuencia <= 51; secuencia++)
+        {
+            var indice = checked((int)secuencia - 2);
+            var ocurrida = ahora.AddSeconds(secuencia * 2);
+            reloj.AvanzarA(ocurrida.AddSeconds(1));
+            var resultado = await jornada.AplicarAsync(hoja.JornadaId,
+                new(Guid.CreateVersion7(), secuencia, "Posicion", null, null, ocurrida,
+                    JsonSerializer.SerializeToElement(new
+                    {
+                        latitud = -34.90 + indice % 9 * 0.001,
+                        longitud = -56.18 + indice % 11 * 0.001,
+                        precisionMetros = 12,
+                        posicionEnUtc = ocurrida
+                    })), ct);
+            if (resultado?.Resultado != "Aplicada")
+                throw new InvalidOperationException("No se pudieron completar las posiciones sintÃ©ticas OPT-06.");
+        }
+
+        var payloads = await db.OperacionesJornada.AsNoTracking().Where(x => x.OperadorId == operador.Id
+            && x.RutaId == hoja.Id && x.Tipo == "Posicion" && x.Secuencia >= 2 && x.Secuencia <= 51)
+            .OrderBy(x => x.Secuencia).Select(x => x.Payload).ToArrayAsync(ct);
+        if (payloads.Length != 50)
+            throw new InvalidOperationException("La jornada OPT-06 no tiene exactamente 50 posiciones reutilizables.");
+        var eventos = payloads.Select(payload => JsonSerializer.Deserialize<OperacionRepartoDatos>(payload, JsonOperacion)
+            ?? throw new InvalidOperationException("Una operaciÃ³n sintÃ©tica OPT-06 no pudo serializarse.")).ToArray();
+        return new(repartidor.UsuarioEmail, hoja.JornadaId, eventos);
+    }
+
     private async Task<OrganizacionDemo> CrearOrganizacionAsync(TipoAccesoUsuario tipo, string nombre,
         string email, CancellationToken ct)
     {
@@ -274,16 +507,23 @@ public sealed class DatosDemoSeeder(
     }
 
     // Only the explicitly requested demo seed creates this synthetic service, for its new operators.
-    private async Task PublicarServicioDemoAsync(OrganizacionDemo operador, CancellationToken ct)
+    private async Task PublicarServicioDemoAsync(OrganizacionDemo operador, CancellationToken ct,
+        bool calendarioCompleto = false)
     {
         var geometria = NtsGeometryServices.Instance.CreateGeometryFactory(srid: 4326);
         var poligono = geometria.CreateMultiPolygon([geometria.CreatePolygon([
             new(-56.4, -35), new(-56, -35), new(-56, -34.7), new(-56.4, -34.7), new(-56.4, -35)])]);
+        var finDelDia = new TimeOnly(23, 59, 59).Add(TimeSpan.FromTicks(TimeSpan.TicksPerSecond - 10));
+        IEnumerable<FranjaEntregaInicial> franjas = calendarioCompleto
+            ? Enum.GetValues<DiaSemanaIso>()
+                .Select(dia => new FranjaEntregaInicial(dia, TimeOnly.MinValue, finDelDia))
+            : [new(DiaSemanaIso.Lunes, new TimeOnly(9, 0), new TimeOnly(18, 0))];
         var zona = ZonaCobertura.Crear(operador.Id, "Cobertura demo Montevideo", poligono, id: operador.Id,
-            franjasIniciales: [new(DiaSemanaIso.Lunes, new TimeOnly(9, 0), new TimeOnly(18, 0))]);
-        zona.Activar(zona.Version);
-        db.ZonasCobertura.Add(zona);
-        await db.SaveChangesAsync(ct);
+            franjasIniciales: franjas);
+        await zonasCobertura.GuardarNuevaAsync(zona, operador.UsuarioId, ct);
+        var versionZona = zona.Version;
+        zona.Activar(versionZona);
+        await zonasCobertura.GuardarCambioAsync(zona, versionZona, operador.UsuarioId, ct);
         var tarifario = TarifarioOperador.Crear(operador.Id);
         db.TarifariosOperador.Add(tarifario);
         await db.SaveChangesAsync(ct);
@@ -338,4 +578,8 @@ public sealed record EstadoDatosDemo(bool Sembrada, DateTimeOffset? SembradoEnUt
         ejecucion.Operadores, ejecucion.Comercios, ejecucion.CuentasOperador, ejecucion.CuentasComercio,
         ejecucion.Envios, ejecucion.Rutas, ejecucion.Operaciones);
 }
+
+public sealed record CredencialFixtureCarga(string Email, string Password);
+public sealed record CuentaFixtureCargaSembrada(string Email, Guid JornadaId,
+    IReadOnlyList<OperacionRepartoDatos> Operaciones);
 
