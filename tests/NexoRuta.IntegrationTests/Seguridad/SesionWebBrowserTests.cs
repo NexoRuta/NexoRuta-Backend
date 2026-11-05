@@ -83,9 +83,13 @@ public sealed class SesionWebBrowserTests(PostgresFixture postgres):IClassFixtur
             while(!node.HasExited)
             {
                 limit.Token.ThrowIfCancellationRequested();
-                if(File.Exists(control))
+                string? commandJson=null;
+                // Only a missing command is retryable; malformed JSON and other I/O failures remain fatal.
+                try { commandJson=await File.ReadAllTextAsync(control,limit.Token); }
+                catch(FileNotFoundException) { }
+                if(commandJson is not null)
                 {
-                    using var command=JsonDocument.Parse(await File.ReadAllTextAsync(control,limit.Token));var c=command.RootElement;var id=c.GetProperty("id").GetString()!;
+                    using var command=JsonDocument.Parse(commandJson);var c=command.RootElement;var id=c.GetProperty("id").GetString()!;
                     if(id!=seen)
                     {
                         seen=id;var action=c.GetProperty("action").GetString()!;var portal=c.GetProperty("portal").GetString()!;
