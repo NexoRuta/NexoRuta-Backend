@@ -8,7 +8,7 @@ namespace NexoRuta.Api.Features.Reparto.Controllers;
 [ApiController, Authorize(Policy = "reparto.ejecutar"), Route("api/mobile/jornadas/{jornadaId:guid}")]
 public sealed class OperacionesRepartoController(EjecutarRepartoUseCase casos, ILogger<OperacionesRepartoController> logger) : ControllerBase
 {
-    [HttpPost("operaciones"), RequestSizeLimit(32768)]
+    [HttpPost("operaciones"), RequestSizeLimit(131072)]
     [ProducesResponseType<ResultadoOperacionResponse>(200)]
     [ProducesResponseType(400), ProducesResponseType(403), ProducesResponseType(404), ProducesResponseType(409)]
     public async Task<IActionResult> Aplicar(Guid jornadaId, OperacionRepartoRequest request, CancellationToken ct)

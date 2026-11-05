@@ -29,7 +29,7 @@ public sealed partial class EfOperacionesRepartoRepository
             hoja.RegistrarInicio(reloj.GetUtcNow()); return null;
         }
         Exigir(hoja.Estado == EstadoHojaRuta.EnCurso
-            || hoja.Estado == EstadoHojaRuta.Finalizada && op.Tipo == "EvidenciaEntrega",
+            || hoja.Estado == EstadoHojaRuta.Finalizada && op.Tipo is "EvidenciaEntrega" or "EntregaBultos",
             "La jornada ya no admite esta operación.");
         if (op.Tipo == "Posicion")
         {
@@ -43,7 +43,11 @@ public sealed partial class EfOperacionesRepartoRepository
         if (op.Tipo == "ConfirmarCarga")
         {
             Exigir(hoja.SalidaEnUtc is null, "La carga ya fue confirmada; no se admiten cargas intermedias.");
-            var incompletos = hoja.Paradas.Where(p => p.Activa && bultos.Where(b => b.EnvioId == p.EnvioId)
+            var reglasCarga = await db.VersionesReglasOperativas.Where(v => v.OperadorId == hoja.OperadorId).ToDictionaryAsync(v => v.Id, ct);
+            var incompletos = hoja.Paradas.Where(p => p.Activa && !envios.Single(e => e.Id == p.EnvioId).EsRetiro
+                && !(reglasCarga[envios.Single(e => e.Id == p.EnvioId).VersionReglasId].PermiteEntregaParcial
+                    && bultos.Any(b => b.EnvioId == p.EnvioId && b.Resultado == ResultadoBulto.Pendiente && b.Custodia == EstadoCustodiaBulto.Repartidor && b.RutaCustodiaId == hoja.Id))
+                && bultos.Where(b => b.EnvioId == p.EnvioId && b.Resultado == ResultadoBulto.Pendiente)
                 .Any(b => b.Custodia != EstadoCustodiaBulto.Repartidor || b.AccesoCustodioId != hoja.RepartidorAccesoId || b.RutaCustodiaId != hoja.Id)).ToArray();
             Exigir(!politica.BloquearDiscrepanciasCarga || incompletos.Length == 0, "Hay diferencias de carga pendientes de resolver en depósito.");
             var vehiculo = await db.Vehiculos.SingleAsync(v => v.OperadorId == hoja.OperadorId && v.Id == hoja.VehiculoId, ct);
@@ -53,7 +57,7 @@ public sealed partial class EfOperacionesRepartoRepository
                 && b.AccesoCustodioId == hoja.RepartidorAccesoId && b.RutaCustodiaId == hoja.Id);
             if (CapacidadCarga.Exceso(vehiculo, cargados) is { } exceso) throw new ConflictoRepartoException(exceso);
             Exigir(hoja.Paradas.Where(p => p.Activa && !incompletos.Contains(p))
-                .All(p => envios.Single(e => e.Id == p.EnvioId).Estado == EstadoEnvio.AsignadoRuta),
+                .All(p => envios.Single(e => e.Id == p.EnvioId).Estado is EstadoEnvio.AsignadoRuta or EstadoEnvio.EntregadoParcialmente or EstadoEnvio.RetiroAsignado),
                 "Un envío cambió durante la preparación de carga.");
             Exigir(hoja.Paradas.Count(p => p.Activa) <= politica.MaximoParadas, "La ruta supera el máximo de paradas configurado.");
             foreach (var parada in hoja.Paradas.Where(p => p.Activa && !incompletos.Contains(p)))
@@ -65,7 +69,7 @@ public sealed partial class EfOperacionesRepartoRepository
             foreach (var parada in hoja.Paradas.Where(p => p.Activa))
             {
                 var envio = envios.Single(x => x.Id == parada.EnvioId);
-                envio.CambiarEstado(EstadoEnvio.EnTransito, envio.Version);
+                if (!envio.EsRetiro) envio.CambiarEstado(EstadoEnvio.EnTransito, envio.Version);
             }
             hoja.ConfirmarSalida(op.OcurridaEn);
             return incompletos.Length == 0 ? null : $"Salida con {incompletos.Length} envío(s) suspendidos por diferencias de carga.";
@@ -94,8 +98,8 @@ public sealed partial class EfOperacionesRepartoRepository
                 var envio = envios.Single(e => e.Id == parada.EnvioId);
                 if (envio.Estado == EstadoEnvio.AsignadoRuta)
                     hoja.SuspenderParada(envio.Id, "Jornada cerrada antes de la salida; requiere reasignación operativa.");
-                else
-                    parada.Completar();
+                else if (parada.ResultadoVisita == "Pendiente")
+                    hoja.SuspenderParada(envio.Id, "Jornada cerrada sin completar esta visita.");
             }
             hoja.RegistrarFin(op.OcurridaEn);
             var faltantes = bultos.Count(b => b.RutaCustodiaId == hoja.Id && b.Custodia == EstadoCustodiaBulto.Repartidor);
@@ -111,6 +115,10 @@ public sealed partial class EfOperacionesRepartoRepository
             .SingleAsync(v => v.OperadorId == hoja.OperadorId && v.Id == actual!.VersionReglasId
                 && v.Estado == EstadoVersionReglasOperativas.Publicada, ct);
         var propios = bultos.Where(x => x.EnvioId == actual!.Id).ToArray();
+        if (op.Tipo == "IntentoFallido" && actual!.Estado == EstadoEnvio.EntregadoParcialmente)
+            return await AplicarIntentoParcial(hoja, op, datos, actual, paradaActual!, propios, reglas, politica, ct);
+        if (op.Tipo is "EntregaBultos" or "RetirarBultos" or "RetiroFallido")
+            return await AplicarResultadosBultos(hoja, op, datos, actual!, paradaActual!, propios, reglas, ct);
         if (op.Tipo == "EvidenciaEntrega")
             return await AplicarEvidenciaEntrega(hoja, op, datos, actual!, propios, reglas, ct);
         if (op.Tipo == "EntregaFisica" && op.VersionEnvio is >= 0 && op.VersionEnvio < actual!.Version
@@ -126,7 +134,12 @@ public sealed partial class EfOperacionesRepartoRepository
             var recibidoEnUtc = HoraServidorUtc();
             actual.ConciliarEntregaFisica(op.OcurridaEn, recibidoEnUtc, reglas.PlazoValidacionPruebaMinutos,
                 Completa(prueba, reglas), actual.Version);
-            foreach (var bulto in propios) bulto.Entregar(hoja.RepartidorAccesoId, hoja.Id);
+            foreach (var bulto in propios)
+            {
+                bulto.Entregar(hoja.RepartidorAccesoId, hoja.Id);
+                bulto.RegistrarResultado(Completa(prueba, reglas) ? ResultadoBulto.Entregado : ResultadoBulto.EntregaPendienteValidacion,
+                    bulto.Version, entregadoEn: op.OcurridaEn, vence: actual.PlazoPruebaVenceEnUtc);
+            }
             foreach (var otra in otras) otra.SuspenderParada(actual.Id, "Entrega física registrada en la ruta original; no corresponde otra entrega.");
             paradaActual!.Completar();
             return "Entrega física conciliada; el envío conserva el estado Cancelado y su prueba conserva los requisitos fijados al crearlo.";
@@ -134,9 +147,9 @@ public sealed partial class EfOperacionesRepartoRepository
         Exigir(op.VersionEnvio == actual!.Version, "El envío cambió en el servidor; se conservan el hecho y su evidencia como conflicto de sincronización.");
         if (op.Tipo == "CargarBulto")
         {
-            Exigir(hoja.SalidaEnUtc is null && paradaActual!.Activa && actual.Estado == EstadoEnvio.AsignadoRuta, "La carga solo se realiza en depósito antes de salir.");
+            Exigir(hoja.SalidaEnUtc is null && paradaActual!.Activa && !actual.EsRetiro && actual.Estado is EstadoEnvio.AsignadoRuta or EstadoEnvio.EntregadoParcialmente, "La carga solo se realiza en depósito antes de salir.");
             var bulto = propios.SingleOrDefault(x => x.Id == datos.BultoId);
-            Exigir(bulto is not null && bulto.Custodia == EstadoCustodiaBulto.Deposito, "El bulto no está asignado a esta parada o no fue recibido en depósito.");
+            Exigir(bulto is not null && bulto.Custodia == EstadoCustodiaBulto.Deposito && bulto.Resultado == ResultadoBulto.Pendiente, "El bulto no está asignado a esta parada o no fue recibido en depósito.");
             bulto!.Cargar(hoja.RepartidorAccesoId, hoja.Id); return null;
         }
         Exigir(hoja.SalidaEnUtc is not null, "Confirmá la carga antes de registrar entregas o intentos.");
@@ -150,6 +163,7 @@ public sealed partial class EfOperacionesRepartoRepository
                 && x.EnvioId == actual.Id && x.Tipo == "IntentoFallido" && x.Resultado == "Aplicada").Select(x => x.Payload).ToArrayAsync(ct);
             ResumenIntentosEntrega.Calcular(anteriores, reglas.IntervaloEntreIntentosMinutos!.Value)
                 .ExigirSiguienteIntento(op.OcurridaEn, reglas.MaxIntentosEntrega!.Value);
+            foreach (var b in propios.Where(b => b.Resultado == ResultadoBulto.Pendiente)) b.RegistrarPendiente(datos.Motivo!, b.Version);
             actual.CambiarEstado(EstadoEnvio.NoEntregado, actual.Version);
             if (anteriores.Length + 1 == reglas.MaxIntentosEntrega!.Value
                 && reglas.PoliticaDevolucionAlAgotarIntentos == PoliticaDevolucionAlAgotarIntentos.IniciarAutomaticamente)
@@ -157,6 +171,8 @@ public sealed partial class EfOperacionesRepartoRepository
                 // Keep both authorized edges visible to the database history trigger;
                 // the surrounding request transaction still commits or rolls back the whole command.
                 await db.SaveChangesAsync(ct);
+                foreach (var b in propios.Where(b => b.Resultado == ResultadoBulto.Pendiente))
+                    b.RegistrarResultado(ResultadoBulto.EnDevolucion, b.Version, datos.Motivo);
                 actual.CambiarEstado(EstadoEnvio.EnDevolucion, actual.Version);
                 hoja.SuspenderParada(actual.Id, "Intentos agotados: devolución iniciada; requiere rendición y recepción en depósito.");
                 return "Intentos agotados; devolución iniciada sin modificar la custodia física.";
@@ -173,7 +189,12 @@ public sealed partial class EfOperacionesRepartoRepository
             var recibidoEnUtc = HoraServidorUtc();
             actual.DeclararEntregaFisica(op.OcurridaEn, recibidoEnUtc, reglas.PlazoValidacionPruebaMinutos,
                 Completa(prueba, reglas), actual.Version);
-            foreach (var bulto in propios) bulto.Entregar(hoja.RepartidorAccesoId, hoja.Id);
+            foreach (var bulto in propios)
+            {
+                bulto.Entregar(hoja.RepartidorAccesoId, hoja.Id);
+                bulto.RegistrarResultado(Completa(prueba, reglas) ? ResultadoBulto.Entregado : ResultadoBulto.EntregaPendienteValidacion,
+                    bulto.Version, entregadoEn: op.OcurridaEn, vence: actual.PlazoPruebaVenceEnUtc);
+            }
             paradaActual.Completar();
             return actual.Estado == EstadoEnvio.Entregado ? "Entrega validada." : "Entrega física declarada; la prueba queda pendiente según las reglas de esta versión.";
         }
@@ -218,7 +239,12 @@ public sealed partial class EfOperacionesRepartoRepository
         if (actual.Estado == EstadoEnvio.EntregaPendienteValidacion)
         {
             var validada = actual.RegistrarEvidenciaEntrega(recibidaEnUtc, Completa(prueba, reglas), versionActual);
-            if (validada) return "Prueba completa; entrega validada automáticamente.";
+            if (validada)
+            {
+                foreach (var b in propios.Where(b => b.Resultado == ResultadoBulto.EntregaPendienteValidacion))
+                    b.RegistrarResultado(ResultadoBulto.Entregado, b.Version);
+                return "Prueba completa; entrega validada automáticamente.";
+            }
             return actual.PlazoPruebaVenceEnUtc is { } vence && recibidaEnUtc >= vence
                 ? "La prueba se conservó como evidencia; el plazo venció y el Worker resolverá el estado sin validar."
                 : "La entrega conserva prueba pendiente.";
@@ -237,7 +263,7 @@ public sealed partial class EfOperacionesRepartoRepository
     {
         Exigir(datos.FotoId is null || await Archivo(hoja, envioId, datos.FotoId, "Foto", ct), "La foto no está subida o no pertenece a esta entrega.");
         Exigir(datos.FirmaId is null || await Archivo(hoja, envioId, datos.FirmaId, "Firma", ct), "La firma no está subida o no pertenece a esta entrega.");
-        var prueba = await db.PruebasEntrega.SingleOrDefaultAsync(x => x.OperadorId == hoja.OperadorId && x.EnvioId == envioId, ct);
+        var prueba = await db.PruebasEntrega.SingleOrDefaultAsync(x => x.OperadorId == hoja.OperadorId && x.EnvioId == envioId && x.BultoId == Guid.Empty, ct);
         Exigir(prueba is null || prueba.RutaId == hoja.Id, "La prueba pertenece a otra ruta; se conserva la evidencia como conflicto de sincronización.");
         if (prueba is null) { prueba = new() { OperadorId = hoja.OperadorId, EnvioId = envioId, RutaId = hoja.Id }; db.PruebasEntrega.Add(prueba); }
         if (!string.IsNullOrWhiteSpace(datos.Nombre)) prueba.Nombre = datos.Nombre.Trim();

@@ -7,7 +7,7 @@ public sealed class PruebaEntregaConfiguration : IEntityTypeConfiguration<Prueba
 {
     public void Configure(EntityTypeBuilder<PruebaEntrega> e)
     {
-        e.ToTable("PruebasEntrega"); e.HasKey(x => new { x.OperadorId, x.EnvioId });
+        e.ToTable("PruebasEntrega"); e.HasKey(x => new { x.OperadorId, x.EnvioId, x.BultoId });
         e.Property(x => x.Nombre).HasMaxLength(160); e.Property(x => x.Documento).HasMaxLength(40);
         e.HasOne<Envio>().WithMany().HasForeignKey(x => new { x.OperadorId, x.EnvioId }).HasPrincipalKey(x => new { x.OperadorId, x.Id }).OnDelete(DeleteBehavior.Restrict);
         e.HasOne<HojaRuta>().WithMany().HasForeignKey(x => new { x.OperadorId, x.RutaId }).HasPrincipalKey(x => new { x.OperadorId, x.Id }).OnDelete(DeleteBehavior.Restrict);

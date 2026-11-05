@@ -49,6 +49,11 @@ public enum EstadoVersionReglasOperativasContract { Borrador, Publicada }
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed class ReemplazarBorradorReglasOperativasRequest
 {
+    public bool PermiteEntregaParcial { get; init; }
+    [RegularExpression("^(NuevaVisitaSinRecargo|NuevaVisitaConRecargo|DevolverComercio)$")]
+    public string PoliticaPendientesParcial { get; init; } = "NuevaVisitaSinRecargo";
+    [Range(typeof(decimal), "0", "999999999")]
+    public decimal RecargoNuevaVisitaUyu { get; init; }
     [JsonRequired, Range(0, long.MaxValue)]
     public long VersionConcurrencia { get; init; }
 
@@ -134,7 +139,12 @@ public sealed record VersionReglasOperativasResponse(
     IReadOnlyList<TipoPruebaEntregaContract> RequisitosPrueba,
     IReadOnlyList<MotivoNoEntregaResponse> Motivos,
     DateTimeOffset CreadaUtc,
-    DateTimeOffset? PublicadaUtc);
+    DateTimeOffset? PublicadaUtc)
+{
+    public bool PermiteEntregaParcial { get; init; }
+    public string PoliticaPendientesParcial { get; init; } = "NuevaVisitaSinRecargo";
+    public decimal RecargoNuevaVisitaUyu { get; init; }
+}
 
 public sealed record MotivoNoEntregaResponse(string Codigo, string Descripcion, bool Disponible);
 
@@ -157,14 +167,18 @@ public static class ReglasOperativasContractMapper
             version.RequisitosPrueba.OrderBy(item => item.Tipo).Select(item => Tipo(item.Tipo)).ToArray(),
             version.Motivos.OrderBy(item => item.Codigo, StringComparer.Ordinal)
                 .Select(item => new MotivoNoEntregaResponse(item.Codigo, item.Descripcion, item.Disponible)).ToArray(),
-            version.CreadaUtc, version.PublicadaUtc);
+            version.CreadaUtc, version.PublicadaUtc) { PermiteEntregaParcial = version.PermiteEntregaParcial,
+                PoliticaPendientesParcial = version.PoliticaPendientesParcial.ToString(), RecargoNuevaVisitaUyu = version.RecargoNuevaVisitaUyu };
 
     public static ReglasOperativasConfiguracion Configuracion(ReemplazarBorradorReglasOperativasRequest request)
         => new(request.MaxIntentosEntrega, request.IntervaloEntreIntentosMinutos,
             Politica(request.PoliticaDevolucionAlAgotarIntentos), request.PlazoEstandarMinutos,
             request.PlazoUrgenteMinutos, request.PlazoValidacionPruebaMinutos, request.RequisitosPrueba.Select(Tipo).ToArray(),
             request.Motivos.Select(item => new MotivoNoEntregaConfiguracion(
-                item.Codigo, item.Descripcion, item.Disponible)).ToArray());
+                item.Codigo, item.Descripcion, item.Disponible)).ToArray())
+        { PermiteEntregaParcial = request.PermiteEntregaParcial,
+            PoliticaPendientesParcial = Enum.Parse<PoliticaPendientesParcial>(request.PoliticaPendientesParcial),
+            RecargoNuevaVisitaUyu = request.RecargoNuevaVisitaUyu };
 
     public static string CampoApi(string? field) => field switch
     {

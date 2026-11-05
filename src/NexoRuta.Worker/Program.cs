@@ -90,7 +90,10 @@ else
     builder.Services.AddSingleton<IOutboxMessageHandler, KafkaShipmentCreatedOutboxHandler>();
     builder.Services.AddSingleton<IOutboxMessageHandler, KafkaPasswordRecoveryRequestedOutboxHandler>();
     builder.Services.AddSingleton<OutboxHandlerRegistry>();
+    builder.Services.AddSingleton<IOutboxMessageHandler>(sp => new CommerceNoticeOutboxHandler(sp.GetRequiredService<KafkaEnvioCreadoPublisher>(), "BultoActualizado"));
+    builder.Services.AddSingleton<IOutboxMessageHandler>(sp => new CommerceNoticeOutboxHandler(sp.GetRequiredService<KafkaEnvioCreadoPublisher>(), "OperacionActualizada"));
     builder.Services.AddHostedService<KafkaOutboxWorker>();
+    builder.Services.AddHostedService<CommerceNoticeConsumer>();
     var mongoConnection = builder.Configuration[WorkerConfigurationKeys.MongoConnectionString]
         ?? throw new InvalidOperationException("MongoDB connection string is required.");
     var mongoDatabase = builder.Configuration[WorkerConfigurationKeys.MongoDatabase]

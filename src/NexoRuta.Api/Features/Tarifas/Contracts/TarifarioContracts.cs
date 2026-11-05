@@ -21,7 +21,7 @@ public static class TarifarioApiContract
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter<ModalidadTarifariaContract>))]
-public enum ModalidadTarifariaContract { Estandar, Urgente }
+public enum ModalidadTarifariaContract { Estandar, Urgente, Retiro }
 
 [JsonConverter(typeof(JsonStringEnumConverter<TipoAjusteTarifarioContract>))]
 public enum TipoAjusteTarifarioContract { RecargoFijo, RecargoPorcentual, BonificacionFija, BonificacionPorcentual }
@@ -183,6 +183,7 @@ public static class TarifarioContractMapper
     {
         ModalidadTarifariaContract.Estandar => ModalidadTarifaria.Estandar,
         ModalidadTarifariaContract.Urgente => ModalidadTarifaria.Urgente,
+        ModalidadTarifariaContract.Retiro => ModalidadTarifaria.Retiro,
         _ => throw new ArgumentOutOfRangeException(nameof(value))
     };
 
@@ -212,6 +213,7 @@ public static class TarifarioContractMapper
     {
         ModalidadTarifaria.Estandar => ModalidadTarifariaContract.Estandar,
         ModalidadTarifaria.Urgente => ModalidadTarifariaContract.Urgente,
+        ModalidadTarifaria.Retiro => ModalidadTarifariaContract.Retiro,
         _ => throw new ArgumentOutOfRangeException(nameof(value))
     };
 

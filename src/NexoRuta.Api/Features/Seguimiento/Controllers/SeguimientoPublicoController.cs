@@ -41,6 +41,6 @@ public sealed class SeguimientoPublicoController(
                 seguimiento.Identidad.ColorPrimario,
                 seguimiento.Identidad.ColorSecundario,
                 seguimiento.Identidad.LogoContenido,
-                seguimiento.Identidad.LogoTipoContenido)));
+                seguimiento.Identidad.LogoTipoContenido)) { TotalBultos = seguimiento.TotalBultos, BultosEntregados = seguimiento.BultosEntregados, BultosDevueltos = seguimiento.BultosDevueltos, EsRetiro = seguimiento.EsRetiro });
     }
 }

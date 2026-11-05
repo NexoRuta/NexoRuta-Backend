@@ -42,7 +42,7 @@ public sealed partial class OperacionesRepartoHttpTests
         {
             transicionesAntes = await before.EnvioEventos.CountAsync(x => x.EnvioId == parada.EnvioId
                 && x.Tipo == TipoEventoEnvio.TransicionEstado);
-            outboxAntes = await before.OutboxMessages.CountAsync(x => x.EnvioId == parada.EnvioId);
+            outboxAntes = await before.OutboxMessages.CountAsync(x => x.EnvioId == parada.EnvioId && x.Tipo == OutboxMessageTypes.DeliveryChanged);
         }
 
         using (var missingVersion = await client.PostAsJsonAsync($"/api/envios/{parada.EnvioId}/iniciar-devolucion",
@@ -89,7 +89,7 @@ public sealed partial class OperacionesRepartoHttpTests
         await using var afterReplay = data.CreateDbContext();
         Assert.Equal(transicionesAntes + 1, await afterReplay.EnvioEventos.CountAsync(x => x.EnvioId == parada.EnvioId
             && x.Tipo == TipoEventoEnvio.TransicionEstado));
-        Assert.Equal(outboxAntes + 1, await afterReplay.OutboxMessages.CountAsync(x => x.EnvioId == parada.EnvioId));
+        Assert.Equal(outboxAntes + 1, await afterReplay.OutboxMessages.CountAsync(x => x.EnvioId == parada.EnvioId && x.Tipo == OutboxMessageTypes.DeliveryChanged));
         using var changedCommand = await client.PostAsJsonAsync($"/api/envios/{parada.EnvioId}/iniciar-devolucion",
             new { comando.VersionEnvio, comando.ComandoId, Motivo = "Motivo distinto" });
         Assert.Equal(HttpStatusCode.Conflict, changedCommand.StatusCode);
@@ -103,7 +103,7 @@ public sealed partial class OperacionesRepartoHttpTests
         Assert.Equal(HttpStatusCode.Conflict, distinctCommand.StatusCode);
         Assert.Equal(transicionesAntes + 1, await afterReplay.EnvioEventos.CountAsync(x => x.EnvioId == parada.EnvioId
             && x.Tipo == TipoEventoEnvio.TransicionEstado));
-        Assert.Equal(outboxAntes + 1, await afterReplay.OutboxMessages.CountAsync(x => x.EnvioId == parada.EnvioId));
+        Assert.Equal(outboxAntes + 1, await afterReplay.OutboxMessages.CountAsync(x => x.EnvioId == parada.EnvioId && x.Tipo == OutboxMessageTypes.DeliveryChanged));
         await using (var restricted = new NpgsqlConnection(runtime.ConnectionString))
         {
             await restricted.OpenAsync();

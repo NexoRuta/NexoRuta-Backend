@@ -111,6 +111,12 @@ public sealed class HojaRuta
         UltimaSecuencia = secuencia; Version++;
     }
 
+    public void RetirarParada(Guid envioId, string motivo)
+    {
+        var parada = paradas.SingleOrDefault(x => x.EnvioId == envioId && x.Activa)
+            ?? throw new InvalidOperationException("La parada ya no está activa en esta ruta.");
+        parada.Retirar(motivo); Version++;
+    }
     public void SuspenderParada(Guid envioId, string motivo)
     {
         var parada = paradas.SingleOrDefault(x => x.EnvioId == envioId && x.Activa)

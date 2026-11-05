@@ -14,5 +14,7 @@ public enum EstadoEnvio
     Extraviado,
     EntregaPendienteValidacion,
     EntregaSinValidacion,
+    EntregadoParcialmente,
+    RetiroSolicitado, RetiroAsignado, Retirado, RetiroFallido, RetiroEnDeposito, EntregadoComercio,
     Cancelado
 }

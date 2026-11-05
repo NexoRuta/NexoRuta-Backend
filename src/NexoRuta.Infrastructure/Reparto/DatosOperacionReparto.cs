@@ -3,6 +3,7 @@ namespace NexoRuta.Infrastructure.Reparto;
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 internal sealed class DatosOperacionReparto
 {
+    public ResultadoBultoOperacion[]? ResultadosBultos { get; init; }
     public Guid? BultoId { get; init; }
     public Guid[]? BultoIds { get; init; }
     public string? Nombre { get; init; }
@@ -15,3 +16,5 @@ internal sealed class DatosOperacionReparto
     public double? PrecisionMetros { get; init; }
     public DateTimeOffset? PosicionEnUtc { get; init; }
 }
+
+internal sealed record ResultadoBultoOperacion(Guid BultoId, long Version, bool Entregado, string? Motivo);

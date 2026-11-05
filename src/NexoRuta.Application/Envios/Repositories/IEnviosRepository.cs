@@ -6,6 +6,7 @@ namespace NexoRuta.Application.Envios.Repositories;
 
 public interface IEnviosRepository
 {
+    Task BloquearSolicitudRetiroAsync(Guid comercioId, Guid solicitudId, CancellationToken ct);
     Task<IEnviosImportTransaction> IniciarImportacionAsync(CancellationToken cancellationToken = default);
     Task BloquearReferenciasImportacionAsync(IReadOnlyCollection<string> referencias, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<IdentidadEnvioImportadoEncontrada>> BuscarIdentidadesImportacionAsync(

@@ -25,7 +25,7 @@ internal static class TarifasAdmision
     internal static async Task<ResultadoCalculoTarifa> CotizarAsync(NexoRutaDbContext db, Guid operador,
         ServicioEnvioDeclarado servicio, IReadOnlyList<Bulto> bultos, CancellationToken ct, Guid? version = null)
     {
-        if (servicio is null || servicio.Modalidad is not ("Estandar" or "Urgente"))
+        if (servicio is null || servicio.Modalidad is not ("Estandar" or "Urgente" or "Retiro"))
             throw new ArgumentException("Seleccioná una zona y modalidad de servicio.");
         var ofertas = await OfertasAsync(db, operador, servicio.Latitud, servicio.Longitud, ct, version);
         var candidatas = ofertas.Where(o => o.Tarifa.Modalidad.ToString() == servicio.Modalidad).ToArray();

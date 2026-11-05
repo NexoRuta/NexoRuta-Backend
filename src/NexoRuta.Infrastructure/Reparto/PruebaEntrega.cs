@@ -2,6 +2,7 @@ namespace NexoRuta.Infrastructure.Reparto;
 public sealed class PruebaEntrega
 {
     public Guid OperadorId { get; init; }
+    public Guid BultoId { get; init; }
     public Guid EnvioId { get; init; }
     public Guid RutaId { get; init; }
     public string? Nombre { get; set; }

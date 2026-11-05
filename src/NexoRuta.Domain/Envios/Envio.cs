@@ -11,6 +11,33 @@ public sealed class Envio
     public Guid VersionReglasId { get; private set; }
     public EstadoEnvio Estado { get; private set; }
     public long Version { get; private set; }
+    public bool EsRetiro { get; private set; }
+    public string? MotivoRetiro { get; private set; }
+    public DateTimeOffset? FranjaRetiroDesdeUtc { get; private set; }
+    public DateTimeOffset? FranjaRetiroHastaUtc { get; private set; }
+    public Guid? SolicitudRetiroId { get; private set; }
+    public string? SolicitudRetiroHuella { get; private set; }
+    public void ConfigurarRetiro(Guid solicitudId, string motivo, DateTimeOffset desde, DateTimeOffset hasta, string huella)
+    {
+        if (Estado != EstadoEnvio.Admitido || solicitudId == Guid.Empty || string.IsNullOrWhiteSpace(motivo) || motivo.Length > 500
+            || desde == default || hasta <= desde) throw new ArgumentException("Indicá identidad, motivo y franja válida del retiro.");
+        EsRetiro = true; SolicitudRetiroId = solicitudId; SolicitudRetiroHuella = huella; MotivoRetiro = motivo.Trim();
+        FranjaRetiroDesdeUtc = desde.ToUniversalTime(); FranjaRetiroHastaUtc = hasta.ToUniversalTime();
+    }
+    public void ActualizarResultadoBultos(IReadOnlyCollection<Bulto> bultos, DateTimeOffset recibidoEnUtc)
+    {
+        if (EsRetiro || bultos.Count == 0 || bultos.Any(b => b.EnvioId != Id || b.OperadorId != OperadorId))
+            throw new InvalidOperationException("La agregación requiere los bultos de esta entrega.");
+        var destino = AgregacionBultos.Derivar(bultos.Select(b => b.Resultado).ToArray(), Estado);
+        if (bultos.Any(b => TransicionesResultadoBulto.EntregaFisica(b.Resultado)))
+        {
+            EntregaFisicaEnUtc ??= bultos.Where(b => b.EntregadoEnUtc != null).Min(b => b.EntregadoEnUtc);
+            EntregaFisicaRecibidaEnUtc ??= recibidoEnUtc;
+        }
+        PlazoPruebaVenceEnUtc ??= bultos.Where(b => b.Resultado == ResultadoBulto.EntregaPendienteValidacion).Min(b => b.PruebaVenceEnUtc);
+        if (destino != Estado) AplicarEstado(destino);
+        Version++;
+    }
     public DateTimeOffset CreadoEnUtc { get; private set; }
     public DateTimeOffset? EntregaFisicaEnUtc { get; private set; }
     public DateTimeOffset? EntregaFisicaRecibidaEnUtc { get; private set; }
@@ -59,6 +86,8 @@ public sealed class Envio
         if (Version != versionEsperada) throw new InvalidOperationException("El envío cambió desde la última consulta.");
         if (destino == EstadoEnvio.Cancelado && EntregaFisicaEnUtc is not null)
             throw new InvalidOperationException("La transición no corresponde al estado actual del envío.");
+        if (Estado == EstadoEnvio.EntregadoParcialmente && destino is EstadoEnvio.AsignadoRuta or EstadoEnvio.EnTransito or EstadoEnvio.Reprogramado)
+        { Version++; return; }
         AplicarEstado(destino);
         Version = checked(Version + 1);
     }
@@ -75,7 +104,7 @@ public sealed class Envio
 
     public void RegistrarReasignacionSinCambioDeEstado(long versionEsperada)
     {
-        if (Estado != EstadoEnvio.AsignadoRuta || Version != versionEsperada || EntregaFisicaEnUtc is not null)
+        if (Estado is not (EstadoEnvio.AsignadoRuta or EstadoEnvio.EntregadoParcialmente or EstadoEnvio.RetiroAsignado) || Version != versionEsperada || Estado != EstadoEnvio.EntregadoParcialmente && EntregaFisicaEnUtc is not null)
             throw new InvalidOperationException("La reasignación sin transición requiere un envío asignado, sin entrega física y con su versión vigente.");
         Version = checked(Version + 1);
     }

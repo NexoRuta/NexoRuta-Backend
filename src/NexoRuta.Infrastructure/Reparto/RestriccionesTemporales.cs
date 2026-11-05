@@ -10,6 +10,16 @@ internal static class RestriccionesTemporales
     internal static async Task ValidarAsync(NexoRutaDbContext db, Guid operador, Guid envio,
         DateTimeOffset llegada, int? servicio, CancellationToken ct)
     {
+        var retiro = await db.Envios.AsNoTracking().SingleAsync(e => e.OperadorId == operador && e.Id == envio, ct);
+        if (retiro.EsRetiro && (llegada < retiro.FranjaRetiroDesdeUtc || llegada.AddMinutes(servicio ?? 0) > retiro.FranjaRetiroHastaUtc))
+            throw new ConflictoRepartoException("La visita no cabe en la franja solicitada para el retiro.");
+        if (!retiro.EsRetiro && retiro.Estado == NexoRuta.Domain.Envios.EstadoEnvio.EntregadoParcialmente)
+        {
+            var pendientes = await db.Bultos.AsNoTracking().Where(b => b.OperadorId == operador && b.EnvioId == envio && b.Resultado == NexoRuta.Domain.Envios.ResultadoBulto.Pendiente).ToArrayAsync(ct);
+            var reglas = await db.VersionesReglasOperativas.AsNoTracking().SingleAsync(v => v.OperadorId == operador && v.Id == retiro.VersionReglasId, ct);
+            var intentos = await IntentosPorBulto.Calcular(db, operador, envio, pendientes, reglas.IntervaloEntreIntentosMinutos!.Value, ct);
+            foreach (var intento in intentos.Values) intento.ExigirSiguienteIntento(llegada, reglas.MaxIntentosEntrega!.Value);
+        }
         var snapshot = await db.Database.SqlQuery<string>($"""
             SELECT r."SnapshotJson"::text AS "Value" FROM (
                 SELECT * FROM public."TarifasEnvio" WHERE "OperadorId"={operador} AND "EnvioId"={envio}

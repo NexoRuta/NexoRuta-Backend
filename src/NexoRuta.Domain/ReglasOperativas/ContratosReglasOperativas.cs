@@ -1,5 +1,7 @@
 namespace NexoRuta.Domain.ReglasOperativas;
 
+public enum PoliticaPendientesParcial { NuevaVisitaSinRecargo, NuevaVisitaConRecargo, DevolverComercio }
+
 public enum EstadoVersionReglasOperativas { Borrador, Publicada }
 public enum TipoPruebaEntrega { FirmaEnPantalla, Fotografia, NombreReceptor, DocumentoReceptor }
 public enum PoliticaDevolucionAlAgotarIntentos { DecisionOperativa, IniciarAutomaticamente }
@@ -43,4 +45,9 @@ public sealed record ReglasOperativasConfiguracion(
     int? PlazoUrgenteMinutos,
     int? PlazoValidacionPruebaMinutos,
     IReadOnlyCollection<TipoPruebaEntrega> RequisitosPrueba,
-    IReadOnlyCollection<MotivoNoEntregaConfiguracion> Motivos);
+    IReadOnlyCollection<MotivoNoEntregaConfiguracion> Motivos)
+{
+    public bool PermiteEntregaParcial { get; init; }
+    public PoliticaPendientesParcial PoliticaPendientesParcial { get; init; }
+    public decimal RecargoNuevaVisitaUyu { get; init; }
+}

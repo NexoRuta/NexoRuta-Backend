@@ -16,7 +16,7 @@ public sealed partial class EfOperacionesRepartoRepository(NexoRutaDbContext db,
     IConfiguration configuracion) : IOperacionesRepartoRepository
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
-    private static readonly HashSet<string> Tipos = ["InicioJornada", "CargarBulto", "ConfirmarCarga", "EntregaFisica",
+    private static readonly HashSet<string> Tipos = ["EntregaBultos", "RetirarBultos", "RetiroFallido", "InicioJornada", "CargarBulto", "ConfirmarCarga", "EntregaFisica",
         "EvidenciaEntrega", "IntentoFallido", "Rendicion", "Posicion", "FinJornada"];
 
     public async Task<ResultadoOperacionReparto?> AplicarAsync(Guid operadorId, Guid accesoId, Guid jornadaId,
@@ -24,15 +24,19 @@ public sealed partial class EfOperacionesRepartoRepository(NexoRutaDbContext db,
     {
         if (operacion.Id == Guid.Empty || operacion.Secuencia < 1 || operacion.OcurridaEn == default
             || !Tipos.Contains(operacion.Tipo) || operacion.Datos.ValueKind != JsonValueKind.Object
-            || operacion.Datos.GetRawText().Length > 24576)
+            || operacion.Datos.GetRawText().Length > 114688)
             throw new ArgumentException("La operación está incompleta o excede el tamaño admitido.");
-        var requiereEnvio = operacion.Tipo is "CargarBulto" or "EntregaFisica" or "EvidenciaEntrega" or "IntentoFallido";
+        var requiereEnvio = operacion.Tipo is "EntregaBultos" or "RetirarBultos" or "RetiroFallido" or "CargarBulto" or "EntregaFisica" or "EvidenciaEntrega" or "IntentoFallido";
         if (requiereEnvio ? operacion.EnvioId is null || operacion.EnvioId == Guid.Empty : operacion.EnvioId is not null)
             throw new ArgumentException("El envío no corresponde a esta operación.");
         DatosOperacionReparto datos;
         try { datos = operacion.Datos.Deserialize<DatosOperacionReparto>(Json) ?? throw new JsonException(); }
         catch (JsonException) { throw new ArgumentException("Los datos de la operación no corresponden al contrato."); }
         ValidarDatos(datos);
+        if (datos.ResultadosBultos is { } resultados && (resultados.Length is < 1 or > 500
+            || resultados.Any(r => r.BultoId == Guid.Empty || r.Version < 0 || r.Motivo?.Length > 40)
+            || resultados.Select(r => r.BultoId).Distinct().Count() != resultados.Length))
+            throw new ArgumentException("Los resultados de bulto son inválidos o están repetidos.");
         var payload = JsonSerializer.Serialize(operacion, Json);
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload)));
         await using var tx = await db.BeginOrJoinAsync(ct);
@@ -67,7 +71,7 @@ public sealed partial class EfOperacionesRepartoRepository(NexoRutaDbContext db,
             .Where(x => x.State == EntityState.Modified).ToDictionary(x => x.Entity.Id, x => x.Entity.Version) : new Dictionary<Guid, long>();
         var estados = resultado == "Aplicada" ? db.ChangeTracker.Entries<Envio>().Where(x => x.State == EntityState.Modified)
             .ToDictionary(x => x.Entity.Id, x => x.Entity.Estado.ToString()) : new Dictionary<Guid, string>();
-        var respuesta = new ResultadoOperacionReparto(operacion.Id, operacion.Secuencia, resultado, detalle, versionEnvio, hoja.Version, cambios, estados);
+        var respuesta = new ResultadoOperacionReparto(operacion.Id, operacion.Secuencia, resultado, detalle, versionEnvio, hoja.Version, cambios, estados) { VersionesBulto = resultado == "Aplicada" ? db.ChangeTracker.Entries<Bulto>().Where(x => x.State == EntityState.Modified).ToDictionary(x => x.Entity.Id, x => x.Entity.Version) : new Dictionary<Guid, long>() };
         var recibidaEn = reloj.GetUtcNow();
         var incidencias = resultado == "Aplicada" && operacion.Tipo == "FinJornada"
             ? (await db.Bultos.AsNoTracking().Where(b => b.OperadorId == operadorId && b.RutaCustodiaId == hoja.Id

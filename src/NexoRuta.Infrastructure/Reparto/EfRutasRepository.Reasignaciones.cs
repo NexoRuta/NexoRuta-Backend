@@ -48,9 +48,10 @@ public sealed partial class EfRutasRepository
         if (envioBloqueado is null) return null;
         await db.Entry(envioBloqueado).ReloadAsync(ct);
         var envio = envioBloqueado;
-        if (envio.Version != datos.VersionEnvio || envio.Estado != EstadoEnvio.NoEntregado
+        var parcial = envio.Estado == EstadoEnvio.EntregadoParcialmente;
+        if (envio.Version != datos.VersionEnvio || !parcial && (envio.Estado != EstadoEnvio.NoEntregado
             || envio.EntregaFisicaEnUtc is not null || envio.EntregaFisicaRecibidaEnUtc is not null
-            || envio.PlazoPruebaVenceEnUtc is not null)
+            || envio.PlazoPruebaVenceEnUtc is not null))
             throw new ConflictoRepartoException("El envío cambió o ya no admite iniciar una devolución desde su estado actual.");
 
         var reglas = await db.VersionesReglasOperativas.AsNoTracking().SingleOrDefaultAsync(x =>
@@ -60,14 +61,12 @@ public sealed partial class EfRutasRepository
             || reglas.IntervaloEntreIntentosMinutos is not { } intervalo)
             throw new ConflictoRepartoException("La versión de reglas asociada al envío no habilita una decisión operativa de devolución.");
 
-        var payloads = await db.OperacionesJornada.AsNoTracking().Where(x => x.OperadorId == operadorId
-            && x.EnvioId == envioId && x.Tipo == "IntentoFallido" && x.Resultado == "Aplicada")
-            .Select(x => x.Payload).ToArrayAsync(ct);
-        var resumen = ResumenIntentosEntrega.Calcular(payloads, intervalo);
-        if (resumen.Cantidad < maximo)
+        var bultos = await db.Bultos.Where(b => b.OperadorId == operadorId && b.EnvioId == envioId).ToArrayAsync(ct);
+        var intentosBulto = await IntentosPorBulto.Calcular(db, operadorId, envioId, bultos, intervalo, ct);
+        var agotados = bultos.Where(b => b.Resultado == ResultadoBulto.Pendiente && intentosBulto[b.Id].Cantidad >= maximo).ToArray();
+        if (agotados.Length == 0 || !parcial && agotados.Length != bultos.Length)
             throw new ConflictoRepartoException("Todavía quedan intentos disponibles según las reglas asociadas al envío.");
-        if (await db.Bultos.AnyAsync(x => x.OperadorId == operadorId && x.EnvioId == envioId
-            && x.Custodia == EstadoCustodiaBulto.Destinatario, ct))
+        if (!parcial && bultos.Any(b => b.Custodia == EstadoCustodiaBulto.Destinatario))
             throw new ConflictoRepartoException("El envío ya registra custodia de entrega y no admite iniciar una devolución por intentos.");
 
         var rutasConParadaActiva = await db.HojasRuta.Include(x => x.Paradas).Where(x => x.OperadorId == operadorId
@@ -81,7 +80,16 @@ public sealed partial class EfRutasRepository
         await db.SetShipmentHistoryContextAsync("DecisionDevolucionEnvio", decision.Id, datos.ComandoId,
             ahora, cancellationToken: ct);
         db.DecisionesDevolucionEnvio.Add(decision);
-        envio.IniciarDevolucionPorDecision(envio.Version);
+        if (parcial)
+        {
+            foreach (var b in agotados) b.RegistrarResultado(ResultadoBulto.EnDevolucion, b.Version, b.MotivoNoEntrega);
+            envio.ActualizarResultadoBultos(bultos, ahora);
+        }
+        else
+        {
+            foreach (var b in agotados) b.RegistrarResultado(ResultadoBulto.EnDevolucion, b.Version, b.MotivoNoEntrega);
+            envio.IniciarDevolucionPorDecision(envio.Version);
+        }
 
         var paradaActiva = rutasConParadaActiva.SingleOrDefault();
         if (paradaActiva is not null)
@@ -110,7 +118,7 @@ public sealed partial class EfRutasRepository
     }
 
     private static DecisionDevolucionEnvioDatos Resultado(DecisionDevolucionEnvio decision, Envio actual, bool repetida) =>
-        new(decision.EnvioId, decision.Id, decision.ComandoId, EstadoEnvio.EnDevolucion.ToString(),
+        new(decision.EnvioId, decision.Id, decision.ComandoId, (actual.Estado == EstadoEnvio.EntregadoParcialmente ? EstadoEnvio.EntregadoParcialmente : EstadoEnvio.EnDevolucion).ToString(),
             decision.VersionNueva, decision.Motivo, decision.DecididaEnUtc, actual.Estado.ToString(), actual.Version, repetida);
 
     public async Task<ReprogramacionEnvioDatos?> ReprogramarAsync(Guid operadorId, Guid envioId,
@@ -146,7 +154,7 @@ public sealed partial class EfRutasRepository
             occurredAt: ahora, cancellationToken: ct);
         envio.CambiarEstado(EstadoEnvio.Reprogramado, envio.Version);
         const string motivo = "Reprogramado tras un intento fallido.";
-        foreach (var anterior in hojasAnteriores) anterior.SuspenderParada(envioId, motivo);
+        foreach (var anterior in hojasAnteriores) anterior.RetirarParada(envioId, motivo);
 
         var rutaEnCurso = hojasAnteriores.SingleOrDefault(x => x.Estado is EstadoHojaRuta.Despachada or EstadoHojaRuta.EnCurso);
         if (rutaEnCurso is not null)
@@ -186,8 +194,8 @@ public sealed partial class EfRutasRepository
         await Bloquear(operadorId, ct);
         var envio = await db.Envios.SingleOrDefaultAsync(e => e.OperadorId == operadorId && e.Id == envioId, ct);
         if (envio is null) return null;
-        if (envio.EntregaFisicaEnUtc is not null || envio.Version != datos.VersionEnvio
-            || envio.Estado is not (EstadoEnvio.AsignadoRuta or EstadoEnvio.Reprogramado))
+        if (envio.Estado != EstadoEnvio.EntregadoParcialmente && envio.EntregaFisicaEnUtc is not null || envio.Version != datos.VersionEnvio
+            || envio.Estado is not (EstadoEnvio.AsignadoRuta or EstadoEnvio.Reprogramado or EstadoEnvio.EntregadoParcialmente or EstadoEnvio.RetiroAsignado))
             throw new ConflictoRepartoException("Solo se reasignan envíos asignados aún no despachados o reprogramados; un envío en tránsito no cambia a otra ruta.");
         var destino = await db.HojasRuta.Include(h => h.Paradas)
             .SingleOrDefaultAsync(h => h.Id == datos.RutaDestinoId && h.OperadorId == operadorId, ct);
@@ -207,12 +215,14 @@ public sealed partial class EfRutasRepository
             || !await db.Vehiculos.AnyAsync(v => v.OperadorId == operadorId && v.Id == destino.VehiculoId && v.Activo, ct))
             throw new ConflictoRepartoException("La ruta destino supera sus paradas o tiene repartidor/vehículo deshabilitados.");
         var ids = destino.Paradas.Where(p => p.Activa).Select(p => p.EnvioId).Append(envioId).ToArray();
-        var bultos = await db.Bultos.Where(b => b.OperadorId == operadorId && ids.Contains(b.EnvioId)).ToArrayAsync(ct);
+        var bultos = await db.Bultos.Where(b => b.OperadorId == operadorId && ids.Contains(b.EnvioId) && b.Resultado == ResultadoBulto.Pendiente).ToArrayAsync(ct);
         if (!bultos.Any(b => b.EnvioId == envioId)) throw new ConflictoRepartoException("El envío debe tener bultos.");
         var vehiculo = await db.Vehiculos.SingleAsync(v => v.OperadorId == operadorId && v.Id == destino.VehiculoId, ct);
-        if (CapacidadCarga.Exceso(vehiculo, bultos) is { } exceso) throw new ConflictoRepartoException(exceso);
+        var retirosCapacidad = await db.Envios.Where(e => e.OperadorId == operadorId && ids.Contains(e.Id) && e.EsRetiro).Select(e => e.Id).ToArrayAsync(ct);
+        if (CapacidadCarga.ExcesoRecorrido(vehiculo, destino.Paradas.Where(p => p.Activa).OrderBy(p => p.Orden).Select(p => (p.EnvioId, retirosCapacidad.Contains(p.EnvioId))).Append((envioId, envio.EsRetiro)), bultos) is { } exceso)
+            throw new ConflictoRepartoException(exceso);
         var propias = bultos.Where(b => b.EnvioId == envioId).ToArray();
-        if (propias.Any(b => b.Custodia != EstadoCustodiaBulto.Deposito))
+        if (propias.Any(b => b.Custodia != (envio.EsRetiro ? EstadoCustodiaBulto.SinRecepcion : EstadoCustodiaBulto.Deposito)))
             throw new ConflictoRepartoException("La reasignación requiere todos los bultos físicamente recibidos en depósito; no transfiere custodia entre repartidores.");
         foreach (var parada in destino.Paradas.Where(p => p.Activa))
             await RestriccionesTemporales.ValidarAsync(db, operadorId, parada.EnvioId, parada.LlegadaEstimadaUtc, parada.ServicioMinutos, ct);
@@ -224,10 +234,11 @@ public sealed partial class EfRutasRepository
         await db.SetShipmentHistoryContextAsync("ReasignacionRuta", correlacion, correlacion,
             reloj.GetUtcNow(), "CambioRuta", ct);
         foreach (var anterior in anteriores.Where(h => h.Paradas.Any(p => p.EnvioId == envioId && p.Activa)))
-            anterior.SuspenderParada(envioId, datos.Motivo);
+            anterior.RetirarParada(envioId, datos.Motivo);
         // Libera el índice de parada activa antes de insertar la nueva, dentro de la misma transacción.
         await db.SaveChangesAsync(ct);
         destino.AgregarParada(envioId, datos.LlegadaEstimadaUtc, datos.ServicioMinutos);
+        destino.Paradas.Single(p => p.EnvioId == envioId).FijarBultos(propias.Select(b => b.Id));
         if (envio.Estado == EstadoEnvio.Reprogramado)
             envio.CambiarEstado(EstadoEnvio.AsignadoRuta, envio.Version);
         else
