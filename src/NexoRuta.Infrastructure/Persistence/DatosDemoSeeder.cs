@@ -86,11 +86,13 @@ public sealed class DatosDemoSeeder(
             var comerciosExistentes = new List<OrganizacionDemo>(NombresComercios.Length);
             for (var i = 0; i < NombresOperadores.Length; i++)
                 operadoresExistentes.Add(await ObtenerOrganizacionFixtureAsync(TipoAccesoUsuario.Operador,
-                    $"admin.operador{i + 1}@demo.nexoruta.test", NombresOperadores[i], ct)
+                    $"admin.operador{i + 1}@demo.nexoruta.test", NombresOperadores[i], ct,
+                    requierePropietario: false)
                     ?? throw new InvalidOperationException("Falta una cuenta de operador del seed demo."));
             for (var i = 0; i < NombresComercios.Length; i++)
                 comerciosExistentes.Add(await ObtenerOrganizacionFixtureAsync(TipoAccesoUsuario.Comercio,
-                    $"admin.comercio{i + 1}@demo.nexoruta.test", NombresComercios[i], ct)
+                    $"admin.comercio{i + 1}@demo.nexoruta.test", NombresComercios[i], ct,
+                    requierePropietario: false)
                     ?? throw new InvalidOperationException("Falta una cuenta de comercio del seed demo."));
             await SincronizarActoresAsync(actor, operadoresExistentes, comerciosExistentes, ct);
             return (true, EstadoDatosDemo.Desde(anterior));
@@ -330,13 +332,17 @@ public sealed class DatosDemoSeeder(
     }
 
     private async Task<OrganizacionDemo?> ObtenerOrganizacionFixtureAsync(TipoAccesoUsuario tipo, string email,
-        string nombreFallback, CancellationToken ct)
+        string nombreFallback, CancellationToken ct, bool requierePropietario = true)
     {
         var usuario = await db.Usuarios.AsNoTracking().SingleOrDefaultAsync(x => x.Email == email, ct);
         if (usuario is null) return null;
-        var acceso = await db.AccesosUsuario.AsNoTracking().SingleOrDefaultAsync(x => x.UsuarioId == usuario.Id
-            && x.EsPropietario && x.TipoOrganizacion == tipo, ct)
-            ?? throw new InvalidOperationException("La identidad reservada para el fixture OPT-06 tiene un acceso incompatible.");
+        var accesos = db.AccesosUsuario.AsNoTracking().Where(x => x.UsuarioId == usuario.Id
+            && x.TipoOrganizacion == tipo);
+        if (requierePropietario) accesos = accesos.Where(x => x.EsPropietario);
+        var acceso = await accesos.SingleOrDefaultAsync(ct)
+            ?? throw new InvalidOperationException(requierePropietario
+                ? "La identidad reservada para el fixture OPT-06 tiene un acceso incompatible."
+                : $"La cuenta demo {email} no tiene un acceso compatible con {tipo}.");
         var rol = await db.Roles.AsNoTracking().SingleAsync(x => x.Id == acceso.RolId, ct);
         var nombre = tipo == TipoAccesoUsuario.Operador
             ? await db.Operadores.AsNoTracking().Where(x => x.Id == acceso.OperadorId).Select(x => x.Nombre).SingleAsync(ct)
