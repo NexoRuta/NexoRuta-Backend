@@ -20,7 +20,7 @@ public sealed class KafkaFixture : IAsyncLifetime
             await admin.CreateTopicsAsync([new TopicSpecification
             {
                 Name = KafkaEnvioCreadoPublisher.Topic, NumPartitions = 3, ReplicationFactor = 1
-            }]);
+            }, new TopicSpecification { Name = NexoRuta.Application.Operacion.EventoOperativo.Topic, NumPartitions = 3, ReplicationFactor = 1 }]);
         }
         catch
         {

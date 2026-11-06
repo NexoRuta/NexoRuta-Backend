@@ -39,8 +39,17 @@ public sealed class OperationalSignalRTests(PostgresFixture postgres) : IClassFi
         var snapshotA = await Photograph(connectionA, ct); var snapshotB = await Photograph(connectionB, ct);
         Assert.Single(snapshotA.Entidades); Assert.Single(snapshotB.Entidades);
         Assert.Equal(initial.EventId, snapshotA.Entidades[0].EventId); Assert.Equal(snapshotA.Revision, snapshotB.Revision);
+        Assert.Equal("Indisponible", snapshotA.EstadoProyeccion);
+        await using (var health = database.CreateDbContext())
+            for (var partition = 0; partition < 3; partition++)
+                await health.Database.ExecuteSqlInterpolatedAsync($"SELECT nexoruta_app.operational_projection_health({"board"},{partition},{3},{0L})", ct);
+        Assert.Equal("Actualizada", (await Photograph(connectionB, ct)).EstadoProyeccion);
         await connectionA.StopAsync(ct);
-        var newer = Position(op, 2, now.AddMilliseconds(1), -34.7); await Apply(newer);
+        var newer = Position(op, 2, now.AddMilliseconds(1), -34.7);
+        await Capture(newer);
+        // Kafka may still report zero lag before an unpublished outbox event reaches it.
+        Assert.Equal("Atrasada", (await Photograph(connectionB, ct)).EstadoProyeccion);
+        await Apply(newer);
         var delayed = Position(op, 3, now.AddMinutes(-2), -35); await Apply(delayed); await Apply(newer);
         var onSecond = await Photograph(connectionB, ct); Assert.Equal(newer.EventId, Assert.Single(onSecond.Entidades).EventId);
         await connectionA.StartAsync(ct);
@@ -52,8 +61,22 @@ public sealed class OperationalSignalRTests(PostgresFixture postgres) : IClassFi
         using var denied = await anonymous.PostAsync("/hubs/operacion/negotiate?negotiateVersion=1", null, ct);
         Assert.Equal(System.Net.HttpStatusCode.Unauthorized, denied.StatusCode);
 
+        async Task Capture(EventoOperativo value)
+        {
+            await using var db = database.CreateDbContext();
+            var json = JsonSerializer.Serialize(value, OperationalConsumer.Json);
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO public."OutboxMessages"("Id","OperadorId","Ambito","ClaveAmbito","Tipo","VersionContrato","Destino","Prioridad","Estado","Payload","Intentos","CreadoEnUtc","ProximoIntentoEnUtc")
+                VALUES({value.EventId},{value.OperadorId},'Flota',{value.EntidadId},'EventoOperativo',1,'Kafka','Normal','Pendiente',{json}::jsonb,0,clock_timestamp(),clock_timestamp()) ON CONFLICT DO NOTHING
+                """, ct);
+        }
         async Task Apply(EventoOperativo value)
-        { await using var db = database.CreateDbContext(); var json = JsonSerializer.Serialize(value, OperationalConsumer.Json); await db.Database.ExecuteSqlInterpolatedAsync($"SELECT nexoruta_app.project_operational_event({json}::jsonb)", ct); }
+        {
+            await Capture(value);
+            await using var db = database.CreateDbContext();
+            var json = JsonSerializer.Serialize(value, OperationalConsumer.Json);
+            await db.Database.ExecuteSqlInterpolatedAsync($"SELECT nexoruta_app.project_operational_event({json}::jsonb)", ct);
+        }
     }
     private static async Task<OperationalSnapshot> Photograph(HubConnection connection, CancellationToken ct)
     {

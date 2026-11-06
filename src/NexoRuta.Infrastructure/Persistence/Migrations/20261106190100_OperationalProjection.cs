@@ -54,6 +54,8 @@ END $$;
 ALTER FUNCTION nexoruta_app.project_operational_event(jsonb) OWNER TO nexoruta_job_fn;
 REVOKE ALL ON FUNCTION nexoruta_app.project_operational_event(jsonb) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION nexoruta_app.project_operational_event(jsonb) TO nexoruta_worker;
+ALTER TABLE public."OperacionEventosProcesados" OWNER TO nexoruta_schema_owner;
+ALTER TABLE public."OperacionProyeccion" OWNER TO nexoruta_schema_owner;
 """);
     protected override void Down(MigrationBuilder m) => throw new NotSupportedException("Rebuild projections in an isolated destination instead of destructive rollback.");
 }

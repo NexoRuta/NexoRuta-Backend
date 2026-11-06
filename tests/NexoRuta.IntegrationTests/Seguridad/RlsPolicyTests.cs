@@ -33,7 +33,9 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
         "Operadores", "Comercios", "SolicitudesBajaOrganizacion", "SolicitudesReactivacionOrganizacion",
         "CambiosEstadoOrganizacion", "Destinatarios", "Direcciones", "Envios", "Bultos",
         "EnlacesSeguimiento", "EntregasSeguimiento", "OutboxMessages", "ProcessedMessages",
-        "Roles", "Permisos", "RolesPermisos"
+        "Roles", "Permisos", "RolesPermisos",
+        "OperacionEventosProcesados", "OperacionProyeccion", "OperacionFuente",
+        "OperacionDocumentosProcesados", "SolicitudesReprogramacionPublica", "AvisosDestinatarioEstado"
     ];
 
     [Fact]
@@ -599,7 +601,7 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
             owner.OutboxMessages.Add(OutboxMessage.ForShipment(rows.OperatorA, rows.ShipmentA1,
                 OutboxMessageTypes.TrackingRequested, OutboxDestino.RabbitMq, "{}"));
             await owner.SaveChangesAsync();
-            jobId = await owner.OutboxMessages.AsNoTracking().Where(x => x.EnvioId == rows.ShipmentA1).Select(x => x.Id).SingleAsync();
+            jobId = await owner.OutboxMessages.AsNoTracking().Where(x => x.EnvioId == rows.ShipmentA1 && x.Tipo == OutboxMessageTypes.TrackingRequested).Select(x => x.Id).SingleAsync();
         }
 
         var api = await CreateRestrictedConnectionAsync(database, "nexoruta_api");
@@ -700,7 +702,12 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
         start.SetResult();
         var claims = await Task.WhenAll(firstClaim, secondClaim);
         Assert.Single(claims, id => id == message.Id);
-        Assert.Single(claims, id => id is null);
+        // Both the tracking job and its canonical-state notice are ready. Each
+        // restricted worker must claim a distinct logical message exactly once.
+        await using var verify = database.CreateDbContext();
+        var noticeId = await verify.OutboxMessages.Where(x => x.EnvioId == rows.ShipmentA2 && x.Tipo == OutboxMessageTypes.RecipientStateEmail).Select(x => x.Id).SingleAsync();
+        Assert.Single(claims, id => id == noticeId);
+        Assert.Equal(2, claims.Distinct().Count());
     }
 
     [Fact]
@@ -708,6 +715,10 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
     {
         var database = await postgres.CreateDatabaseAsync();
         var rows = await SeedTenantGraphAsync(database);
+        // Isolate the recovery pair's scheduling without deleting captured facts.
+        await using (var seed = database.CreateDbContext())
+            await seed.OutboxMessages.Where(x => x.Tipo == "EventoOperativo").ExecuteUpdateAsync(update =>
+                update.SetProperty(x => x.ProximoIntentoEnUtc, DateTimeOffset.UtcNow.AddDays(1)));
         var emailId = Guid.CreateVersion7();
         var eventId = Guid.CreateVersion7();
         var occurredAt = DateTimeOffset.UtcNow;
@@ -760,8 +771,9 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
         }
 
         await using var verify = database.CreateDbContext();
-        Assert.Equal(2, await verify.OutboxMessages.CountAsync());
-        Assert.All(await verify.OutboxMessages.ToListAsync(), message =>
+        var recovery = await verify.OutboxMessages.Where(x => x.Ambito == OutboxScope.Identidad).ToListAsync();
+        Assert.Equal(2, recovery.Count);
+        Assert.All(recovery, message =>
         {
             Assert.Null(message.OperadorId);
             Assert.Null(message.EnvioId);

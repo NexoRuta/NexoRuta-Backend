@@ -91,6 +91,7 @@ ALTER FUNCTION nexoruta_app.prepare_recipient_state_email(uuid) OWNER TO nexorut
 ALTER FUNCTION nexoruta_app.mark_recipient_state_email(uuid) OWNER TO nexoruta_job_fn;
 REVOKE ALL ON FUNCTION nexoruta_app.prepare_recipient_state_email(uuid),nexoruta_app.mark_recipient_state_email(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION nexoruta_app.prepare_recipient_state_email(uuid),nexoruta_app.mark_recipient_state_email(uuid) TO nexoruta_worker;
+ALTER TABLE public."AvisosDestinatarioEstado" OWNER TO nexoruta_schema_owner;
 """);
     protected override void Down(MigrationBuilder m) => throw new NotSupportedException("Recipient notification history must be preserved.");
 }

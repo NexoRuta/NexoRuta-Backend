@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Xunit.Abstractions;
 using Confluent.Kafka;
 using Confluent.Kafka.Admin;
 using DotNet.Testcontainers.Builders;
@@ -6,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging;
 using MongoDB.Bson;
 using MongoDB.Driver;
 using NexoRuta.Application.Operacion;
@@ -17,7 +19,7 @@ using NexoRuta.Worker.Messaging;
 namespace NexoRuta.IntegrationTests.Operacion;
 
 [Collection(OperationalInfrastructureCollection.Name)]
-public sealed class OperationalProjectionTests(PostgresFixture postgres, KafkaFixture kafka)
+public sealed class OperationalProjectionTests(PostgresFixture postgres, KafkaFixture kafka, ITestOutputHelper output)
     : IClassFixture<PostgresFixture>, IClassFixture<KafkaFixture>
 {
     [Fact]
@@ -29,7 +31,7 @@ public sealed class OperationalProjectionTests(PostgresFixture postgres, KafkaFi
             .WithPortBinding(27017, true)
             .WithWaitStrategy(Wait.ForUnixContainer().UntilInternalTcpPortIsAvailable(27017)).Build();
         await mongo.StartAsync(ct);
-        var mongoClient = new MongoClient($"mongodb://{mongo.Hostname}:{mongo.GetMappedPublicPort(27017)}/?serverSelectionTimeoutMS=3000");
+        var mongoClient = new MongoClient($"mongodb://{mongo.Hostname}:{mongo.GetMappedPublicPort(27017)}/?serverSelectionTimeoutMS=3000&socketTimeoutMS=1000&connectTimeoutMS=1000");
         var topic = "test-operational-" + Guid.NewGuid().ToString("N");
         using var admin = new AdminClientBuilder(new AdminClientConfig { BootstrapServers = kafka.BootstrapServers }).Build();
         await admin.CreateTopicsAsync([new TopicSpecification { Name = topic, NumPartitions = 2, ReplicationFactor = 1, Configs = new Dictionary<string, string> { ["retention.ms"] = "-1", ["retention.bytes"] = "-1" } }]);
@@ -64,8 +66,11 @@ public sealed class OperationalProjectionTests(PostgresFixture postgres, KafkaFi
         using (var producer = new ProducerBuilder<string, string>(new ProducerConfig { BootstrapServers = kafka.BootstrapServers, Acks = Acks.All }).Build())
             foreach (var value in facts)
                 await producer.ProduceAsync(topic, new Message<string, string> { Key = value.OperadorId.ToString("D") + ":" + value.EntidadId.ToString("D"), Value = JsonSerializer.Serialize(value, OperationalConsumer.Json) }, ct);
-        await ConsumeAsync(first, firstMongo, topic, expected, ct);
-        await ConsumeAsync(replay, replayMongo, topic, expected, ct);
+        // Only the documentary consumer fails. The independent board must catch up
+        // while MongoDB is paused; then the same group recovers its uncommitted offset.
+        await mongo.PauseAsync(ct);
+        var firstGroups = await ConsumeAsync(first, firstMongo, topic, expected, ct, () => mongo.UnpauseAsync(ct));
+        var replayGroups = await ConsumeAsync(replay, replayMongo, topic, expected, ct);
         var stateA = await StateAsync(first, ct);
         var stateB = await StateAsync(replay, ct);
         Assert.Equal(stateA, stateB); // Entire materialized state, excluding destination-local revision IDs.
@@ -80,10 +85,11 @@ public sealed class OperationalProjectionTests(PostgresFixture postgres, KafkaFi
         var currentShipment = await db.Database.SqlQuery<string>($"SELECT \"Evento\"::text AS \"Value\" FROM public.\"OperacionProyeccion\" WHERE \"OperadorId\"={opA} AND \"Tipo\"='Envio'").SingleAsync(ct);
         Assert.Equal(partial.EventId,JsonSerializer.Deserialize<EventoOperativo>(currentShipment,OperationalConsumer.Json)!.EventId);
         Assert.Equal(9,stateA.Length);
+        output.WriteLine(JsonSerializer.Serialize(new { topic, firstGroups, replayGroups, uniqueEvents = expected, materializedRows = stateA.Length, identicalReplay = stateA.SequenceEqual(stateB), physicalPositionNeverRewinds = true, duplicatesCountOnce = true, documentaryConsumerRecoveredIndependently = true }));
         Assert.Single(await store.QueryAsync(opB, null, null, null, now.AddDays(-1), now.AddDays(1), 0, 100, ct));
     }
 
-    private async Task ConsumeAsync(IntegrationDatabase database, IMongoDatabase mongo, string topic, int expected, CancellationToken ct)
+    private async Task<string[]> ConsumeAsync(IntegrationDatabase database, IMongoDatabase mongo, string topic, int expected, CancellationToken ct, Func<Task>? recover = null)
     {
         await using var provider = new ServiceCollection().AddDbContext<NexoRutaDbContext>(options => options.UseNexoRutaPostgres(database.ConnectionString)).BuildServiceProvider();
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
@@ -95,7 +101,9 @@ public sealed class OperationalProjectionTests(PostgresFixture postgres, KafkaFi
             ["Operational:nexoruta-operational-history-v1:Group"] = "history-" + Guid.NewGuid().ToString("N")
         }).Build();
         using var board = new OperationalBoardConsumer(config, provider.GetRequiredService<IServiceScopeFactory>(), NullLogger<OperationalBoardConsumer>.Instance);
-        using var history = new OperationalHistoryConsumer(config, new OperationalMongoStore(mongo), provider.GetRequiredService<IServiceScopeFactory>(), NullLogger<OperationalHistoryConsumer>.Instance);
+        var recoveryExpected = recover is not null;
+        var historyLog = new HistoryFailureLogger();
+        using var history = new OperationalHistoryConsumer(config, new OperationalMongoStore(mongo), provider.GetRequiredService<IServiceScopeFactory>(), historyLog);
         await board.StartAsync(ct);
         await history.StartAsync(ct);
         try
@@ -105,12 +113,33 @@ public sealed class OperationalProjectionTests(PostgresFixture postgres, KafkaFi
                 ct.ThrowIfCancellationRequested();
                 using var db = database.CreateDbContext();
                 var count = await db.Database.SqlQueryRaw<int>("SELECT count(*)::integer AS \"Value\" FROM public.\"OperacionEventosProcesados\"").SingleAsync(ct);
-                var documents = await mongo.GetCollection<BsonDocument>(OperationalMongoStore.CollectionName).CountDocumentsAsync(FilterDefinition<BsonDocument>.Empty, cancellationToken: ct);
+                if (recover is not null)
+                {
+                    if (count != expected) { await Task.Delay(100, ct); continue; }
+                    await historyLog.FirstFailure.Task.WaitAsync(ct);
+                    await recover();
+                    recover = null;
+                }
+                long documents;
+                try { documents = await mongo.GetCollection<BsonDocument>(OperationalMongoStore.CollectionName).CountDocumentsAsync(FilterDefinition<BsonDocument>.Empty, cancellationToken: ct); }
+                catch (Exception error) when (error is MongoException or TimeoutException)
+                { await Task.Delay(100, ct); continue; }
                 if (count == expected && documents == expected) break;
                 await Task.Delay(100, ct);
             }
         }
         finally { await board.StopAsync(CancellationToken.None); await history.StopAsync(CancellationToken.None); }
+        if (recoveryExpected) Assert.True(historyLog.FirstFailure.Task.IsCompletedSuccessfully);
+        return [config["Operational:nexoruta-operational-board-v1:Group"]!, config["Operational:nexoruta-operational-history-v1:Group"]!];
+    }
+
+    private sealed class HistoryFailureLogger : ILogger<OperationalHistoryConsumer>
+    {
+        public TaskCompletionSource FirstFailure { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel level) => true;
+        public void Log<TState>(LogLevel level, EventId id, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        { if (level == LogLevel.Warning) FirstFailure.TrySetResult(); }
     }
 
     private static async Task<string[]> StateAsync(IntegrationDatabase database, CancellationToken ct)

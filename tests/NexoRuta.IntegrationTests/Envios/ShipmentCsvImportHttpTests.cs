@@ -44,12 +44,13 @@ public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOu
         var parcels = await db.Bultos.Where(b => b.EnvioId == shipment.Id).OrderBy(b => b.Codigo).ToArrayAsync();
         Assert.Equal(2, parcels.Length);
         Assert.Equal(new[] { 500m, 1250.55m }, parcels.Select(b => b.PesoGramos));
-        Assert.Equal(2, await db.OutboxMessages.CountAsync());
+        // 2 existing jobs + 1 recipient notice + 4 operational facts, including both parcels.
+        Assert.Equal(7, await db.OutboxMessages.CountAsync());
         using var retry = await ImportAsync(client, Csv(second, first, first), operatorId);
         Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
         Assert.Single(await db.Envios.ToArrayAsync());
         Assert.Equal(2, await db.Bultos.CountAsync());
-        Assert.Equal(2, await db.OutboxMessages.CountAsync());
+        Assert.Equal(7, await db.OutboxMessages.CountAsync());
         using var list = await client.GetAsync("/api/envios");
         Assert.Equal(HttpStatusCode.OK, list.StatusCode);
         var listed = await Body(list);
@@ -82,7 +83,7 @@ public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOu
         Assert.Equal(2, (await Body(response)).GetProperty("bultos").GetArrayLength());
         Assert.Single(await db.Envios.ToArrayAsync());
         Assert.Equal(2, await db.Bultos.CountAsync());
-        Assert.Equal(2, await db.OutboxMessages.CountAsync());
+        Assert.Equal(7, await db.OutboxMessages.CountAsync());
     }
 
     [Fact]
@@ -176,7 +177,7 @@ public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOu
         Assert.Equal(3, await db.Envios.CountAsync());
         Assert.Equal(3, await db.Database.SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM public.\"EnvioEventos\" WHERE \"Tipo\" = 'Creacion'").SingleAsync());
         Assert.Equal(3, await db.IdentidadesEnvioImportado.CountAsync());
-        Assert.Equal(6, await db.OutboxMessages.CountAsync());
+        Assert.Equal(18, await db.OutboxMessages.CountAsync());
         Assert.Equal(3, await db.OutboxMessages.CountAsync(x => x.Tipo == OutboxMessageTypes.TrackingRequested && x.Destino == OutboxDestino.RabbitMq));
         Assert.Equal(3, await db.OutboxMessages.CountAsync(x => x.Tipo == OutboxMessageTypes.ShipmentCreated && x.Destino == OutboxDestino.Kafka));
     }
@@ -207,7 +208,7 @@ public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOu
         Assert.Equal(2, Int(conflictBody, "resumen", "conflictos"));
         Assert.Equal(1, Int(conflictBody, "resumen", "noProcesados"));
         Assert.Equal(1, await db.Envios.CountAsync());
-        Assert.Equal(2, await db.OutboxMessages.CountAsync());
+        Assert.Equal(6, await db.OutboxMessages.CountAsync());
     }
 
     [Fact]
@@ -252,7 +253,7 @@ public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOu
         Assert.Equal(1, Int(retryBody, "resumen", "creados"));
         Assert.Equal(2, await db.Envios.CountAsync());
         Assert.Equal(2, await db.IdentidadesEnvioImportado.CountAsync());
-        Assert.Equal(beforeOutbox + 2, await db.OutboxMessages.CountAsync());
+        Assert.Equal(beforeOutbox + 6, await db.OutboxMessages.CountAsync());
     }
 
     [Fact]
@@ -288,7 +289,7 @@ public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOu
         Assert.Equal(HttpStatusCode.Conflict, operatorConflict.StatusCode);
         Assert.Equal(2, await db.Envios.CountAsync());
         Assert.Equal(1, await db.Envios.CountAsync(x => x.ComercioId == secondCommerceId));
-        Assert.Equal(4, await db.OutboxMessages.CountAsync());
+        Assert.Equal(12, await db.OutboxMessages.CountAsync());
     }
 
     [Fact]
@@ -357,7 +358,7 @@ public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOu
         await using var verify = database.CreateDbContext();
         Assert.Equal(2, await verify.Envios.CountAsync());
         Assert.Equal(2, await verify.IdentidadesEnvioImportado.CountAsync());
-        Assert.Equal(4, await verify.OutboxMessages.CountAsync());
+        Assert.Equal(12, await verify.OutboxMessages.CountAsync());
     }
 
     private static async Task<string> CreateRestrictedApiConnectionAsync(IntegrationDatabase database)
@@ -462,7 +463,7 @@ public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOu
         Assert.Equal(2, Int(firstBody, "resumen", "creados") + Int(secondBody, "resumen", "creados"));
         Assert.Equal(2, Int(firstBody, "resumen", "existentes") + Int(secondBody, "resumen", "existentes"));
         Assert.Equal(2, await db.Envios.CountAsync());
-        Assert.Equal(4, await db.OutboxMessages.CountAsync());
+        Assert.Equal(12, await db.OutboxMessages.CountAsync());
         output.WriteLine($"Two overlapping reverse-order imports completed in {watch.Elapsed.TotalMilliseconds:F0} ms; created={Int(firstBody, "resumen", "creados") + Int(secondBody, "resumen", "creados")}, existing={Int(firstBody, "resumen", "existentes") + Int(secondBody, "resumen", "existentes")}.");
 
         var conflictingA = ImportAsync(client, Csv(Row("LOCK-CONFLICT", name: "Recipient A")), operatorId);
@@ -472,7 +473,7 @@ public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOu
         Assert.Contains(new[] { conflictA.StatusCode, conflictB.StatusCode }, status => status == HttpStatusCode.OK);
         Assert.Contains(new[] { conflictA.StatusCode, conflictB.StatusCode }, status => status == HttpStatusCode.Conflict);
         Assert.Equal(3, await db.Envios.CountAsync());
-        Assert.Equal(6, await db.OutboxMessages.CountAsync());
+        Assert.Equal(18, await db.OutboxMessages.CountAsync());
     }
 
     [Fact]
@@ -495,7 +496,7 @@ public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOu
         Assert.NotNull(lost);
         Assert.Equal(1, await db.Envios.CountAsync());
         Assert.Equal(1, await db.IdentidadesEnvioImportado.CountAsync());
-        Assert.Equal(2, await db.OutboxMessages.CountAsync());
+        Assert.Equal(6, await db.OutboxMessages.CountAsync());
 
         using var retry = await ImportAsync(client, csv, operatorId);
         Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
@@ -503,7 +504,7 @@ public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOu
         Assert.Equal(0, Int(retryBody, "resumen", "creados"));
         Assert.Equal(1, Int(retryBody, "resumen", "existentes"));
         Assert.Equal(1, await db.Envios.CountAsync());
-        Assert.Equal(2, await db.OutboxMessages.CountAsync());
+        Assert.Equal(6, await db.OutboxMessages.CountAsync());
     }
 
     [Fact]
@@ -523,7 +524,7 @@ public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOu
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(500, Int(await Body(response), "resumen", "creados"));
         Assert.Equal(500, await db.Envios.CountAsync());
-        Assert.Equal(1000, await db.OutboxMessages.CountAsync());
+        Assert.Equal(3000, await db.OutboxMessages.CountAsync());
         output.WriteLine($"500-row HTTP import: {watch.Elapsed.TotalMilliseconds:F0} ms in Docker Testcontainers PostgreSQL (postgis/postgis:18-3.6-alpine), single local test process.");
     }
 

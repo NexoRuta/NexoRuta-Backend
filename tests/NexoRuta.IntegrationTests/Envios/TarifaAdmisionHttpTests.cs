@@ -57,7 +57,7 @@ public sealed class TarifaAdmisionHttpTests(PostgresFixture postgres) : IClassFi
         using var created=await client.PostAsJsonAsync("/api/envios",request);Assert.Equal(HttpStatusCode.Created,created.StatusCode);
         var result=await created.Content.ReadFromJsonAsync<JsonElement>();var envio=result.GetProperty("id").GetGuid();
         Assert.Equal(121.40m,result.GetProperty("tarifa").GetProperty("totalFinalUyu").GetDecimal());
-        Assert.Equal(2,await db.Bultos.CountAsync());Assert.Equal(2,await db.OutboxMessages.CountAsync());
+        Assert.Equal(2,await db.Bultos.CountAsync());Assert.Equal(7,await db.OutboxMessages.CountAsync());
         var destino=await db.Direcciones.SingleAsync();Assert.Equal(-34.901,destino.Latitud);Assert.Equal(-56.201,destino.Longitud);Assert.NotNull(destino.ConfirmadaEnUtc);
         var detalle=await client.GetFromJsonAsync<JsonElement[]> ("/api/envios");Assert.Equal(121.40m,Assert.Single(detalle!).GetProperty("tarifa").GetProperty("totalFinalUyu").GetDecimal());
         using var tarifa=await client.GetAsync($"/api/envios/{envio}/tarifa");Assert.Equal(HttpStatusCode.OK,tarifa.StatusCode);
@@ -76,7 +76,7 @@ public sealed class TarifaAdmisionHttpTests(PostgresFixture postgres) : IClassFi
         await using var db=data.CreateDbContext();var operador=await db.Operadores.Select(o=>o.Id).SingleAsync();await client.SetBearerForAccessAsync(data,await db.AccesosUsuario.Where(a=>a.ComercioId!=null).Select(a=>a.Id).SingleAsync());
         var request=Solicitud(operador);request.Servicio.Latitud=lat;request.Servicio.Longitud=lon;request.Servicio.Modalidad=modalidad;
         using var response=await client.PostAsJsonAsync("/api/envios",request);Assert.Equal(permitido?HttpStatusCode.Created:HttpStatusCode.BadRequest,response.StatusCode);
-        Assert.Equal(permitido?1:0,await db.Envios.CountAsync());Assert.Equal(permitido?2:0,await db.Bultos.CountAsync());Assert.Equal(permitido?2:0,await db.OutboxMessages.CountAsync());
+        Assert.Equal(permitido?1:0,await db.Envios.CountAsync());Assert.Equal(permitido?2:0,await db.Bultos.CountAsync());Assert.Equal(permitido?7:0,await db.OutboxMessages.CountAsync());
     }
 
     [Fact]
@@ -137,7 +137,7 @@ public sealed class TarifaAdmisionHttpTests(PostgresFixture postgres) : IClassFi
         using var rejected=await Importar(buena+"\n"+mala);Assert.Equal(HttpStatusCode.UnprocessableEntity,rejected.StatusCode);
         Assert.Empty(await db.Envios.ToArrayAsync());Assert.Empty(await db.Bultos.ToArrayAsync());Assert.Empty(await db.IdentidadesEnvioImportado.ToArrayAsync());Assert.Empty(await db.OutboxMessages.ToArrayAsync());
         using var accepted=await Importar(buena+"\n"+segunda);Assert.Equal(HttpStatusCode.OK,accepted.StatusCode);Assert.Single(await db.Envios.ToArrayAsync());Assert.Equal(2,await db.Bultos.CountAsync());Assert.Equal((short)2,(await db.IdentidadesEnvioImportado.SingleAsync()).VersionHuella);
-        using var retry=await Importar(segunda+"\n"+buena);Assert.Equal(HttpStatusCode.OK,retry.StatusCode);Assert.Single(await db.Envios.ToArrayAsync());Assert.Equal(2,await db.OutboxMessages.CountAsync());
+        using var retry=await Importar(segunda+"\n"+buena);Assert.Equal(HttpStatusCode.OK,retry.StatusCode);Assert.Single(await db.Envios.ToArrayAsync());Assert.Equal(7,await db.OutboxMessages.CountAsync());
         Assert.Equal(1,await db.Database.SqlQuery<int>($"SELECT count(*)::int AS \"Value\" FROM public.\"TarifasEnvio\"").SingleAsync());
         using var oldFormat=await Importar(buena,formato:1);Assert.Equal(HttpStatusCode.BadRequest,oldFormat.StatusCode);Assert.Single(await db.Envios.ToArrayAsync());
     }

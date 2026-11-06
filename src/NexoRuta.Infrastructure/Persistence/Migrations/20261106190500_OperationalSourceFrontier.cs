@@ -60,8 +60,11 @@ CREATE FUNCTION nexoruta_app.operational_projection_status(p_projection text,p_o
  WHEN count(*)<>max("Particiones") OR max("Atraso")>0 OR EXISTS(SELECT 1 FROM public."OperacionFuente" f WHERE f."OperadorId"=p_operator AND f."Capturados"<>CASE WHEN p_projection='board' THEN f."Proyectados" ELSE f."Documentados" END) THEN 'Atrasada'
  ELSE 'Actualizada' END FROM public."OperacionProyeccionSalud" WHERE "Proyeccion"=p_projection
  $$;
+ALTER FUNCTION nexoruta_app.operational_projection_status(text,uuid) OWNER TO nexoruta_job_fn;
 REVOKE ALL ON FUNCTION nexoruta_app.operational_projection_status(text,uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION nexoruta_app.operational_projection_status(text,uuid) TO nexoruta_api,nexoruta_public_fn;
+ALTER TABLE public."OperacionFuente" OWNER TO nexoruta_schema_owner;
+ALTER TABLE public."OperacionDocumentosProcesados" OWNER TO nexoruta_schema_owner;
 """);
     protected override void Down(MigrationBuilder m) => throw new NotSupportedException();
 }

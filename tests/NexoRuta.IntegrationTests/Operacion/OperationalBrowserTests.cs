@@ -148,8 +148,13 @@ public sealed class OperationalBrowserTests(PostgresFixture postgres, KafkaFixtu
         var host=builder.Build();await host.StartAsync(ct);return host;
     }
 
-    private static string FindRoot()
-    { for (var d = new DirectoryInfo(Directory.GetCurrentDirectory()); d is not null; d = d.Parent) if (File.Exists(Path.Combine(d.FullName, "frontend", "NexoRuta.sln"))) return d.FullName; throw new DirectoryNotFoundException("Build the pinned frontend companion beside backend."); }
+    private static string FindRoot([System.Runtime.CompilerServices.CallerFilePath] string source = "")
+    {
+        foreach (var start in new[] { Directory.GetCurrentDirectory(), Path.GetDirectoryName(source)! })
+            for (var directory = new DirectoryInfo(start); directory is not null; directory = directory.Parent)
+                if (File.Exists(Path.Combine(directory.FullName, "frontend", "NexoRuta.sln"))) return directory.FullName;
+        throw new DirectoryNotFoundException("Build the pinned frontend companion beside backend.");
+    }
     private static int FreePort() { var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start(); var port = ((IPEndPoint)listener.LocalEndpoint).Port; listener.Stop(); return port; }
     private static Process StartPortal(string root, string name, string address, Uri api, string keys)
     {

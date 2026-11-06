@@ -35,5 +35,5 @@ ALTER FUNCTION nexoruta_app.public_estimated_service_window(text) OWNER TO nexor
 REVOKE ALL ON FUNCTION nexoruta_app.public_estimated_service_window(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION nexoruta_app.public_estimated_service_window(text) TO nexoruta_api;
 """);
-    protected override void Down(MigrationBuilder m) => throw new NotSupportedException();
+    protected override void Down(MigrationBuilder m) => throw new NotSupportedException("Operational projections must not be rolled back over accepted physical results; rebuild isolated derived storage instead.");
 }

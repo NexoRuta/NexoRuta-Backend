@@ -21,6 +21,7 @@ END $$;
 ALTER FUNCTION nexoruta_app.operational_projection_health(text,int,int,bigint) OWNER TO nexoruta_job_fn;
 REVOKE ALL ON FUNCTION nexoruta_app.operational_projection_health(text,int,int,bigint) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION nexoruta_app.operational_projection_health(text,int,int,bigint) TO nexoruta_worker;
+ALTER TABLE public."OperacionProyeccionSalud" OWNER TO nexoruta_schema_owner;
 """);
     protected override void Down(MigrationBuilder m) => throw new NotSupportedException();
 }

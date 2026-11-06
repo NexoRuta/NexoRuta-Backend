@@ -80,6 +80,7 @@ ALTER FUNCTION nexoruta_app.public_parcel_details(text) OWNER TO nexoruta_public
 REVOKE ALL ON FUNCTION nexoruta_app.public_parcel_details(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION nexoruta_app.public_parcel_details(text) TO nexoruta_api;
 
+ALTER TABLE public."SolicitudesReprogramacionPublica" OWNER TO nexoruta_schema_owner;
 """);
     protected override void Down(MigrationBuilder m) => throw new NotSupportedException("Public requests must be preserved.");
 }

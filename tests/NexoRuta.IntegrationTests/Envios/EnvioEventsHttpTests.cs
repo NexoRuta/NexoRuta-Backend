@@ -47,9 +47,9 @@ public sealed class EnvioEventsHttpTests(PostgresFixture postgres) : IClassFixtu
             await owner.Database.ExecuteSqlRawAsync("ALTER TABLE public.\"EnvioEventos\" DROP CONSTRAINT audit_reject_creation");
             await owner.Database.ExecuteSqlRawAsync("ALTER TABLE public.\"OutboxMessages\" ADD CONSTRAINT audit_reject_outbox CHECK (false)");
         }
-        var outboxFailure = await Assert.ThrowsAsync<DbUpdateException>(() =>
+        var outboxFailure = await Assert.ThrowsAsync<PostgresException>(() =>
             client.PostAsJsonAsync("/api/envios", Alta(operatorId, "OUTBOX-FAIL")));
-        Assert.Equal("audit_reject_outbox", Assert.IsType<PostgresException>(outboxFailure.InnerException).ConstraintName);
+        Assert.Equal("audit_reject_outbox", outboxFailure.ConstraintName);
         await AssertEmptyAsync(database);
 
         await using (var owner = database.CreateDbContext())

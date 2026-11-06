@@ -1,4 +1,5 @@
 using System.Data.Common;
+using Xunit.Abstractions;
 using System.Net;
 using System.Net.Http.Json;
 using System.Net.Sockets;
@@ -29,7 +30,7 @@ using Testcontainers.RabbitMq;
 namespace NexoRuta.IntegrationTests.Operacion;
 
 [Collection(OperationalInfrastructureCollection.Name)]
-public sealed class RecipientMailpitTests(PostgresFixture postgres) : IClassFixture<PostgresFixture>
+public sealed class RecipientMailpitTests(PostgresFixture postgres, ITestOutputHelper output) : IClassFixture<PostgresFixture>
 {
     [Fact]
     public async Task PersistedNoticeUsesRealMailpitAndRecoversThroughRabbitRetryWithoutLogicalDuplicates()
@@ -99,6 +100,7 @@ public sealed class RecipientMailpitTests(PostgresFixture postgres) : IClassFixt
             await Task.Delay(1000, ct);
             Assert.Equal(1, (await http.GetFromJsonAsync<JsonElement>("/api/v1/messages", ct)).GetProperty("total").GetInt32());
             Assert.True(sender.Attempts >= 2);
+            output.WriteLine(JsonSerializer.Serialize(new { mailpitMessageId = id, received = 1, smtpAttempts = sender.Attempts, controlledSmtpFailureRecovered = true, duplicateMessageDidNotResend = true, operatorBrandAndOpaqueLinkVerified = true }));
         }
         finally { await consumer.StopAsync(CancellationToken.None); }
     }
