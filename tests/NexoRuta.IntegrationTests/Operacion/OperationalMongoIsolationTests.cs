@@ -30,6 +30,10 @@ public sealed class OperationalMongoIsolationTests(PostgresFixture postgres) : I
         { var shipment = Guid.NewGuid(); return new(1, Guid.NewGuid(), tenant, merchant, "Envio", shipment, shipment, null, 0, Guid.NewGuid(), null, recorded, JsonSerializer.SerializeToElement(new { estado = "Admitido" })); }
         var own = Shipment(op, commerce, now); var otherMerchant = Shipment(op, otherCommerce, now); var otherTenant = Shipment(otherOperator, commerce, now); var expired = Shipment(op, commerce, now.AddDays(-91));
         foreach (var value in new[] { own, otherMerchant, own, otherTenant, expired, expired }) await store.InsertAsync(value, JsonSerializer.Serialize(value, OperationalConsumer.Json), ct);
+        var ordered = JsonSerializer.SerializeToElement(own, OperationalConsumer.Json);
+        var reordered = new System.Text.Json.Nodes.JsonObject(ordered.EnumerateObject().Reverse()
+            .Select(property => KeyValuePair.Create<string, System.Text.Json.Nodes.JsonNode?>(property.Name, System.Text.Json.Nodes.JsonNode.Parse(property.Value.GetRawText()))));
+        await store.InsertAsync(own, reordered.ToJsonString(), ct);
         var ownRows = await store.QueryAsync(op, commerce, null, null, now.AddDays(-1), now.AddDays(1), 0, 100, ct); Assert.Single(ownRows);
         Assert.Equal(own.EventId, JsonSerializer.Deserialize<EventoOperativo>(ownRows[0], OperationalConsumer.Json)!.EventId);
         var first = await store.QueryAsync(op, null, null, null, now.AddDays(-1), now.AddDays(1), 0, 1, ct); var second = await store.QueryAsync(op, null, null, null, now.AddDays(-1), now.AddDays(1), 1, 1, ct);

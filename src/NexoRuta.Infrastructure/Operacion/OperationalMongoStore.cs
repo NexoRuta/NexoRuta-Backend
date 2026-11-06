@@ -1,3 +1,4 @@
+using System.Text.Json;
 using MongoDB.Bson;
 using MongoDB.Driver;
 using NexoRuta.Application.Operacion;
@@ -54,7 +55,12 @@ public sealed class OperationalMongoStore(IMongoDatabase database)
         catch (MongoWriteException error) when (error.WriteError.Category == ServerErrorCategory.DuplicateKey)
         {
             var existing = await Collection.Find(new BsonDocument("_id", value.EventId.ToString("D"))).SingleAsync(ct);
-            if (!existing["payload"].Equals(doc["payload"]))
+            // JSON object property order is not part of the event contract. Match
+            // PostgreSQL jsonb semantics while still rejecting divergent content.
+            var format = new MongoDB.Bson.IO.JsonWriterSettings { OutputMode = MongoDB.Bson.IO.JsonOutputMode.RelaxedExtendedJson };
+            using var previous = JsonDocument.Parse(existing["payload"].ToJson(format));
+            using var incoming = JsonDocument.Parse(doc["payload"].ToJson(format));
+            if (!JsonElement.DeepEquals(previous.RootElement, incoming.RootElement))
                 throw new InvalidDataException("Event identity reused with different content.");
         }
     }
