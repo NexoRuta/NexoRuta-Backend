@@ -76,7 +76,9 @@ jobs:
 
   integration:
     needs: source_policy
-    runs-on: ubuntu-latest
+    # MongoDB 8 refuses kernels 6.19–7.0.13 (SERVER-125742). The Jammy
+    # hosted image uses the supported 6.8 HWE kernel; keep real MongoDB 8 tests.
+    runs-on: ubuntu-22.04
     environment: nexoruta-ci
     defaults:
       run:
