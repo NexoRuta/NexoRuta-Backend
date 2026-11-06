@@ -17,6 +17,13 @@ public sealed class RlsTransactionMiddleware(RequestDelegate next)
         IPlataformaRepository platform,
         IRegistroRepository identities)
     {
+        // Business SignalR invocations establish and revalidate their own short RLS
+        // transactions. Never buffer a WebSocket or hold a transaction for its lifetime.
+        if (httpContext.GetEndpoint()?.Metadata.GetMetadata<Microsoft.AspNetCore.SignalR.HubMetadata>() is not null)
+        {
+            await next(httpContext);
+            return;
+        }
         // Login/refresh y los accesos públicos delimitan su propia transacción y contexto.
         if (httpContext.User.Identity?.IsAuthenticated != true
             || httpContext.GetEndpoint()?.Metadata.GetMetadata<IAllowAnonymous>() is not null)

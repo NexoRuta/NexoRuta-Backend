@@ -46,14 +46,21 @@ public sealed class EfEnlacesSeguimientoRepository(
         string token,
         CancellationToken cancellationToken = default)
     {
+        await using var photograph = db.Database.CurrentTransaction is null
+            ? await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.RepeatableRead, cancellationToken) : null;
         var result = await db.Database.SqlQueryRaw<PublicTrackingIdentity>(
             "SELECT * FROM " + RlsSqlFunctionContract.PublicTracking + "({0})", token)
             .SingleOrDefaultAsync(cancellationToken);
         if (result is null || !Enum.TryParse<EstadoEnvio>(result.Estado, out var state)) return null;
         var progreso = await db.Database.SqlQuery<ProgresoPublico>($"SELECT * FROM nexoruta_app.public_parcel_progress({token})").SingleOrDefaultAsync(cancellationToken);
+        var historial = await db.Database.SqlQuery<EventoPublico>($"SELECT * FROM nexoruta_app.public_tracking_history({token})").ToArrayAsync(cancellationToken);
+        var bultos = await db.Database.SqlQuery<BultoPublico>($"SELECT * FROM nexoruta_app.public_parcel_details({token})").ToArrayAsync(cancellationToken);
+        var ventana = await db.Database.SqlQuery<VentanaEstimadaPublica>($"SELECT * FROM nexoruta_app.public_estimated_service_window({token})").SingleOrDefaultAsync(cancellationToken);
+        if (photograph is not null) await photograph.CommitAsync(cancellationToken);
         return new SeguimientoPublico(state, new IdentidadVisualPublica(result.NombreOperador,
             result.CorreoPublico, result.TelefonoPublico, result.ColorPrimario, result.ColorSecundario,
-            result.LogoContenido, result.LogoTipoContenido)) { TotalBultos = progreso?.Total ?? 0, BultosEntregados = progreso?.Entregados ?? 0, BultosDevueltos = progreso?.Devueltos ?? 0, EsRetiro = progreso?.EsRetiro ?? false };
+            result.LogoContenido, result.LogoTipoContenido))
+        { VentanaEstimada = ventana, Historial = historial, Bultos = bultos, TotalBultos = progreso?.Total ?? 0, BultosEntregados = progreso?.Entregados ?? 0, BultosDevueltos = progreso?.Devueltos ?? 0, EsRetiro = progreso?.EsRetiro ?? false };
     }
 
     private sealed record ProgresoPublico(int Total, int Entregados, int Devueltos, bool EsRetiro);

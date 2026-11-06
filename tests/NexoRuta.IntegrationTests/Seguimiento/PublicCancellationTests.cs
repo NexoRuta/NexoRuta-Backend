@@ -127,11 +127,17 @@ public sealed class PublicCancellationTests(PostgresFixture postgres) : IClassFi
         using var respuesta = await p.Client.PostAsync(p.Url + "/cancelacion/codigo", null);
         Assert.Equal(HttpStatusCode.TooManyRequests, respuesta.StatusCode);
         Assert.Equal(TimeSpan.FromSeconds(60), respuesta.Headers.RetryAfter!.Delta);
-        await using var db = p.Data.CreateDbContext(); Assert.Single(await db.OutboxMessages.ToArrayAsync());
+        await using var db = p.Data.CreateDbContext();
+        var messages = await db.OutboxMessages.ToArrayAsync();
+        Assert.Equal(2, messages.Length);
+        Assert.Single(messages, x => x.Tipo == OutboxMessageTypes.CancellationCodeEmail);
         var registro = await db.CodigosCancelacionPublica.SingleAsync();
         Assert.NotEqual(comando.Codigo, registro.Hash);
-        Assert.DoesNotContain(comando.Codigo, (await db.OutboxMessages.SingleAsync()).Payload);
-        Assert.DoesNotContain(comando.Destinatario, (await db.OutboxMessages.SingleAsync()).Payload);
+        Assert.All(messages, message =>
+        {
+            Assert.DoesNotContain(comando.Codigo, message.Payload);
+            Assert.DoesNotContain(comando.Destinatario, message.Payload);
+        });
         using var malformado = await p.Client.PostAsJsonAsync(p.Url + "/cancelacion", new { codigo = comando.Codigo, envioId = p.Envio.Id });
         Assert.Equal(HttpStatusCode.BadRequest, malformado.StatusCode);
     }

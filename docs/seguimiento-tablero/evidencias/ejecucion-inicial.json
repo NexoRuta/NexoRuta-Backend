@@ -1,0 +1,111 @@
+{
+  "backend": "74f2b3193844eb02febbecdc003d5c8b823d7588",
+  "metric": "source line union; unit and integration; no custom exclusions",
+  "runs": [
+    {
+      "suite": "coverage-inicial",
+      "counters": {
+        "total": "336",
+        "executed": "336",
+        "passed": "336",
+        "failed": "0",
+        "error": "0",
+        "timeout": "0",
+        "aborted": "0",
+        "inconclusive": "0",
+        "passedButRunAborted": "0",
+        "notRunnable": "0",
+        "notExecuted": "0",
+        "disconnected": "0",
+        "warning": "0",
+        "completed": "0",
+        "inProgress": "0",
+        "pending": "0"
+      },
+      "notPassed": []
+    },
+    {
+      "suite": "coverage-inicial-integracion",
+      "counters": {
+        "total": "712",
+        "executed": "707",
+        "passed": "700",
+        "failed": "7",
+        "error": "0",
+        "timeout": "0",
+        "aborted": "0",
+        "inconclusive": "0",
+        "passedButRunAborted": "0",
+        "notRunnable": "0",
+        "notExecuted": "0",
+        "disconnected": "0",
+        "warning": "0",
+        "completed": "0",
+        "inProgress": "0",
+        "pending": "0"
+      },
+      "notPassed": [
+        {
+          "test": "NexoRuta.IntegrationTests.Envios.GeocodificacionFullStackBrowserTests.AdmissionSelectsAdjustsQuotesSavesAndReopensBeforeShipping",
+          "outcome": "NotExecuted",
+          "message": "Opt-in Commerce / authenticated real API / restricted PostgreSQL, controlled provider transport only."
+        },
+        {
+          "test": "NexoRuta.IntegrationTests.Seguridad.SesionWebBrowserTests.RealPortalsRecoverFromDelayed401WithoutErasingNewSession",
+          "outcome": "NotExecuted",
+          "message": "Opt-in real portal/API/PostgreSQL session race test."
+        },
+        {
+          "test": "NexoRuta.IntegrationTests.Envios.CommerceCsvImportKestrelTests.BackofficeBrowserReprogramsFailedDeliveryAndShowsRuleBoundEligibility",
+          "outcome": "Failed",
+          "message": "Build Backoffice before the browser check."
+        },
+        {
+          "test": "NexoRuta.IntegrationTests.Reparto.OperacionesRepartoHttpTests.H1H2_SegundaVisitaPersisteYPlazosDeBultosSeResuelvenIndependientemente(primeraCompleta: False, completarSegunda: False)",
+          "outcome": "Failed",
+          "message": "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.5.10\",\"title\":\"Conflict\",\"status\":409,\"detail\":\"La nueva tentativa no puede ocurrir antes de 2026-11-06T19:57:38.4339810+00:00 según las reglas de este envío.\",\"traceId\":\"00-a56d52e042fbe5835f258cb6b7c09c4a-fb26cf0b23259f57-00\"}"
+        },
+        {
+          "test": "NexoRuta.IntegrationTests.Reparto.RecepcionDepositoBrowserTests.RealLabelDecodingAndBackofficeReceiptUseRestrictedApiAndIsolatedPostgres",
+          "outcome": "NotExecuted",
+          "message": "Opt-in real PDF/Chromium/checkout/API/PostgreSQL test."
+        },
+        {
+          "test": "NexoRuta.IntegrationTests.Envios.CommerceCsvImportKestrelTests.KestrelAndCommerceBrowserUseIsolatedPostgresForImportAndReimport",
+          "outcome": "Failed",
+          "message": "Build Commerce before the browser verification."
+        },
+        {
+          "test": "NexoRuta.IntegrationTests.Envios.GeocodificacionFullStackBrowserTests.CommerceAuthenticatedApiAndRestrictedPostgresUseControlledProviderOnly",
+          "outcome": "NotExecuted",
+          "message": "Opt-in Commerce / authenticated real API / restricted PostgreSQL, controlled provider transport only."
+        },
+        {
+          "test": "NexoRuta.IntegrationTests.Envios.CommerceCsvImportKestrelTests.BackofficeBrowserIniciaDecisionOperativaConConflictoYReintentoSeguro",
+          "outcome": "Failed",
+          "message": "Build Backoffice before the isolated browser check."
+        },
+        {
+          "test": "NexoRuta.IntegrationTests.Reparto.OperacionesRepartoHttpTests.H1H2_SegundaVisitaPersisteYPlazosDeBultosSeResuelvenIndependientemente(primeraCompleta: True, completarSegunda: False)",
+          "outcome": "Failed",
+          "message": "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.5.10\",\"title\":\"Conflict\",\"status\":409,\"detail\":\"La nueva tentativa no puede ocurrir antes de 2026-11-06T19:57:51.4983350+00:00 según las reglas de este envío.\",\"traceId\":\"00-45d9a1aa59b0b078c59979ad68d33319-bfeb727c3fea36e5-00\"}"
+        },
+        {
+          "test": "NexoRuta.IntegrationTests.Envios.CommerceCsvImportKestrelTests.BackofficeBrowserReassignsEligibleShipmentAndPersistsOneEffect",
+          "outcome": "Failed",
+          "message": "Build Backoffice before the browser check."
+        },
+        {
+          "test": "NexoRuta.IntegrationTests.Reparto.OperacionesRepartoHttpTests.H1H2_SegundaVisitaPersisteYPlazosDeBultosSeResuelvenIndependientemente(primeraCompleta: False, completarSegunda: True)",
+          "outcome": "Failed",
+          "message": "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.5.10\",\"title\":\"Conflict\",\"status\":409,\"detail\":\"La nueva tentativa no puede ocurrir antes de 2026-11-06T19:57:44.8904060+00:00 según las reglas de este envío.\",\"traceId\":\"00-5ad82de45b3b9c1f93ff1d1ef1d1aece-ffcb86e80c438432-00\"}"
+        },
+        {
+          "test": "NexoRuta.IntegrationTests.Reparto.VehiculosBackofficeBrowserTests.ChromiumTraversesCheckoutBackofficeRealApiAndEphemeralPostgres",
+          "outcome": "NotExecuted",
+          "message": "Opt-in real local checkout/ephemeral database browser test."
+        }
+      ]
+    }
+  ]
+}

@@ -789,6 +789,7 @@
           "Microsoft.AspNetCore.Identity.EntityFrameworkCore": "[10.0.12, )",
           "Microsoft.EntityFrameworkCore.Relational": "[10.0.12, )",
           "Microsoft.Extensions.Caching.StackExchangeRedis": "[10.0.12, )",
+          "MongoDB.Driver": "[3.12.0, )",
           "NetTopologySuite.IO.GeoJSON": "[4.0.0, )",
           "NexoRuta.Application": "[1.0.0, )",
           "NexoRuta.Domain": "[1.0.0, )",

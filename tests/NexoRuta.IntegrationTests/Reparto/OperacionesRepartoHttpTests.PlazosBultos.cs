@@ -90,7 +90,7 @@ public sealed partial class OperacionesRepartoHttpTests
         Assert.True(inspeccion.IsSuccessStatusCode, await inspeccion.Content.ReadAsStringAsync());
         await ConfigurarPerfilVial(client, segundoVehiculo);
         using var nueva = await client.PostAsJsonAsync("/api/rutas", new { RepartidorAccesoId = segundoAcceso, VehiculoId = segundoVehiculo,
-            Fecha = FechaOperacion, Paradas = new[] { new { p.EnvioId, LlegadaEstimadaUtc = LlegadaEstimada.AddMinutes(20) } } });
+            Fecha = FechaOperacion, Paradas = new[] { new { p.EnvioId, LlegadaEstimadaUtc = t0.AddMinutes(20) } } });
         Assert.True(nueva.IsSuccessStatusCode, await nueva.Content.ReadAsStringAsync());
         var siguiente = (await nueva.Content.ReadFromJsonAsync<HojaRutaResponse>())!;
         var visita = siguiente.Paradas.Single(); Assert.Equal(segundo.Id, Assert.Single(visita.Bultos).Id);

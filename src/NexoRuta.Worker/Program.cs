@@ -1,4 +1,5 @@
 using NexoRuta.Infrastructure.Hosting;
+using NexoRuta.Infrastructure.Operacion;
 using System.Net.Mail;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
@@ -69,6 +70,9 @@ if (transport == WorkerTransportNames.RabbitMq)
     builder.Services.AddSingleton<IOutboxMessageHandler, RabbitCancellationCodeOutboxHandler>();
     builder.Services.AddScoped<ProcesarCorreoCodigoCancelacion>();
     builder.Services.AddHostedService<CancellationCodeEmailConsumer>();
+    builder.Services.AddScoped<RecipientStateEmailProcessor>();
+    builder.Services.AddSingleton<IOutboxMessageHandler, RecipientStateOutboxHandler>();
+    builder.Services.AddHostedService<RecipientStateEmailConsumer>();
     builder.Services.AddHostedService<PasswordRecoveryEmailConsumer>();
     builder.Services.AddHostedService<PasswordRecoveryEmailDeadLetterConsumer>();
 }
@@ -92,6 +96,10 @@ else
     builder.Services.AddSingleton<OutboxHandlerRegistry>();
     builder.Services.AddSingleton<IOutboxMessageHandler>(sp => new CommerceNoticeOutboxHandler(sp.GetRequiredService<KafkaEnvioCreadoPublisher>(), "BultoActualizado"));
     builder.Services.AddSingleton<IOutboxMessageHandler>(sp => new CommerceNoticeOutboxHandler(sp.GetRequiredService<KafkaEnvioCreadoPublisher>(), "OperacionActualizada"));
+    builder.Services.AddSingleton<IOutboxMessageHandler, OperationalOutboxHandler>();
+    builder.Services.AddHostedService<OperationalBoardConsumer>();
+    builder.Services.AddSingleton<OperationalMongoStore>();
+    builder.Services.AddHostedService<OperationalHistoryConsumer>();
     builder.Services.AddHostedService<KafkaOutboxWorker>();
     builder.Services.AddHostedService<CommerceNoticeConsumer>();
     var mongoConnection = builder.Configuration[WorkerConfigurationKeys.MongoConnectionString]

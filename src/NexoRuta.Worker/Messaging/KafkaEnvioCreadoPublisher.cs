@@ -11,12 +11,14 @@ namespace NexoRuta.Worker.Messaging;
 public sealed class KafkaEnvioCreadoPublisher : IDisposable
 {
     public const string Topic = PasswordRecoveryMessaging.ShipmentCreatedTopic;
+    private readonly string operationalTopic;
     private readonly Lazy<IProducer<string, string>> producer;
     private readonly ILogger<KafkaEnvioCreadoPublisher> logger;
 
     public KafkaEnvioCreadoPublisher(IConfiguration configuration, ILogger<KafkaEnvioCreadoPublisher> logger)
     {
         this.logger = logger;
+        operationalTopic = configuration["Operational:Topic"] ?? NexoRuta.Application.Operacion.EventoOperativo.Topic;
         producer = new Lazy<IProducer<string, string>>(() =>
             new ProducerBuilder<string, string>(CrearConfiguracion(configuration))
                 // Native log text can contain endpoint/security information.
@@ -69,7 +71,9 @@ public sealed class KafkaEnvioCreadoPublisher : IDisposable
             headers.Add("traceparent", Encoding.UTF8.GetBytes(traceParent));
         return new Message<string, string>
         {
-            Key = mensaje.EnvioId.Value.ToString("D"), Value = mensaje.BusinessPayload, Headers = headers
+            Key = mensaje.EnvioId.Value.ToString("D"),
+            Value = mensaje.BusinessPayload,
+            Headers = headers
         };
     }
 
@@ -149,11 +153,40 @@ public sealed class KafkaEnvioCreadoPublisher : IDisposable
             throw new InvalidDataException("Unregistered commerce notification.");
         var delivery = await producer.Value.ProduceAsync(CommerceNoticeConsumer.Topic, new Message<string, string>
         {
-            Key = message.EnvioId!.Value.ToString("D"), Value = message.Payload,
+            Key = message.EnvioId!.Value.ToString("D"),
+            Value = message.Payload,
             Headers = new Headers { { "eventId", Encoding.UTF8.GetBytes(message.Id.ToString("D")) }, { "eventVersion", Encoding.UTF8.GetBytes("2") }, { "eventType", Encoding.UTF8.GetBytes(message.Tipo) } }
         }, ct);
         if (delivery.Status != PersistenceStatus.Persisted) throw new InvalidOperationException("Commerce notice not confirmed persisted.");
     }
+    public async Task PublicarOperativoAsync(OutboxClaim message, CancellationToken ct)
+    {
+        if (message.Tipo != NexoRuta.Application.Operacion.EventoOperativo.OutboxType || message.VersionContrato != 1
+            || message.Destino != "Kafka" || message.Ambito != "Flota")
+            throw new InvalidDataException("Unregistered operational event.");
+        var value = JsonSerializer.Deserialize<NexoRuta.Application.Operacion.EventoOperativo>(message.Payload, OperationalConsumer.Json)
+            ?? throw new InvalidDataException("Missing operational payload.");
+        value.Validar();
+        if (value.EventId != message.Id || value.OperadorId != message.OperadorId || value.EntidadId != message.ClaveAmbito)
+            throw new InvalidDataException("Operational outbox identity mismatch.");
+        var delivery = await producer.Value.ProduceAsync(operationalTopic,
+            new Message<string, string>
+            {
+                Key = value.OperadorId.ToString("D") + ":" + value.EntidadId.ToString("D"),
+                Value = message.BusinessPayload,
+                Headers = new Headers
+                {
+                    { "eventId", Encoding.UTF8.GetBytes(value.EventId.ToString("D")) },
+                    { "eventType", Encoding.UTF8.GetBytes(value.Tipo) },
+                    { "eventVersion", Encoding.UTF8.GetBytes("1") },
+                    { "correlationId", Encoding.UTF8.GetBytes(value.CorrelacionId.ToString("D")) }
+                }
+            }, ct);
+        if (delivery.Status != PersistenceStatus.Persisted)
+            throw new InvalidOperationException("Operational event not confirmed persisted.");
+        logger.LogInformation("Operational Kafka event confirmed. EventId: {EventId}, CorrelationId: {CorrelationId}", value.EventId, value.CorrelacionId);
+    }
+
     public void Dispose()
     {
         if (!producer.IsValueCreated) return;

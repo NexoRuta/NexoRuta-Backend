@@ -11,6 +11,7 @@ using NexoRuta.Domain.Envios;
 using NexoRuta.Domain.Tarifas;
 using NexoRuta.IntegrationTests.Fixtures;
 using NexoRuta.IntegrationTests.Seguridad;
+using NexoRuta.IntegrationTests.Seguimiento;
 using static NexoRuta.IntegrationTests.Fixtures.RepartoHttpData;
 namespace NexoRuta.IntegrationTests.Reparto;
 public sealed partial class OperacionesRepartoHttpTests
@@ -52,6 +53,9 @@ public sealed partial class OperacionesRepartoHttpTests
   using var repetida=await client.PostAsJsonAsync("/api/retiros",solicitud);Assert.Equal(HttpStatusCode.Created,repetida.StatusCode);Assert.Equal(retiroId,(await repetida.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid());
   Assert.Equal(2,await db.Envios.CountAsync());
   Assert.Equal("Retiro",payload.GetProperty("tarifa").GetProperty("modalidad").GetString());
+  var publicToken = await SeguimientoTestData.CreateActiveLinkAsync(db, await db.Envios.SingleAsync(e=>e.Id==retiroId));
+  using var publicClient = host.CreateClient();
+  await CheckPublic("RetiroSolicitado", "RetiroPendiente");
   await client.SetBearerForAccessAsync(data,op.Id);
   using var limitar=await client.PutAsJsonAsync("/api/reparto/vehiculos",new{Id=preparado.VehiculoId,Version=(await db.Vehiculos.AsNoTracking().SingleAsync(v=>v.Id==preparado.VehiculoId)).Version,Matricula="SAB1234",PesoMaximoGramos=1000m,VolumenMaximoCm3=1000m,Activo=true});
   Assert.True(limitar.IsSuccessStatusCode,await limitar.Content.ReadAsStringAsync());
@@ -88,14 +92,41 @@ public sealed partial class OperacionesRepartoHttpTests
   Assert.True(descargar.Resultado=="Aplicada",descargar.Detalle);
   var resolucion=Operacion(Guid.NewGuid(),7,"RetirarBultos",retiroId,retiro.EnvioVersion,new{ResuelveOperacionId=rechazo.Id,FotoId=foto,FirmaId=firma,ResultadosBultos=retiro.Bultos.Select(b=>new{BultoId=b.Id,b.Version,Entregado=true}).ToArray()});
   var hecho=await Aplicar(client,hoja,resolucion);Assert.True(hecho.Resultado=="Aplicada",hecho.Detalle);Assert.Equivalent(hecho,await Aplicar(client,hoja,resolucion));
+  await CheckPublic("Retirado", "Retirado");
   Assert.Equal("Aplicada",(await Aplicar(client,hoja,Operacion(Guid.NewGuid(),8,"Rendicion",datos:new{BultoIds=retiro.Bultos.Select(b=>b.Id).ToArray()}))).Resultado);
   Assert.Equal("Aplicada",(await Aplicar(client,hoja,Operacion(Guid.NewGuid(),9,"FinJornada"))).Resultado);
   var e=await db.Envios.AsNoTracking().SingleAsync(e=>e.Id==retiroId);
   using var recepcion=await client.PostAsJsonAsync($"/api/deposito/envios/{retiroId}/recepcion",new{e.Version});Assert.True(recepcion.StatusCode==HttpStatusCode.NoContent,await recepcion.Content.ReadAsStringAsync());
   e=await db.Envios.AsNoTracking().SingleAsync(e=>e.Id==retiroId);Assert.Equal(EstadoEnvio.RetiroEnDeposito,e.Estado);
+  await CheckPublic("RetiroEnDeposito", "RetiroEnDeposito");
   using var final=await client.PostAsJsonAsync($"/api/deposito/retiros/{retiroId}/entrega-comercio",new{e.Version});Assert.Equal(HttpStatusCode.NoContent,final.StatusCode);
   Assert.Equal(EstadoEnvio.EntregadoComercio,(await db.Envios.AsNoTracking().SingleAsync(e=>e.Id==retiroId)).Estado);
   Assert.All(await db.Bultos.AsNoTracking().Where(b=>b.EnvioId==retiroId).ToArrayAsync(),b=>Assert.Equal(EstadoCustodiaBulto.Comercio,b.Custodia));
+  await CheckPublic("EntregadoComercio", "EntregadoComercio", true);
   Assert.Equal(cantidad,await db.PruebasEntrega.CountAsync(p=>p.EnvioId==retiroId)); Assert.All(await db.PruebasEntrega.Where(p=>p.EnvioId==retiroId).ToArrayAsync(),p=>Assert.Equal(foto,p.FotoId));
+  async Task CheckPublic(string expectedState, string parcelState, bool completed = false)
+  {
+   var view = await publicClient.GetFromJsonAsync<JsonElement>($"/api/public/seguimiento/{publicToken}");
+   Assert.True(view.GetProperty("esRetiro").GetBoolean());
+   Assert.Equal(expectedState, view.GetProperty("estado").GetString());
+   Assert.Equal(cantidad, view.GetProperty("totalBultos").GetInt32());
+   Assert.Equal(completed ? cantidad : 0, view.GetProperty("bultosEntregados").GetInt32());
+   Assert.DoesNotContain(retiroId.ToString(), view.GetRawText());
+   var seen = new HashSet<int>();
+   foreach (var parcel in view.GetProperty("bultos").EnumerateArray())
+   { Assert.Equal(parcelState, parcel.GetProperty("resultado").GetString()); Assert.True(seen.Add(parcel.GetProperty("numero").GetInt32())); }
+   if (completed)
+   {
+    for (var offset=200; offset<cantidad; offset+=200)
+    {
+     var page = await publicClient.GetFromJsonAsync<JsonElement>($"/api/public/seguimiento/{publicToken}/bultos?offset={offset}&limite=200");
+     Assert.InRange(page.GetArrayLength(),1,200);
+     foreach(var parcel in page.EnumerateArray())
+     { Assert.Equal(parcelState, parcel.GetProperty("resultado").GetString()); Assert.True(seen.Add(parcel.GetProperty("numero").GetInt32())); }
+    }
+    Assert.Equal(cantidad,seen.Count);
+   }
+  }
+
  }
 }

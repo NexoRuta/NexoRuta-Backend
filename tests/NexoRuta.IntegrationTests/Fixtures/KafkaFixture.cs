@@ -7,7 +7,7 @@ namespace NexoRuta.IntegrationTests.Fixtures;
 
 public sealed class KafkaFixture : IAsyncLifetime
 {
-    public KafkaContainer Container { get; } = new KafkaBuilder("confluentinc/cp-kafka:7.9.0").WithKRaft().Build();
+    public KafkaContainer Container { get; } = new KafkaBuilder("confluentinc/cp-kafka:7.9.0").WithKRaft().WithEnvironment("KAFKA_HEAP_OPTS", "-Xms128m -Xmx512m").Build();
     public string BootstrapServers => Container.GetBootstrapAddress();
 
     public async Task InitializeAsync()
@@ -20,7 +20,7 @@ public sealed class KafkaFixture : IAsyncLifetime
             await admin.CreateTopicsAsync([new TopicSpecification
             {
                 Name = KafkaEnvioCreadoPublisher.Topic, NumPartitions = 3, ReplicationFactor = 1
-            }]);
+            }, new TopicSpecification { Name = NexoRuta.Application.Operacion.EventoOperativo.Topic, NumPartitions = 3, ReplicationFactor = 1 }]);
         }
         catch
         {

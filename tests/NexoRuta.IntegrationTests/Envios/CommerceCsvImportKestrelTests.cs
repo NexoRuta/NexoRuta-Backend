@@ -126,7 +126,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
                 Bultos = new List<NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest> { new NexoRuta.Api.Features.Envios.Contracts.Requests.BultoDeclaradoRequest { Codigo = "INDIVIDUAL-KST", PesoGramos = 500m, LargoCentimetros = 20m, AnchoCentimetros = 15m, AltoCentimetros = 10m } }
             }))
                 Assert.Equal(HttpStatusCode.Created, individual.StatusCode);
-            Assert.Equal((beforeIndividual.Shipments + 1, beforeIndividual.Outbox + 2), await CountsAsync(database));
+            Assert.Equal((beforeIndividual.Shipments + 1, beforeIndividual.Outbox + 6), await CountsAsync(database));
 
             using (var created = await PostCsvAsync(http, operatorId, Csv(Row("KESTREL-NEW"))))
             {
@@ -224,7 +224,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             await browser.CreateIndividualShipmentAsync(operatorId);
             var afterBrowserIndividual = await CountsAsync(database);
             Assert.Equal(beforeBrowserIndividual.Shipments + 1, afterBrowserIndividual.Shipments);
-            Assert.Equal(beforeBrowserIndividual.Outbox + 2, afterBrowserIndividual.Outbox);
+            Assert.Equal(beforeBrowserIndividual.Outbox + 6, afterBrowserIndividual.Outbox);
 
             await browser.NavigateAsync(commerceUrl + "/envios/importar");
             await browser.WaitForAsync($"document.querySelector('#import-operator option[value=\\\"{operatorId:D}\\\"]') !== null");
@@ -233,7 +233,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             await browser.ClickImportAndWaitAsync("Creado", doubleClick: true);
             var afterBrowserCreate = await CountsAsync(database);
             Assert.Equal(beforeBrowserCreate.Shipments + 1, afterBrowserCreate.Shipments);
-            Assert.Equal(beforeBrowserCreate.Outbox + 2, afterBrowserCreate.Outbox);
+            Assert.Equal(beforeBrowserCreate.Outbox + 6, afterBrowserCreate.Outbox);
             await browser.ClickImportAndWaitAsync("Ya existente");
             Assert.Equal(afterBrowserCreate, await CountsAsync(database));
 
@@ -278,7 +278,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
             await browser.WaitForAsync("location.pathname === '/ingresar' && document.body.innerText.includes('sesi')");
 
             var finalCounts = await CountsAsync(database);
-            Assert.Equal(finalCounts.Shipments * 2, finalCounts.Outbox);
+            Assert.Equal(finalCounts.Shipments * 6, finalCounts.Outbox);
             Console.WriteLine($"Kestrel+Commerce browser evidence passed. Isolated DB counts: {finalCounts.Shipments} shipments / {finalCounts.Outbox} outbox. Screenshots: {tempRoot}");
         }
         finally

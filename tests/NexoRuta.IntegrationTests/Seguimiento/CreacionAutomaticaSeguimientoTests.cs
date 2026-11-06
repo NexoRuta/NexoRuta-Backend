@@ -13,7 +13,7 @@ public sealed class CreacionAutomaticaSeguimientoTests(
 ) : IClassFixture<PostgresFixture>
 {
     [Fact]
-    public async Task CrearEnvio_GuardaDosMensajesOutboxPendientes()
+    public async Task CrearEnvio_GuardaTrabajoEventosYAvisoPersistidos()
     {
         // ARRANGE: PostgreSQL aislado mediante Testcontainers.
         var database = await postgres.CreateDatabaseAsync();
@@ -43,7 +43,8 @@ public sealed class CreacionAutomaticaSeguimientoTests(
             Content = JsonContent.Create(new
             {
                 operadorId,
-                destinatarioNombre = "Destinatario Outbox", destinatarioEmail = "destinatario@example.test",
+                destinatarioNombre = "Destinatario Outbox",
+                destinatarioEmail = "destinatario@example.test",
                 direccion = "Dirección de prueba",
                 servicio = ServiciosEnvioTestData.Declarar(operadorId),
                 bultos = new[] { new { codigo = "B-OUTBOX-001", pesoGramos = 1250m, largoCentimetros = 30m, anchoCentimetros = 20m, altoCentimetros = 10m } }
@@ -78,8 +79,9 @@ public sealed class CreacionAutomaticaSeguimientoTests(
             .Where(x => x.EnvioId == envioId)
             .ToListAsync();
 
-        // Deben existir exactamente dos mensajes.
-        Assert.Equal(2, mensajes.Count);
+        // Preserve the original published contracts and add one logical recipient notice.
+        Assert.Equal(3, mensajes.Count);
+        Assert.Single(mensajes, x => x.Tipo == OutboxMessageTypes.RecipientStateEmail);
 
         var trabajo = mensajes.Single(
             x => x.Tipo == "GenerarSeguimiento");
@@ -177,7 +179,8 @@ public sealed class CreacionAutomaticaSeguimientoTests(
             Content = JsonContent.Create(new
             {
                 operadorId,
-                destinatarioNombre = "Destinatario rollback", destinatarioEmail = "destinatario@example.test",
+                destinatarioNombre = "Destinatario rollback",
+                destinatarioEmail = "destinatario@example.test",
                 direccion = "Dirección de prueba",
                 servicio = ServiciosEnvioTestData.Declarar(operadorId),
                 bultos = new[] { new { codigo = "B-ROLLBACK-001", pesoGramos = 1250m, largoCentimetros = 30m, anchoCentimetros = 20m, altoCentimetros = 10m } }

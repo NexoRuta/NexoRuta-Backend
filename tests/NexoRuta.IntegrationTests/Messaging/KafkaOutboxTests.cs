@@ -42,7 +42,7 @@ public sealed class KafkaOutboxTests(PostgresFixture postgres, KafkaFixture kafk
             Assert.Equal(1, publicado.Intentos);
             await using var db = database.CreateDbContext();
             Assert.Equal(OutboxEstado.Pendiente, (await db.OutboxMessages.AsNoTracking()
-                .SingleAsync(x => x.Destino == OutboxDestino.RabbitMq)).Estado);
+                .SingleAsync(x => x.Destino == OutboxDestino.RabbitMq && x.Tipo == OutboxMessageTypes.TrackingRequested)).Estado);
         }
         finally { await host.StopAsync(); }
     }
@@ -159,7 +159,7 @@ public sealed class KafkaOutboxTests(PostgresFixture postgres, KafkaFixture kafk
             await kafkaHost.StartAsync();
             await rabbitHost.StartAsync();
             await using var db = database.CreateDbContext();
-            var trabajo = await db.OutboxMessages.AsNoTracking().SingleAsync(x => x.Destino == OutboxDestino.RabbitMq);
+            var trabajo = await db.OutboxMessages.AsNoTracking().SingleAsync(x => x.Destino == OutboxDestino.RabbitMq && x.Tipo == OutboxMessageTypes.TrackingRequested);
             var healthy = failedTransport == OutboxDestino.Kafka ? trabajo : evento;
             var failed = failedTransport == OutboxDestino.Kafka ? evento : trabajo;
             await WaitForStateAsync(database, healthy.Id, OutboxEstado.Publicado);
@@ -201,6 +201,7 @@ public sealed class KafkaOutboxTests(PostgresFixture postgres, KafkaFixture kafk
         {
             builder.Services.AddSingleton<KafkaEnvioCreadoPublisher>();
             builder.Services.AddSingleton<IOutboxMessageHandler, KafkaShipmentCreatedOutboxHandler>();
+            builder.Services.AddSingleton<IOutboxMessageHandler, OperationalOutboxHandler>();
             builder.Services.AddSingleton<OutboxHandlerRegistry>();
             builder.Services.AddHostedService<KafkaOutboxWorker>();
         }
@@ -209,6 +210,7 @@ public sealed class KafkaOutboxTests(PostgresFixture postgres, KafkaFixture kafk
             builder.Configuration.AddInMemoryCollection(rabbitSettings);
             builder.Services.AddSingleton<RabbitMqOutboxPublisher>();
             builder.Services.AddSingleton<IOutboxMessageHandler, RabbitTrackingOutboxHandler>();
+            builder.Services.AddSingleton<IOutboxMessageHandler, RecipientStateOutboxHandler>();
             builder.Services.AddSingleton<OutboxHandlerRegistry>();
             builder.Services.AddHostedService<NexoRuta.Worker.Worker>();
         }
@@ -234,7 +236,7 @@ public sealed class KafkaOutboxTests(PostgresFixture postgres, KafkaFixture kafk
         await client.SetBearerForAccessAsync(database, accesoId);
         using var response = await client.SendAsync(request);
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        return await db.OutboxMessages.AsNoTracking().SingleAsync(x => x.Destino == OutboxDestino.Kafka);
+        return await db.OutboxMessages.AsNoTracking().SingleAsync(x => x.Destino == OutboxDestino.Kafka && x.Tipo == OutboxMessageTypes.ShipmentCreated);
     }
 
     private static async Task<OutboxMessage> ReadAsync(IntegrationDatabase database, Guid id)

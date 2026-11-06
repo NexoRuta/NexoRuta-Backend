@@ -1,0 +1,30 @@
+# Application-service overlay for an explicitly selected local/synthetic Compose stack.
+# Merge from the superproject with compose.yaml. This file never changes an existing
+# topic's configuration, deletes a topic, resets offsets or provisions cloud resources.
+services:
+  api:
+    environment:
+      MongoDb__ConnectionString: "mongodb://${NEXORUTA_MONGODB_USERNAME:-nexoruta_dev}:${NEXORUTA_MONGODB_PASSWORD:-local-dev-only-change-me}@mongodb:27017/?authSource=admin"
+      MongoDb__Database: nexoruta_security
+  worker:
+    environment:
+      Tracking__PublicPortalBaseUrl: http://localhost:5103
+  worker-kafka:
+    environment:
+      Operational__Partitions: "3"
+    depends_on:
+      kafka-operacion-init:
+        condition: service_completed_successfully
+  kafka-operacion-init:
+    profiles: ["kafka"]
+    image: confluentinc/cp-kafka:7.9.10
+    restart: "no"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-ec"]
+    command:
+      - >-
+        kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists
+        --topic nexoruta.operacion.v1 --partitions 3 --replication-factor 1
+        --config min.insync.replicas=1 --config retention.ms=-1 --config retention.bytes=-1

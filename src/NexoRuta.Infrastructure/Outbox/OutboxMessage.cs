@@ -9,6 +9,7 @@ public static class OutboxMessageTypes
     public const string PasswordRecoveryEmail = "PasswordRecoveryEmail";
     public const string PasswordRecoveryRequested = "PasswordRecoveryRequested";
     public const string DeliveryChanged = "RepartoModificado";
+    public const string RecipientStateEmail = "AvisoDestinatarioEstado";
     public const string CancellationCodeEmail = "CodigoCancelacionEmail";
 }
 
@@ -18,7 +19,7 @@ public static class OutboxContractVersions
 }
 
 public enum OutboxDestino { RabbitMq, Kafka, PushFcm }
-public enum OutboxScope { Envio, Identidad }
+public enum OutboxScope { Envio, Identidad, Flota }
 public enum OutboxPriority { Baja = 0, Normal = 1, Alta = 2 }
 public enum OutboxEstado { Pendiente, Procesando, Publicado, Error }
 public enum OutboxEmailDeliveryState { Pending, Delivered, Expired, Failed }
@@ -56,6 +57,7 @@ public sealed class OutboxMessage
             (OutboxMessageTypes.TrackingRequested, OutboxDestino.RabbitMq, OutboxContractVersions.Current) => OutboxPriority.Alta,
             (OutboxMessageTypes.ShipmentCreated, OutboxDestino.Kafka, OutboxContractVersions.Current) => OutboxPriority.Normal,
             (OutboxMessageTypes.DeliveryChanged, OutboxDestino.PushFcm, OutboxContractVersions.Current) => OutboxPriority.Alta,
+            (OutboxMessageTypes.RecipientStateEmail, OutboxDestino.RabbitMq, OutboxContractVersions.Current) => OutboxPriority.Normal,
             (OutboxMessageTypes.CancellationCodeEmail, OutboxDestino.RabbitMq, OutboxContractVersions.Current) => OutboxPriority.Alta,
             _ => throw new ArgumentException("Unregistered shipment outbox contract.")
         };

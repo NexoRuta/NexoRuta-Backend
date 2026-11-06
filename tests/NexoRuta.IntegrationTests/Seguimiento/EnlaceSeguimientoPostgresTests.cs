@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -49,14 +50,24 @@ public sealed class EnlaceSeguimientoPostgresTests(PostgresFixture postgres)
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal(new[] { "estado", "identidad", "totalBultos", "bultosEntregados", "bultosDevueltos", "esRetiro" }, json.RootElement.EnumerateObject().Select(property => property.Name));
+        Assert.Equal(new[] { "estado", "identidad", "ventanaEstimada", "historial", "bultos", "totalBultos", "bultosEntregados", "bultosDevueltos", "esRetiro" }, json.RootElement.EnumerateObject().Select(property => property.Name));
         Assert.Equal("Admitido", json.RootElement.GetProperty("estado").GetString());
         Assert.Equal(2, json.RootElement.GetProperty("totalBultos").GetInt32());
         Assert.Equal(0, json.RootElement.GetProperty("bultosEntregados").GetInt32());
         Assert.Equal(0, json.RootElement.GetProperty("bultosDevueltos").GetInt32());
         Assert.False(json.RootElement.GetProperty("esRetiro").GetBoolean());
-        // Exact allowlist above excludes parcel IDs/codes, reasons, addresses and recipient data.
+        Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("ventanaEstimada").ValueKind);
+        Assert.All(json.RootElement.GetProperty("bultos").EnumerateArray(), parcel =>
+            Assert.Equal(new[] { "numero", "resultado" }, parcel.EnumerateObject().Select(property => property.Name)));
+        Assert.All(json.RootElement.GetProperty("historial").EnumerateArray(), entry =>
+            Assert.Equal(new[] { "estado", "ocurridaEnUtc", "registradaEnUtc" }, entry.EnumerateObject().Select(property => property.Name)));
+        // Exact allowlists exclude parcel IDs/codes, reasons, addresses and recipient data.
         Assert.DoesNotContain("PRIVATE-CODE", json.RootElement.GetRawText());
+        var page = await client.GetFromJsonAsync<JsonElement>($"/api/public/seguimiento/{token}/bultos?offset=1&limite=1");
+        Assert.Equal(1, page.GetArrayLength());
+        Assert.Equal(2, page[0].GetProperty("numero").GetInt32());
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync($"/api/public/seguimiento/{token}/bultos?offset=10001")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/public/seguimiento/{new string('0',64)}/bultos")).StatusCode);
 
         Assert.Equal("Integration operator", json.RootElement.GetProperty("identidad").GetProperty("nombre").GetString());
         Assert.False(json.RootElement.GetProperty("identidad").TryGetProperty("nombreAdministrativo", out _));

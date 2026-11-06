@@ -136,7 +136,9 @@ public sealed class EnvioHistoryMigrationTests(PostgresFixture postgres, ITestOu
                 reconstructed.EstadoNuevo, reconstructed.VersionAnterior, reconstructed.VersionNueva));
         Assert.Equal(cancellationTime, reconstructed.OcurridaEnUtc);
         Assert.Equal(cancellationId, reconstructed.OrigenId);
-        Assert.Equal(outboxCount, await verify.OutboxMessages.CountAsync());
+        Assert.Equal(outboxCount, await verify.OutboxMessages.CountAsync(x => x.Tipo != "EventoOperativo"));
+        Assert.Equal(shipmentCount * 2 + 1, await verify.OutboxMessages.CountAsync(x => x.Tipo == "EventoOperativo"));
+        Assert.Equal(0, await verify.OutboxMessages.CountAsync(x => x.Tipo == "AvisoDestinatarioEstado"));
         Assert.Equal(1, await verify.EnvioEventos.CountAsync(x => x.CancelacionEnvioId == cancellationId));
     }
 

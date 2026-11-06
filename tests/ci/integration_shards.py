@@ -122,7 +122,7 @@ def main():
     trx_path = results / f"integration-shard-{args.shard_index}.trx"
     subprocess.run([
         "dotnet", "test", args.test_project, "-c", "Release", "--no-build", "--no-restore",
-        "--filter", filter_expression, "--logger", f"trx;LogFileName={trx_path.name}",
+        "--filter", filter_expression, "--collect", "XPlat Code Coverage", "--logger", f"trx;LogFileName={trx_path.name}",
         "--results-directory", str(results),
     ], check=True)
     actual = actual_test_counts(trx_path)
