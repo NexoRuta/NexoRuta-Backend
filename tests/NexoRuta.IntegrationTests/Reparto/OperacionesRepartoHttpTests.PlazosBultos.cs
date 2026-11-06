@@ -27,6 +27,11 @@ public sealed partial class OperacionesRepartoHttpTests
         var runtime = await RlsRestrictedHttpFlowTests.RestrictApiAsync(data);
         var settings = RlsRestrictedHttpFlowTests.ApiSettings(); settings["Reparto:EvidenciasEncryptionKey"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
         var reloj = new ManualClock(DateTimeOffset.UtcNow);
+        // Every device event in this scenario shares the controlled clock. The
+        // planned arrival is a schedule, not the physical occurrence time.
+        object Comando(Guid id, long secuencia, string tipo, Guid? envio = null, long? version = null, object? datos = null) =>
+            new { Id = id, Secuencia = secuencia, Tipo = tipo, EnvioId = envio, VersionEnvio = version,
+                OcurridaEn = reloj.GetUtcNow(), Datos = datos ?? new { } };
         settings["RoutingGeoapify:PermitirLlamadasReales"] = "true"; settings["RoutingGeoapify:ApiKey"] = "SYNTHETIC-NOT-A-CREDENTIAL";
         using var factory = new IntegrationApiFactory(runtime, settings: settings, timeProvider: reloj);
         using var host = factory.WithWebHostBuilder(b => b.ConfigureTestServices(s => s.AddHttpClient("RoutingGeoapify").ConfigurePrimaryHttpMessageHandler(() => new RoutingBultosControlado())));
@@ -40,8 +45,8 @@ public sealed partial class OperacionesRepartoHttpTests
         await ConfigurarBaseVial(client, listo.VehiculoId);
         var hoja = await PlanYDespacho(client, listo);
         var p = hoja.Paradas.Single(); var primero = p.Bultos.First(); var segundo = p.Bultos.Last();
-        Assert.Equal("Aplicada", (await Aplicar(client, hoja, Operacion(Guid.NewGuid(), 1, "InicioJornada"))).Resultado);
-        Assert.Equal("Aplicada", (await Aplicar(client, hoja, Operacion(Guid.NewGuid(), 2, "CargarBulto", p.EnvioId, p.EnvioVersion, new { BultoId = primero.Id }))).Resultado);
+        Assert.Equal("Aplicada", (await Aplicar(client, hoja, Comando(Guid.NewGuid(), 1, "InicioJornada"))).Resultado);
+        Assert.Equal("Aplicada", (await Aplicar(client, hoja, Comando(Guid.NewGuid(), 2, "CargarBulto", p.EnvioId, p.EnvioVersion, new { BultoId = primero.Id }))).Resultado);
         Assert.Equal("Aplicada", (await Aplicar(client, hoja, new { Id = Guid.NewGuid(), Secuencia = 3, Tipo = "ConfirmarCarga", OcurridaEn = reloj.GetUtcNow(), Datos = new { } })).Resultado);
         var t0 = new DateTimeOffset(reloj.GetUtcNow().Ticks / 10 * 10, TimeSpan.Zero); reloj.Set(t0);
         var foto = Guid.NewGuid();
@@ -49,7 +54,7 @@ public sealed partial class OperacionesRepartoHttpTests
         Assert.Equal(HttpStatusCode.NoContent, subida.StatusCode);
         if (primeraCompleta)
         {
-            var invalida = await Aplicar(client, hoja, Operacion(Guid.NewGuid(), 4, "EntregaBultos", p.EnvioId, 0,
+            var invalida = await Aplicar(client, hoja, Comando(Guid.NewGuid(), 4, "EntregaBultos", p.EnvioId, 0,
                 new { ResultadosBultos = new[] {
                     new { BultoId = primero.Id, Version = primero.Version + 1, Entregado = true, Motivo = (string?)null },
                     new { BultoId = segundo.Id, segundo.Version, Entregado = false, Motivo = (string?)"MOTIVO_INEXISTENTE" } } }));
@@ -58,7 +63,7 @@ public sealed partial class OperacionesRepartoHttpTests
             Assert.False(await intacta.PruebasEntrega.AnyAsync(x => x.EnvioId == p.EnvioId));
             Assert.All(await intacta.Bultos.Where(x => x.EnvioId == p.EnvioId).ToArrayAsync(), b => Assert.Equal(ResultadoBulto.Pendiente, b.Resultado));
         }
-        var primera = await Aplicar(client, hoja, Operacion(Guid.NewGuid(), primeraCompleta ? 5 : 4, "EntregaBultos", p.EnvioId, 0,
+        var primera = await Aplicar(client, hoja, Comando(Guid.NewGuid(), primeraCompleta ? 5 : 4, "EntregaBultos", p.EnvioId, 0,
             new { FotoId = primeraCompleta ? (Guid?)foto : null, Nombre = "Receptor", Latitud = -34.9, Longitud = -56.2, PrecisionMetros = 10, PosicionEnUtc = t0, ResultadosBultos = new[] {
                 new { BultoId = primero.Id, Version = primero.Version + 1, Entregado = true, Motivo = (string?)null },
                 new { BultoId = segundo.Id, segundo.Version, Entregado = false, Motivo = (string?)"AUSENTE" } } }));
@@ -93,8 +98,8 @@ public sealed partial class OperacionesRepartoHttpTests
             reloj.Set(t0.AddMinutes(20));
             using var despacho = await client.PostAsJsonAsync($"/api/rutas/{siguiente.Id}/despacho", new { siguiente.Version });
             Assert.True(despacho.IsSuccessStatusCode, await despacho.Content.ReadAsStringAsync());
-            Assert.Equal("Aplicada", (await Aplicar(client, siguiente, Operacion(Guid.NewGuid(), 1, "InicioJornada"))).Resultado);
-            Assert.Equal("Aplicada", (await Aplicar(client, siguiente, Operacion(Guid.NewGuid(), 2, "CargarBulto", actual.Id, visita.EnvioVersion, new { BultoId = segundo.Id }))).Resultado);
+            Assert.Equal("Aplicada", (await Aplicar(client, siguiente, Comando(Guid.NewGuid(), 1, "InicioJornada"))).Resultado);
+            Assert.Equal("Aplicada", (await Aplicar(client, siguiente, Comando(Guid.NewGuid(), 2, "CargarBulto", actual.Id, visita.EnvioVersion, new { BultoId = segundo.Id }))).Resultado);
             var salidaNueva = await Aplicar(client, siguiente, new { Id = Guid.NewGuid(), Secuencia = 3, Tipo = "ConfirmarCarga", OcurridaEn = reloj.GetUtcNow(), Datos = new { } }); Assert.Equal("Aplicada", salidaNueva.Resultado);
         await VerificarRecorridoBultos(data, client, siguiente, reloj.GetUtcNow(), 4, actual.Id);
         var entregaSegunda = new { Id = Guid.NewGuid(), Secuencia = 5, Tipo = "EntregaBultos", EnvioId = actual.Id, VersionEnvio = 0, OcurridaEn = t0.AddMinutes(20), Datos =
@@ -117,7 +122,7 @@ public sealed partial class OperacionesRepartoHttpTests
             var foto2 = Guid.NewGuid();
             using var subir = await client.PutAsJsonAsync($"/api/mobile/jornadas/{siguiente.JornadaId}/evidencias/{foto2}", new { EnvioId = actual.Id, Tipo = "Foto", Contenido = FotoPrueba });
             Assert.Equal(HttpStatusCode.NoContent, subir.StatusCode);
-            var evidencia = await Aplicar(client, siguiente, Operacion(Guid.NewGuid(), 7, "EntregaBultos", actual.Id, 0,
+            var evidencia = await Aplicar(client, siguiente, Comando(Guid.NewGuid(), 7, "EntregaBultos", actual.Id, 0,
                 new { FotoId = foto2, Nombre = "Segundo receptor", Latitud = -34.9, Longitud = -56.2, PrecisionMetros = 10, PosicionEnUtc = t0, ResultadosBultos = new[] { new { BultoId = segundo.Id, b2.Version, Entregado = true } } }));
             Assert.Equal("Aplicada", evidencia.Resultado);
         }
