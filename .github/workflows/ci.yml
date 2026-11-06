@@ -95,7 +95,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: NexoRuta/NexoRuta-Frontend
-          ref: c7b69ba05bf6172df60dc3cdd9d02d38fc0ae106
+          ref: bae070083ec81519f4ad40726fc1667839b7ea53
           path: frontend
           token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
