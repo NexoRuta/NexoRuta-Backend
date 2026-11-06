@@ -83,6 +83,15 @@ builder.Services.AddOptions<PasswordRecoveryOptions>()
         && string.IsNullOrEmpty(url.UserInfo) && string.IsNullOrEmpty(url.Query) && string.IsNullOrEmpty(url.Fragment),
         "Password recovery requires an absolute trusted HTTPS reset page URL (HTTP only in Development) and a token lifespan under one hour.")
     .ValidateOnStart();
+builder.Services.AddScoped<NexoRuta.Infrastructure.Operacion.OperationalReadStore>();
+if (builder.Configuration["MongoDB:ConnectionString"] is { Length: > 0 } operationalMongo
+    && builder.Configuration["MongoDB:Database"] is { Length: > 0 } operationalDatabase)
+{
+    builder.Services.AddSingleton<MongoDB.Driver.IMongoClient>(_ => new MongoDB.Driver.MongoClient(operationalMongo));
+    builder.Services.AddSingleton(sp => sp.GetRequiredService<MongoDB.Driver.IMongoClient>().GetDatabase(operationalDatabase));
+    builder.Services.AddSingleton<NexoRuta.Infrastructure.Operacion.OperationalMongoStore>();
+}
+builder.Services.AddSignalR(options => options.MaximumParallelInvocationsPerClient = 1);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IUsuarioActual, UsuarioActualHttp>();
 if (platformCommand)
@@ -123,7 +132,7 @@ var jwt = new JwtConfiguracion(builder.Configuration);
 builder.Services.AddSingleton(jwt);
 builder.Services.AddSingleton<JwtTokenService>();
 builder.Services.AddScoped<JwtValidacionEventos>();
-builder.Services.AddScoped<IAuthorizationHandler,PermisoAuthorizationHandler>();
+builder.Services.AddScoped<IAuthorizationHandler, PermisoAuthorizationHandler>();
 builder.Services
     .AddAuthentication(options =>
     {
@@ -210,7 +219,7 @@ if (rateDataSource is not null) builder.Services.AddSingleton(rateDataSource);
 RateLimitPartition<string> RequestPartition(string policy, string key, int limit)
     => rateDataSource is null
         ? RateLimitPartition.GetFixedWindowLimiter(key, _ => new FixedWindowRateLimiterOptions
-            { PermitLimit = limit, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true })
+        { PermitLimit = limit, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true })
         : RateLimitPartition.Get(key, _ => new PostgresRateLimiter(rateDataSource, policy, key, limit));
 
 
@@ -273,6 +282,7 @@ app.UseRateLimiter();
 app.UseMiddleware<RlsTransactionMiddleware>();
 app.UseAuthorization();
 app.MapControllers();
+app.MapHub<NexoRuta.Api.Features.Operacion.OperationalHub>("/hubs/operacion", options => options.CloseOnAuthenticationExpiration = true);
 app.MapHealthChecks("/health/ready");
 app.MapGet("/health/live", () => Results.Ok(new { status = "live" }));
 

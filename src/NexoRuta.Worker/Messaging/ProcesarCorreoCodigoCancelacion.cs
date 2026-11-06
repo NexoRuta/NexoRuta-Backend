@@ -60,11 +60,11 @@ public sealed class ProcesarCorreoCodigoCancelacion(NexoRutaDbContext db, IDataP
         return "<!doctype html><html lang=\"es\"><body style=\"margin:0;background:#f5f7fa;color:#17212b;font:16px/1.5 Arial,sans-serif\"><main style=\"max-width:560px;margin:24px auto;background:#fff;border:1px solid #cbd5e1;border-radius:8px;overflow:hidden\"><header style=\"padding:24px;background:" + background + ";color:" + text + "\">" + logo + "<h1 style=\"margin:0;font-size:22px\">" + brand + "</h1></header><section style=\"padding:24px\"><p>Tu código para cancelar el envío es:</p><p style=\"font-size:24px;font-weight:bold;letter-spacing:2px\"><code>" + WebUtility.HtmlEncode(codigo) + "</code></p><p>Ingresalo en el enlace de seguimiento. Solo permite cancelar antes de recibir el paquete. Si ya lo recibiste, corresponde una devolución.</p><p>No compartas este código. Si no solicitaste cancelar, ignorá este correo.</p><hr style=\"border:0;border-top:2px solid #64748b\">" + contact + "</section></main></body></html>";
     }
 
-    private static bool LogoPermitido(NexoRuta.Application.Seguimiento.Dtos.IdentidadVisualPublica? identity)
+    internal static bool LogoPermitido(NexoRuta.Application.Seguimiento.Dtos.IdentidadVisualPublica? identity)
         => identity?.LogoContenido is { Length: > 0 and <= NexoRuta.Infrastructure.IdentidadVisual.ValidadorIdentidadVisual.MaximoLogoBytes }
             && identity.LogoTipoContenido is "image/png" or "image/jpeg";
 
-    private static (string Background, string Text) ColoresHeader(string? color)
+    internal static (string Background, string Text) ColoresHeader(string? color)
     {
         if (color is null || !System.Text.RegularExpressions.Regex.IsMatch(color, "^#[0-9A-Fa-f]{6}$"))
             return ("#1D4ED8", "#FFFFFF");

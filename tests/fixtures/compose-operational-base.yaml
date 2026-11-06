@@ -1,0 +1,14 @@
+# Schema-only fixture: never start these placeholder services.
+services:
+  api:
+    image: nexoruta-api:fixture
+  worker:
+    image: nexoruta-worker:fixture
+  worker-kafka:
+    profiles: ["kafka"]
+    image: nexoruta-worker:fixture
+  kafka:
+    profiles: ["kafka"]
+    image: confluentinc/cp-kafka:7.9.10
+    healthcheck:
+      test: ["CMD", "true"]

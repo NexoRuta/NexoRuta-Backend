@@ -45,6 +45,8 @@ jobs:
         run: python3 scripts/release/test-deploy.py
       - name: Test integration shard planner
         run: python3 tests/ci/test_integration_shards.py -v
+      - name: Test coverage gate
+        run: python3 scripts/coverage/test_report.py -v
       - name: Validate workflow syntax
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/*.yml
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
@@ -52,19 +54,23 @@ jobs:
           global-json-file: global.json
           cache: true
           cache-dependency-path: '**/packages.lock.json'
+      - name: Validate operational application service configuration
+        run: docker compose --env-file /dev/null -f tests/fixtures/compose-operational-base.yaml -f compose.operacion.yaml --profile kafka config --no-interpolate --quiet
       - name: Restore backend
         run: dotnet restore NexoRuta.sln --locked-mode
       - name: Build backend
         run: dotnet build NexoRuta.sln --no-restore --configuration Release
       - name: Test backend unit tests
-        run: dotnet test tests/NexoRuta.UnitTests/NexoRuta.UnitTests.csproj --no-build --no-restore --configuration Release --logger trx --results-directory artifacts/unit
+        run: dotnet test tests/NexoRuta.UnitTests/NexoRuta.UnitTests.csproj --no-build --no-restore --configuration Release --logger trx --collect:"XPlat Code Coverage" --results-directory artifacts/unit
       - name: Test backend architecture
         run: dotnet test tests/NexoRuta.ArchitectureTests/NexoRuta.ArchitectureTests.csproj --no-build --no-restore --configuration Release --logger trx --results-directory artifacts/architecture
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: backend-fast-test-results-${{ github.run_id }}
-          path: artifacts/**/*.trx
+          path: |
+            artifacts/**/*.trx
+            artifacts/**/coverage.cobertura.xml
           if-no-files-found: error
           retention-days: 14
 
@@ -95,7 +101,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: NexoRuta/NexoRuta-Frontend
-          ref: bae070083ec81519f4ad40726fc1667839b7ea53
+          ref: 5fc8fd25565f7fef2809b377f4ec3f8e42526a5f
           path: frontend
           token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
@@ -141,14 +147,38 @@ jobs:
         if: always()
         with:
           name: backend-integration-shard-${{ matrix.shard }}-${{ github.run_id }}
-          path: backend/artifacts/integration/**/*.trx
+          path: |
+            backend/artifacts/integration/**/*.trx
+            backend/artifacts/integration/**/coverage.cobertura.xml
+            backend/artifacts/browser/**
+          if-no-files-found: error
+          retention-days: 14
+
+  coverage:
+    name: Backend coverage / Domain and Application >70%
+    if: always()
+    needs: [build-and-test, integration]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: backend-*-*-${{ github.run_id }}
+          path: artifacts/coverage-input
+      - name: Require coverage above 70% independently in each layer
+        run: python3 scripts/coverage/report.py 'artifacts/coverage-input/**/coverage.cobertura.xml' --output artifacts/coverage-summary --minimum-reports 4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: backend-coverage-summary-${{ github.run_id }}
+          path: artifacts/coverage-summary/
           if-no-files-found: error
           retention-days: 14
 
   result:
     name: Backend CI / result
     if: always()
-    needs: [source_policy, build-and-test, integration]
+    needs: [source_policy, build-and-test, integration, coverage]
     runs-on: ubuntu-latest
     steps:
       - name: Require the backend validation

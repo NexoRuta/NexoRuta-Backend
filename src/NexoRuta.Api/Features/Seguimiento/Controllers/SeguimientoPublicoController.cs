@@ -6,6 +6,7 @@ using NexoRuta.Api.Features.Seguimiento.Contracts;
 using Microsoft.AspNetCore.RateLimiting;
 
 namespace NexoRuta.Api.Features.Seguimiento.Controllers;
+
 [ApiController]
 [AllowAnonymous] // Permite acceder a este endpoint sin autenticación
 [EnableRateLimiting("seguimiento-publico")]
@@ -41,6 +42,7 @@ public sealed class SeguimientoPublicoController(
                 seguimiento.Identidad.ColorPrimario,
                 seguimiento.Identidad.ColorSecundario,
                 seguimiento.Identidad.LogoContenido,
-                seguimiento.Identidad.LogoTipoContenido)) { TotalBultos = seguimiento.TotalBultos, BultosEntregados = seguimiento.BultosEntregados, BultosDevueltos = seguimiento.BultosDevueltos, EsRetiro = seguimiento.EsRetiro });
+                seguimiento.Identidad.LogoTipoContenido))
+        { VentanaEstimada = seguimiento.VentanaEstimada, Historial = seguimiento.Historial, Bultos = seguimiento.Bultos, TotalBultos = seguimiento.TotalBultos, BultosEntregados = seguimiento.BultosEntregados, BultosDevueltos = seguimiento.BultosDevueltos, EsRetiro = seguimiento.EsRetiro });
     }
 }

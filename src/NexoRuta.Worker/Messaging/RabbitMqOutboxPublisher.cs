@@ -28,9 +28,35 @@ public sealed class RabbitMqOutboxPublisher(IConfiguration configuration) : IAsy
         if (message.OperadorId is null || message.EnvioId is null || message.ClaveAmbito != message.EnvioId)
             throw new InvalidDataException("Invalid cancellation email scope.");
         // El consumidor obtiene el sobre autorizado desde PostgreSQL, nunca desde el cuerpo del broker.
-        return (CancellationCodeEmailConsumer.Queue, new BasicProperties {
-            MessageId = message.Id.ToString("D"), Type = message.Tipo, Persistent = true,
-            ContentType = "application/json", Headers = TraceHeaders(message)
+        return (CancellationCodeEmailConsumer.Queue, new BasicProperties
+        {
+            MessageId = message.Id.ToString("D"),
+            Type = message.Tipo,
+            Persistent = true,
+            ContentType = "application/json",
+            Headers = TraceHeaders(message)
+        }, "{}"u8.ToArray());
+    }
+
+    public Task PublishRecipientStateAsync(OutboxClaim message, CancellationToken ct)
+        => PublishAsync(message, CreateRecipientPublication, ct);
+
+    private static (string Queue, BasicProperties Properties, ReadOnlyMemory<byte> Body) CreateRecipientPublication(OutboxClaim message)
+    {
+        Validate(message, OutboxDestino.RabbitMq, OutboxScope.Envio, OutboxMessageTypes.RecipientStateEmail, 1);
+        if (message.OperadorId is null || message.EnvioId is null || message.ClaveAmbito != message.EnvioId)
+            throw new InvalidDataException("Invalid recipient notice scope.");
+        using var payload = JsonDocument.Parse(message.BusinessPayload);
+        var correlation = payload.RootElement.TryGetProperty("correlacionId", out var property) && property.ValueKind == JsonValueKind.String
+            && Guid.TryParse(property.GetString(), out var id) ? id.ToString("D") : message.Id.ToString("D");
+        return (RecipientStateEmailConsumer.Queue, new BasicProperties
+        {
+            MessageId = message.Id.ToString("D"),
+            CorrelationId = correlation,
+            Type = message.Tipo,
+            Persistent = true,
+            ContentType = "application/json",
+            Headers = TraceHeaders(message)
         }, "{}"u8.ToArray());
     }
 
@@ -62,6 +88,7 @@ public sealed class RabbitMqOutboxPublisher(IConfiguration configuration) : IAsy
             arguments: null, cancellationToken: ct);
         await PasswordRecoveryEmailTopology.DeclareAsync(channel, ct);
         await CancellationCodeEmailConsumer.DeclareAsync(channel, ct);
+        await RecipientStateEmailConsumer.DeclareAsync(channel, ct);
         return channel;
     }
 

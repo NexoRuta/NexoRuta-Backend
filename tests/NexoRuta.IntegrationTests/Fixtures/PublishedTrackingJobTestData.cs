@@ -38,8 +38,18 @@ internal static class PublishedTrackingJobTestData
     private static async Task PublishPendingAsync(NexoRutaDbContext db, Guid messageId)
     {
         var publisherId = Guid.NewGuid();
-        var claimed = await new EfOutboxRepository(db).ReservarSiguienteAsync(publisherId, OutboxDestino.RabbitMq);
-        if (claimed?.Id != messageId || !await new EfOutboxRepository(db).MarcarPublicadoAsync(messageId, publisherId))
-            throw new InvalidOperationException("The test could not publish the persisted tracking outbox job.");
+        var repository = new EfOutboxRepository(db);
+        for (var remaining = 1000; remaining > 0; remaining--)
+        {
+            var claimed = await repository.ReservarSiguienteAsync(publisherId, OutboxDestino.RabbitMq);
+            if (claimed is null || claimed.Id != messageId && claimed.Tipo != OutboxMessageTypes.RecipientStateEmail)
+                throw new InvalidOperationException("The test could not publish the persisted tracking outbox job.");
+            if (!await repository.MarcarPublicadoAsync(claimed.Id, publisherId))
+                throw new InvalidOperationException("The test could not finish the persisted outbox reservation.");
+            if (claimed.Id == messageId) return;
+            // This helper simulates SQL publisher completion only. The real SMTP
+            // and Rabbit retry behavior is exercised separately against Mailpit.
+        }
+        throw new InvalidOperationException("The test exceeded the synthetic publication limit.");
     }
 }

@@ -124,7 +124,7 @@ public sealed partial class EfRutasRepository
     public async Task<ReprogramacionEnvioDatos?> ReprogramarAsync(Guid operadorId, Guid envioId,
         SolicitarReprogramacionEnvioDatos datos, CancellationToken ct)
     {
-        if (datos.VersionEnvio < 0) throw new ArgumentException("Indicá la versión actual del envío.");
+        if (datos.VersionEnvio < 0 || datos.SolicitudPublicaId == Guid.Empty) throw new ArgumentException("Indicá la versión actual y una correlación válida del envío.");
         await using var tx = await db.BeginOrJoinAsync(ct);
         await Contexto(operadorId, ct);
         await Bloquear(operadorId, ct);
@@ -149,7 +149,7 @@ public sealed partial class EfRutasRepository
         var hojasAnteriores = await db.HojasRuta.Include(x => x.Paradas).Where(x => x.OperadorId == operadorId
             && x.Paradas.Any(p => p.EnvioId == envioId && p.Activa)).ToArrayAsync(ct);
         var ahora = reloj.GetUtcNow().ToUniversalTime();
-        var correlacion = Guid.CreateVersion7();
+        var correlacion = datos.SolicitudPublicaId ?? Guid.CreateVersion7();
         await db.SetShipmentHistoryContextAsync("ReprogramacionEnvio", correlacion,
             occurredAt: ahora, cancellationToken: ct);
         envio.CambiarEstado(EstadoEnvio.Reprogramado, envio.Version);
