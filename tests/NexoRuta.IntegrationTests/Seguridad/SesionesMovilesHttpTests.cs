@@ -290,21 +290,25 @@ public sealed class SesionesMovilesHttpTests(PostgresFixture postgres) : IClassF
     [Fact]
     public async Task MigracionYRollbackConservanUsuariosHashesRolesYAccesos()
     {
-        var database = await postgres.CreateDatabaseAsync();
-        using var factory = database.CreateApiFactory();
-        using var client = factory.CreateHttpClient();
+        var database = await postgres.CreateDatabaseAsync("20261017182259_AddMobileRefreshSessions");
         await using var db = database.CreateDbContext();
-        var (user, acceso) = await Operador(db);
-        var ids = await db.Usuarios.AsNoTracking().Select(x => x.Id).OrderBy(x => x).ToArrayAsync();
-        var rol = acceso.RolId;
-        await Login(client, user.Email);
+        var userId=Guid.NewGuid(); var accessId=Guid.NewGuid(); var operatorId=Guid.NewGuid(); var roleId=Guid.NewGuid();
+        const string email="historic-mobile@example.test";
+        var hash=AuthenticationTestData.Hash(email);
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "Operadores" ("Id","Nombre") VALUES ({operatorId},'Historic mobile operator');
+            INSERT INTO "Usuarios" ("Id","Email","PasswordHash") VALUES ({userId},{email},{hash});
+            INSERT INTO "Roles" ("Id","Codigo","Nombre","TipoOrganizacion","OperadorId") VALUES ({roleId},'historic','Historic','Operador',{operatorId});
+            INSERT INTO "AccesosUsuario" ("Id","UsuarioId","OperadorId","RolId") VALUES ({accessId},{userId},{operatorId},{roleId});
+            INSERT INTO "SesionesMoviles" ("Id","UsuarioId","AccesoId","VersionSesion","CreadaEnUtc","ExpiraEnUtc")
+                VALUES ({Guid.NewGuid()},{userId},{accessId},0,now(),now()+interval '1 day');
+            """);
         var migrator = db.GetService<IMigrator>();
         await migrator.MigrateAsync("20261017035519_AddUsuarioEmailConcurrency");
         await migrator.MigrateAsync();
-        db.ChangeTracker.Clear();
-        Assert.Equal(ids, await db.Usuarios.AsNoTracking().Select(x => x.Id).OrderBy(x => x).ToArrayAsync());
-        Assert.Equal(user.PasswordHash, (await db.Usuarios.SingleAsync(x => x.Id == user.Id)).PasswordHash);
-        Assert.Equal(rol, (await db.AccesosUsuario.SingleAsync(x => x.Id == acceso.Id)).RolId);
+        Assert.Equal(new[] {userId}, await db.Usuarios.AsNoTracking().Select(x => x.Id).OrderBy(x => x).ToArrayAsync());
+        Assert.Equal(hash, (await db.Usuarios.SingleAsync(x => x.Id == userId)).PasswordHash);
+        Assert.Equal(roleId, (await db.AccesosUsuario.SingleAsync(x => x.Id == accessId)).RolId);
         Assert.Equal(0, await db.SesionesMoviles.CountAsync());
         Assert.False((await db.Database.GetPendingMigrationsAsync()).Any());
     }

@@ -376,7 +376,8 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         const string actual = "20261008180729_AccountOwnerAndShipmentOperator";
 
         var inicial = Datos();
-        await using var db = new NexoRutaDbContext(options);
+        var historicalDatabase = await postgres.CreateDatabaseAsync(anterior);
+        await using var db = historicalDatabase.CreateDbContext();
         var migrator = db.GetService<IMigrator>();
 
         await migrator.MigrateAsync(anterior);
@@ -519,23 +520,20 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
         const string anterior = "20261008180729_AccountOwnerAndShipmentOperator";
 
         var inicial = Datos();
-        await using var db = new NexoRutaDbContext(options);
+        var historicalDatabase = await postgres.CreateDatabaseAsync(anterior);
+        await using var db = historicalDatabase.CreateDbContext();
         var migrator = db.GetService<IMigrator>();
-
-        await AuthenticationTestData.Seeder(db, inicial).SeedAsync();
-
-        var cuenta = await Cuenta(
-            db, inicial.UsuarioEmail, TipoAccesoUsuario.Comercio);
-
-        var operador = await Cuenta(
-            db, inicial.OperadorUsuarioEmail, TipoAccesoUsuario.Operador);
-
-        // Solo en esta base efímera: habilita el downgrade histórico
-        // sin intentar descartar una propiedad de operador registrada.
-        await db.Database.ExecuteSqlInterpolatedAsync(
-            $"UPDATE \"AccesosUsuario\" SET \"EsPropietario\" = FALSE WHERE \"OperadorId\" = {operador.OperadorId}");
-
-        await migrator.MigrateAsync(anterior);
+        var cuenta = new { UsuarioId = Guid.NewGuid(), AccesoId = Guid.NewGuid(), ComercioId = (Guid?)Guid.NewGuid() };
+        var operador = new { OperadorId = (Guid?)Guid.NewGuid() };
+        var operatorUser = Guid.NewGuid(); var operatorAccess = Guid.NewGuid();
+        inicial.OperadorId = operador.OperadorId; inicial.ComercioId = cuenta.ComercioId;
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "Operadores" ("Id","Nombre") VALUES ({operador.OperadorId},{inicial.OperadorNombre});
+            INSERT INTO "Comercios" ("Id","Nombre") VALUES ({cuenta.ComercioId},{inicial.ComercioNombre});
+            INSERT INTO "Usuarios" ("Id","Email") VALUES ({cuenta.UsuarioId},{inicial.UsuarioEmail}),({operatorUser},{inicial.OperadorUsuarioEmail});
+            INSERT INTO "AccesosUsuario" ("Id","UsuarioId","ComercioId") VALUES ({cuenta.AccesoId},{cuenta.UsuarioId},{cuenta.ComercioId});
+            INSERT INTO "AccesosUsuario" ("Id","UsuarioId","OperadorId") VALUES ({operatorAccess},{operatorUser},{operador.OperadorId});
+            """);
 
         var vinculo = Guid.CreateVersion7();
 
@@ -752,9 +750,6 @@ public sealed class EnvioPostgresRoundTripTests(PostgresFixture postgres) : ICla
     private static async Task MigrarActualConCorreosDeFixture(NexoRutaDbContext db, IMigrator migrator)
     {
         await HistoricRecipientEmail.MigrateAsync(db);
-        // These round-trip fixtures stop before the breaking shipment-rules migration, while the
-        // current repository projection includes the later shipment creation timestamp.
-        await db.Database.ExecuteSqlRawAsync("ALTER TABLE \"Envios\" ADD COLUMN IF NOT EXISTS \"CreadoEnUtc\" timestamp with time zone NOT NULL DEFAULT now()");
     }
     private static async Task VerificarEnvioHistoricoAsync(
         NexoRutaDbContext db,

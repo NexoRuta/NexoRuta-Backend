@@ -13,7 +13,7 @@ public sealed class IdentityAccountStoreTests(PostgresFixture postgres) : IClass
     [Fact]
     public async Task UpgradePreservesLegacyGuidHashVersionAndPlatformAccess()
     {
-        var database = await postgres.CreateDatabaseAsync();
+        var database = await postgres.CreateDatabaseAsync("20261017035519_AddUsuarioEmailConcurrency");
         await using var db = database.CreateDbContext();
         await db.GetService<IMigrator>().MigrateAsync("20261017035519_AddUsuarioEmailConcurrency");
         var previousAccountForeignKeys = await db.Database.SqlQueryRaw<string>("""

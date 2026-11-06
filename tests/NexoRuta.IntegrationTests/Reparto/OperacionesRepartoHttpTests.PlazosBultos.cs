@@ -42,7 +42,7 @@ public sealed partial class OperacionesRepartoHttpTests
         var p = hoja.Paradas.Single(); var primero = p.Bultos.First(); var segundo = p.Bultos.Last();
         Assert.Equal("Aplicada", (await Aplicar(client, hoja, Operacion(Guid.NewGuid(), 1, "InicioJornada"))).Resultado);
         Assert.Equal("Aplicada", (await Aplicar(client, hoja, Operacion(Guid.NewGuid(), 2, "CargarBulto", p.EnvioId, p.EnvioVersion, new { BultoId = primero.Id }))).Resultado);
-        Assert.Equal("Aplicada", (await Aplicar(client, hoja, Operacion(Guid.NewGuid(), 3, "ConfirmarCarga"))).Resultado);
+        Assert.Equal("Aplicada", (await Aplicar(client, hoja, new { Id = Guid.NewGuid(), Secuencia = 3, Tipo = "ConfirmarCarga", OcurridaEn = reloj.GetUtcNow(), Datos = new { } })).Resultado);
         var t0 = new DateTimeOffset(reloj.GetUtcNow().Ticks / 10 * 10, TimeSpan.Zero); reloj.Set(t0);
         var foto = Guid.NewGuid();
         using var subida = await client.PutAsJsonAsync($"/api/mobile/jornadas/{hoja.JornadaId}/evidencias/{foto}", new { p.EnvioId, Tipo = "Foto", Contenido = FotoPrueba });
@@ -95,7 +95,7 @@ public sealed partial class OperacionesRepartoHttpTests
             Assert.True(despacho.IsSuccessStatusCode, await despacho.Content.ReadAsStringAsync());
             Assert.Equal("Aplicada", (await Aplicar(client, siguiente, Operacion(Guid.NewGuid(), 1, "InicioJornada"))).Resultado);
             Assert.Equal("Aplicada", (await Aplicar(client, siguiente, Operacion(Guid.NewGuid(), 2, "CargarBulto", actual.Id, visita.EnvioVersion, new { BultoId = segundo.Id }))).Resultado);
-            var salidaNueva = await Aplicar(client, siguiente, Operacion(Guid.NewGuid(), 3, "ConfirmarCarga")); Assert.Equal("Aplicada", salidaNueva.Resultado);
+            var salidaNueva = await Aplicar(client, siguiente, new { Id = Guid.NewGuid(), Secuencia = 3, Tipo = "ConfirmarCarga", OcurridaEn = reloj.GetUtcNow(), Datos = new { } }); Assert.Equal("Aplicada", salidaNueva.Resultado);
         await VerificarRecorridoBultos(data, client, siguiente, reloj.GetUtcNow(), 4, actual.Id);
         var entregaSegunda = new { Id = Guid.NewGuid(), Secuencia = 5, Tipo = "EntregaBultos", EnvioId = actual.Id, VersionEnvio = 0, OcurridaEn = t0.AddMinutes(20), Datos =
             new { Nombre = "Segundo receptor", Latitud = -34.9, Longitud = -56.2, PrecisionMetros = 10, PosicionEnUtc = t0, ResultadosBultos = new[] { new { BultoId = segundo.Id, Version = visita.Bultos.Single().Version + 1, Entregado = true } } } };

@@ -148,7 +148,7 @@ public sealed partial class PushOutboxTests
         var expectedNotice = permitida && fixture.ShouldNotifyRoute ? 1 : 0;
         Assert.Equal(fixture.Avisos + expectedNotice, noticeCount);
         Assert.Equal(fixture.PushMessages + expectedNotice, pushCount);
-        Assert.Equal(fixture.AllOutboxMessages + expectedNotice, allOutboxCount);
+        Assert.Equal(fixture.AllOutboxMessages + expectedNotice + (permitida ? 1 : 0), allOutboxCount);
         Assert.Equal(fixture.HistoryIds.Length + (permitida ? 1 : 0), history.Length);
         Assert.Equal(fixture.HistoryIds.Order(), history.Select(x => x.Id).Where(fixture.HistoryIds.Contains).Order());
         if (rutaId is { } id)
@@ -171,6 +171,21 @@ public sealed partial class PushOutboxTests
                 (transition.Tipo, transition.EstadoAnterior, transition.EstadoNuevo, transition.VersionAnterior,
                     transition.VersionNueva, transition.OrigenTipo));
             Assert.Single(await result.CancelacionesEnvio.Where(c => c.EnvioId == envio.Id).ToArrayAsync());
+            // A state change emits one v2 commerce notice in addition to the optional courier push.
+            var notice = Assert.Single(await result.OutboxMessages.Where(m => m.EnvioId == envio.Id
+                && m.Tipo == "OperacionActualizada").ToArrayAsync(),
+                m => m.Payload.Contains("Cancelado"));
+            Assert.Equal((OutboxDestino.Kafka, 2), (notice.Destino, notice.VersionContrato));
+            using var payload = JsonDocument.Parse(notice.Payload);
+            Assert.Equal(envio.Version, payload.RootElement.GetProperty("version").GetInt64());
+            Assert.Equal(envio.Id, payload.RootElement.GetProperty("envioId").GetGuid());
+            using var replay = await p.Client.PostAsJsonAsync($"/api/envios/{envioId}/cancelacion",
+                new { Version = fixture.Version, Motivo = "Cancelación de prueba." });
+            Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
+            Assert.Equal(allOutboxCount, await result.OutboxMessages.CountAsync(m => m.EnvioId == envio.Id));
+            Assert.Equal(history.Length, await result.EnvioEventos.CountAsync(x => x.EnvioId == envio.Id));
+            Assert.Equal(envio.Version, await CurrentShipmentVersion(p.Data, envioId));
+
         }
         else
         {
@@ -582,7 +597,7 @@ public sealed partial class PushOutboxTests
     [Fact]
     public async Task MigracionDeCancelacionRevierteSusCapacidadesSinCambiarDatosPrevios()
     {
-        var data = await postgres.CreateDatabaseAsync(); await using var db = data.CreateDbContext();
+        var data = await postgres.CreateDatabaseAsync("20261019223054_AddAuthenticatedShipmentCancellation"); await using var db = data.CreateDbContext();
         var migrator = db.GetService<Microsoft.EntityFrameworkCore.Migrations.IMigrator>();
         await migrator.MigrateAsync("20261019185305_IntegratePushOutboxDispatch");
         var funcion = await db.Database.SqlQuery<bool>($"SELECT to_regprocedure('nexoruta_app.cancel_shipment(uuid,bigint,text,uuid,uuid,uuid)') IS NULL AS \"Value\"").SingleAsync();

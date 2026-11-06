@@ -39,7 +39,7 @@ public sealed class ProtectedRoleMigrationTests(PostgresFixture postgres) : ICla
     [Fact]
     public async Task AdditiveClassificationPreservesExistingOperatorIdentityAndRoleRelationships()
     {
-        var database = await postgres.CreateDatabaseAsync();
+        var database = await postgres.CreateDatabaseAsync("20261015212134_AddVersionSesionAcceso");
         Guid operatorId;
         Guid userId;
         Guid roleId;
@@ -48,24 +48,17 @@ public sealed class ProtectedRoleMigrationTests(PostgresFixture postgres) : ICla
         await using (var db = database.CreateDbContext())
         {
             operatorId = Guid.NewGuid();
-            var user = new Usuario("migration-compatibility@test.local", AuthenticationTestData.Hash("migration-compatibility@test.local"));
-            var role = new Rol("administrador_operador", "Operator administrator", operatorId, null);
-            var permission = new Permiso("usuarios.gestionar", "Manage users");
-            var access = new AccesoUsuario(user.Id, operatorId, null, role);
-            db.AddRange(new Operador("Operator", operatorId), user, role, permission,
-                new RolPermiso(role.Id, permission.Id));
-            await db.SaveChangesAsync();
-            db.AccesosUsuario.Add(access);
-            await db.SaveChangesAsync();
-            userId = user.Id;
-            roleId = role.Id;
-            permissionId = permission.Id;
-            accessId = access.Id;
+            userId = Guid.NewGuid(); roleId = Guid.NewGuid(); permissionId = Guid.NewGuid(); accessId = Guid.NewGuid();
+            const string email = "migration-compatibility@test.local";
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO "Operadores" ("Id","Nombre") VALUES ({operatorId},'Operator');
+                INSERT INTO "Usuarios" ("Id","Email","PasswordHash") VALUES ({userId},{email},{AuthenticationTestData.Hash(email)});
+                INSERT INTO "Roles" ("Id","Codigo","Nombre","OperadorId","TipoOrganizacion") VALUES ({roleId},'administrador_operador','Operator administrator',{operatorId},'Operador');
+                INSERT INTO "Permisos" ("Id","Codigo","Nombre") VALUES ({permissionId},'usuarios.gestionar','Manage users');
+                INSERT INTO "RolesPermisos" ("RolId","PermisoId") VALUES ({roleId},{permissionId});
+                INSERT INTO "AccesosUsuario" ("Id","UsuarioId","OperadorId","RolId") VALUES ({accessId},{userId},{operatorId},{roleId});
+                """);
         }
-
-        // Reproduce an existing installation at the last pre-classification schema, retaining its rows.
-        await using (var db = database.CreateDbContext())
-            await db.Database.MigrateAsync("20261015212134_AddVersionSesionAcceso");
 
         await using (var upgraded = database.CreateDbContext())
         {

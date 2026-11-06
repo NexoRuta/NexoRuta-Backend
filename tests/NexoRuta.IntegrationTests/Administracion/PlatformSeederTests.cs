@@ -193,7 +193,7 @@ public sealed class PlatformSeederTests(PostgresFixture postgres) : IClassFixtur
     [Fact]
     public async Task MigrationBackfillsOnlyPreviouslyEnabledPlatformRoles()
     {
-        var database = await postgres.CreateDatabaseAsync();
+        var database = await postgres.CreateDatabaseAsync("20261016035056_AddPlatformAdministration");
         await using var db = database.CreateDbContext();
 
         await db.GetService<IMigrator>()

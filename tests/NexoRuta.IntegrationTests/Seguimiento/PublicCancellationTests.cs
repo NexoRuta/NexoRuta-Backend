@@ -49,8 +49,10 @@ public sealed class PublicCancellationTests(PostgresFixture postgres) : IClassFi
         Assert.NotNull((await db.CodigosCancelacionPublica.SingleAsync()).ConsumidoEnUtc);
         Assert.Empty(await db.AvisosReparto.ToArrayAsync());
         Assert.DoesNotContain("destinatario", await respuesta.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
-        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => db.GetService<IMigrator>().MigrateAsync("20261019225313_RequireRecipientEmail"));
-        Assert.Equal("55000", Assert.IsType<PostgresException>(error.InnerException).SqlState); // No elimina hechos públicos para volver al modelo anterior.
+        var error = await Assert.ThrowsAsync<NotSupportedException>(() => db.GetService<IMigrator>().MigrateAsync("20261019225313_RequireRecipientEmail"));
+        Assert.Contains("accepted physical results", error.Message);
+        Assert.Single(await db.CancelacionesEnvio.ToArrayAsync());
+        Assert.NotNull((await db.CodigosCancelacionPublica.SingleAsync()).ConsumidoEnUtc);
     }
 
     [Fact]
@@ -237,7 +239,7 @@ public sealed class PublicCancellationTests(PostgresFixture postgres) : IClassFi
     [Fact]
     public async Task MigracionPuedeRevertirseSinHechosPublicosYVolverAAplicarse()
     {
-        var data = await postgres.CreateDatabaseAsync(); await using var db = data.CreateDbContext();
+        var data = await postgres.CreateDatabaseAsync("20261019230046_AddPublicShipmentCancellation"); await using var db = data.CreateDbContext();
         await db.GetService<IMigrator>().MigrateAsync("20261019225313_RequireRecipientEmail");
         await db.Database.MigrateAsync(); Assert.False(db.Database.HasPendingModelChanges());
     }
