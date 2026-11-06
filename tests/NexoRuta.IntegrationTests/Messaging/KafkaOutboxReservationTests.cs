@@ -19,6 +19,7 @@ public sealed class KafkaOutboxReservationTests(PostgresFixture postgres) : ICla
             OutboxDestino.Kafka, "{}");
         db.OutboxMessages.Add(evento);
         await db.SaveChangesAsync();
+        await DeferGeneratedWorkAsync(db);
         var reservado = await new EfOutboxRepository(db).ReservarSiguienteAsync(Guid.NewGuid(), OutboxDestino.Kafka);
         Assert.NotNull(reservado);
         Assert.Equal(evento.Id, reservado.Id);
@@ -34,6 +35,7 @@ public sealed class KafkaOutboxReservationTests(PostgresFixture postgres) : ICla
             db.OutboxMessages.Add(OutboxMessage.ForShipment(envio.OperadorId, envio.Id,
                 OutboxMessageTypes.ShipmentCreated, OutboxDestino.Kafka, "{}"));
             await db.SaveChangesAsync();
+        await DeferGeneratedWorkAsync(db);
         }
         await using var primero = database.CreateDbContext();
         await using var segundo = database.CreateDbContext();
@@ -42,7 +44,7 @@ public sealed class KafkaOutboxReservationTests(PostgresFixture postgres) : ICla
             new EfOutboxRepository(segundo).ReservarSiguienteAsync(Guid.NewGuid(), OutboxDestino.Kafka));
         Assert.Single(reservas, x => x is not null);
         await using var verificacion = database.CreateDbContext();
-        Assert.Equal(1, (await verificacion.OutboxMessages.AsNoTracking().SingleAsync()).Intentos);
+        Assert.Equal(1, (await verificacion.OutboxMessages.AsNoTracking().SingleAsync(x => x.Tipo == OutboxMessageTypes.ShipmentCreated)).Intentos);
     }
 
     [Fact]
@@ -54,6 +56,7 @@ public sealed class KafkaOutboxReservationTests(PostgresFixture postgres) : ICla
         var evento = OutboxMessage.ForShipment(envio.OperadorId, envio.Id, OutboxMessageTypes.ShipmentCreated, OutboxDestino.Kafka, "{}");
         db.OutboxMessages.Add(evento);
         await db.SaveChangesAsync();
+        await DeferGeneratedWorkAsync(db);
         var repo = new EfOutboxRepository(db);
         var oldOwner = Guid.NewGuid();
         await repo.ReservarSiguienteAsync(oldOwner, OutboxDestino.Kafka);
@@ -78,6 +81,7 @@ public sealed class KafkaOutboxReservationTests(PostgresFixture postgres) : ICla
             OutboxMessage.ForShipment(envio.OperadorId, envio.Id, OutboxMessageTypes.ShipmentCreated, OutboxDestino.Kafka, "{}"),
             OutboxMessage.ForShipment(envio.OperadorId, envio.Id, OutboxMessageTypes.TrackingRequested, OutboxDestino.RabbitMq, "{}"));
         await db.SaveChangesAsync();
+        await DeferGeneratedWorkAsync(db);
         var repo = new EfOutboxRepository(db);
         Assert.Equal(nameof(OutboxDestino.Kafka), (await repo.ReservarSiguienteAsync(Guid.NewGuid(), OutboxDestino.Kafka))!.Destino);
         Assert.Null(await repo.ReservarSiguienteAsync(Guid.NewGuid(), OutboxDestino.Kafka));
@@ -99,6 +103,7 @@ public sealed class KafkaOutboxReservationTests(PostgresFixture postgres) : ICla
             OutboxMessageTypes.ShipmentCreated, OutboxDestino.Kafka, "{}");
         db.OutboxMessages.AddRange(recovery, normal);
         await db.SaveChangesAsync();
+        await DeferGeneratedWorkAsync(db);
         var agedAt = DateTimeOffset.UtcNow.AddMinutes(-11);
         await db.OutboxMessages.Where(x => x.Id == recovery.Id).ExecuteUpdateAsync(update => update
             .SetProperty(x => x.CreadoEnUtc, agedAt)
@@ -127,6 +132,7 @@ public sealed class KafkaOutboxReservationTests(PostgresFixture postgres) : ICla
         var second = Request(secondId);
         db.OutboxMessages.AddRange(first, second);
         await db.SaveChangesAsync();
+        await DeferGeneratedWorkAsync(db);
         var earlier = DateTimeOffset.UtcNow.AddMinutes(-2);
         await db.OutboxMessages.Where(x => x.Id == firstId).ExecuteUpdateAsync(update => update
             .SetProperty(x => x.CreadoEnUtc, earlier)
@@ -142,4 +148,13 @@ public sealed class KafkaOutboxReservationTests(PostgresFixture postgres) : ICla
         Assert.True(await repository.MarcarPublicadoAsync(firstId, processor));
         Assert.Equal(secondId, (await repository.ReservarSiguienteAsync(Guid.CreateVersion7(), OutboxDestino.Kafka))?.Id);
     }
+    private static Task<int> DeferGeneratedWorkAsync(NexoRuta.Infrastructure.Persistence.NexoRutaDbContext db)
+    {
+        // These reservation tests isolate their explicit jobs. Retain automatically
+        // captured facts/notices, but schedule them outside the owned test interval.
+        // Real publication and consumer recovery are exercised in operational tests.
+        return db.OutboxMessages.Where(x => x.Tipo == "EventoOperativo" || x.Tipo == OutboxMessageTypes.RecipientStateEmail)
+            .ExecuteUpdateAsync(update => update.SetProperty(x => x.ProximoIntentoEnUtc, DateTimeOffset.UtcNow.AddDays(1)));
+    }
+
 }

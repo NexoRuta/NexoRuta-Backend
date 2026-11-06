@@ -69,17 +69,37 @@ CREATE POLICY tracking_stop ON public."ParadasRuta" FOR SELECT TO nexoruta_publi
  EXISTS(SELECT 1 FROM public."Envios" e WHERE e."OperadorId"="ParadasRuta"."OperadorId" AND e."Id"="ParadasRuta"."EnvioId"));
 CREATE POLICY tracking_route ON public."HojasRuta" FOR SELECT TO nexoruta_public_fn USING(
  EXISTS(SELECT 1 FROM public."ParadasRuta" p WHERE p."OperadorId"="HojasRuta"."OperadorId" AND p."RutaId"="HojasRuta"."Id"));
-CREATE FUNCTION nexoruta_app.public_parcel_details(p_token text) RETURNS TABLE("Numero" integer,"Resultado" text)
+CREATE FUNCTION nexoruta_app.public_parcel_details(p_token text,p_offset int DEFAULT 0,p_limit int DEFAULT 200) RETURNS TABLE("Numero" integer,"Resultado" text)
  LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
 BEGIN
  IF p_token IS NULL OR p_token !~ '^[0-9a-f]{64}$' THEN RETURN; END IF;
  PERFORM set_config('nexoruta.public_token_hash',encode(public.digest(convert_to(p_token,'SQL_ASCII'),'sha256'),'hex'),true);
- RETURN QUERY SELECT row_number() OVER(ORDER BY b."Id")::integer,b."Resultado"::text FROM public."Bultos" b ORDER BY b."Id" LIMIT 200;
+ IF p_offset IS NULL OR p_limit IS NULL OR p_offset<0 OR p_offset>10000 OR p_limit<1 OR p_limit>200 THEN RAISE EXCEPTION 'Invalid public parcel page'; END IF;
+ RETURN QUERY SELECT row_number() OVER(ORDER BY b."Id")::integer,
+ CASE WHEN e."EsRetiro" THEN CASE b."Custodia" WHEN 'SinRecepcion' THEN 'RetiroPendiente' WHEN 'Repartidor' THEN 'Retirado' WHEN 'Deposito' THEN 'RetiroEnDeposito' WHEN 'Comercio' THEN 'EntregadoComercio' ELSE b."Resultado"::text END ELSE b."Resultado"::text END
+ FROM public."Bultos" b JOIN public."Envios" e ON e."OperadorId"=b."OperadorId" AND e."Id"=b."EnvioId"
+ ORDER BY b."Id" LIMIT p_limit OFFSET p_offset;
 END $$;
-ALTER FUNCTION nexoruta_app.public_parcel_details(text) OWNER TO nexoruta_public_fn;
-REVOKE ALL ON FUNCTION nexoruta_app.public_parcel_details(text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION nexoruta_app.public_parcel_details(text) TO nexoruta_api;
+ALTER FUNCTION nexoruta_app.public_parcel_details(text,int,int) OWNER TO nexoruta_public_fn;
+REVOKE ALL ON FUNCTION nexoruta_app.public_parcel_details(text,int,int) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION nexoruta_app.public_parcel_details(text,int,int) TO nexoruta_api;
 
+CREATE OR REPLACE FUNCTION nexoruta_app.public_parcel_progress(p_token text)
+ RETURNS TABLE("Total" integer,"Entregados" integer,"Devueltos" integer,"EsRetiro" boolean)
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+BEGIN
+ IF p_token IS NULL OR p_token !~ '^[0-9a-f]{64}$' THEN RETURN; END IF;
+ PERFORM set_config('nexoruta.public_token_hash',encode(public.digest(convert_to(p_token,'SQL_ASCII'),'sha256'),'hex'),true);
+ RETURN QUERY SELECT count(b."Id")::integer,count(b."Id") FILTER(WHERE (NOT e."EsRetiro" AND b."Resultado"='Entregado') OR (e."EsRetiro" AND b."Custodia"='Comercio'))::integer,
+   count(b."Id") FILTER(WHERE b."Resultado"='Devuelto')::integer,e."EsRetiro"
+ FROM public."Envios" e JOIN public."Bultos" b ON b."OperadorId"=e."OperadorId" AND b."EnvioId"=e."Id"
+ WHERE EXISTS(SELECT 1 FROM public."EnlacesSeguimiento" l WHERE l."OperadorId"=e."OperadorId" AND l."EnvioId"=e."Id"
+  AND l."TokenHash"=nexoruta_app.setting('public_token_hash') AND l."RevocadoEnUtc" IS NULL AND l."ExpiraEnUtc">now())
+ GROUP BY e."Id",e."EsRetiro";
+END $$;
+ALTER FUNCTION nexoruta_app.public_parcel_progress(text) OWNER TO nexoruta_public_fn;
+REVOKE ALL ON FUNCTION nexoruta_app.public_parcel_progress(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION nexoruta_app.public_parcel_progress(text) TO nexoruta_api;
 ALTER TABLE public."SolicitudesReprogramacionPublica" OWNER TO nexoruta_schema_owner;
 """);
     protected override void Down(MigrationBuilder m) => throw new NotSupportedException("Public requests must be preserved.");

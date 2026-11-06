@@ -121,6 +121,39 @@ public sealed class OperationalBrowserTests(PostgresFixture postgres, KafkaFixtu
             Assert.Equal("Aplicada", (await response.Content.ReadFromJsonAsync<ResultadoOperacionResponse>(ct))!.Resultado);
         }
     }
+    [Fact]
+    public async Task AnonymousTrackingPaginatesRealParcelsAndKeepsKeyboardFocusAtMobileWidth()
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(3)); var ct = deadline.Token;
+        var data = await postgres.CreateDatabaseAsync();
+        string token;
+        await using (var seed = data.CreateDbContext())
+        {
+            var shipment = await NexoRuta.IntegrationTests.Seguimiento.SeguimientoTestData.CreateEnvioAsync(seed);
+            seed.Bultos.AddRange(Enumerable.Range(1,250).Select(i => new Bulto(shipment.OperadorId,shipment.Id,$"PRIVATE-PARCEL-{i}",1,1,1,1)));
+            await seed.SaveChangesAsync(ct);
+            token = await NexoRuta.IntegrationTests.Seguimiento.SeguimientoTestData.CreateActiveLinkAsync(seed,shipment);
+        }
+        var runtime = await RlsRestrictedHttpFlowTests.RestrictApiAsync(data);
+        var settings = RlsRestrictedHttpFlowTests.ApiSettings(); settings["DatabaseInitialization:SeedData"]="false";
+        using var factory = new IntegrationApiFactory(runtime,settings:settings,seedOperationalRules:false); factory.UseKestrel(0);
+        using var api = factory.CreateClient();
+        var root = FindRoot(); var temp = Directory.CreateTempSubdirectory("nexoruta-public-parcels-");
+        var address=$"http://127.0.0.1:{FreePort()}";
+        using var portal=StartPortal(root,"NexoRuta.Tracking",address,api.BaseAddress!,Path.Combine(temp.FullName,"keys"));
+        try
+        {
+            await WaitReady(portal,address,ct);
+            var output=Environment.GetEnvironmentVariable("NEXORUTA_OPERATIONAL_E2E_DIR") ?? Path.Combine(root,"backend","artifacts","browser","operational"); Directory.CreateDirectory(output);
+            var start=new ProcessStartInfo("node") { UseShellExecute=false,RedirectStandardOutput=true,RedirectStandardError=true };
+            start.ArgumentList.Add(Path.Combine(root,"frontend","tests","browser","public-parcels.cjs"));
+            start.Environment["OPERATIONAL_TRACKING_URL"]=address+"/seguimiento/"+token;start.Environment["OPERATIONAL_OUTPUT"]=output;
+            using var browser=Process.Start(start)!;var stdout=browser.StandardOutput.ReadToEndAsync(ct);var stderr=browser.StandardError.ReadToEndAsync(ct);
+            await browser.WaitForExitAsync(ct);Assert.True(browser.ExitCode==0,await stdout+await stderr);
+        }
+        finally { Stop(portal);temp.Delete(true); }
+    }
+
     private async Task<IHost> StartProjection(IntegrationDatabase data, CancellationToken ct)
     {
         var topic="e2e-operational-"+Guid.NewGuid().ToString("N");

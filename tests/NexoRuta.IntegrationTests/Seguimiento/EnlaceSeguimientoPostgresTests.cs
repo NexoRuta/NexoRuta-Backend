@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -62,6 +63,11 @@ public sealed class EnlaceSeguimientoPostgresTests(PostgresFixture postgres)
             Assert.Equal(new[] { "estado", "ocurridaEnUtc", "registradaEnUtc" }, entry.EnumerateObject().Select(property => property.Name)));
         // Exact allowlists exclude parcel IDs/codes, reasons, addresses and recipient data.
         Assert.DoesNotContain("PRIVATE-CODE", json.RootElement.GetRawText());
+        var page = await client.GetFromJsonAsync<JsonElement>($"/api/public/seguimiento/{token}/bultos?offset=1&limite=1");
+        Assert.Equal(1, page.GetArrayLength());
+        Assert.Equal(2, page[0].GetProperty("numero").GetInt32());
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync($"/api/public/seguimiento/{token}/bultos?offset=10001")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/public/seguimiento/{new string('0',64)}/bultos")).StatusCode);
 
         Assert.Equal("Integration operator", json.RootElement.GetProperty("identidad").GetProperty("nombre").GetString());
         Assert.False(json.RootElement.GetProperty("identidad").TryGetProperty("nombreAdministrativo", out _));
