@@ -379,9 +379,9 @@ public sealed class ProcesarGeneracionSeguimientoTests(
             await verificacion.ProcessedMessages
                 .CountAsync(x => x.MessageId == messageId));
 
-        // El Outbox del alta debe conservarse.
+        // El alta conserva sus dos contratos existentes y el aviso de estado.
         Assert.Equal(
-            2,
+            3,
             await verificacion.OutboxMessages
                 .CountAsync(x => x.EnvioId == envioId));
     }
