@@ -59,11 +59,28 @@ public sealed class Cu01MigrationTests(PostgresFixture postgres) : IClassFixture
         await db.SaveChangesAsync();
         Assert.False(await permissions.TienePermisoAsync(userIds[0], accessIds[0], "envios.consultar"));
         Assert.True(await permissions.TienePermisoAsync(userIds[1], accessIds[1], "envios.consultar"));
-        // Shared code cannot be reintroduced by unsafe rollback that merges administrative changes.
-        var rollback = await Assert.ThrowsAsync<PostgresException>(() => migrator.MigrateAsync("20261012230124_AddUsuarioPasswordHash"));
+    }
+
+    [Fact]
+    public async Task UnsafeRollbackPreservesOrganizationRolesAndEditedGrants()
+    {
+        var database = await postgres.CreateDatabaseAsync("20261013010505_NormalizeCu01Initialization");
+        await using var db = database.CreateDbContext();
+        var roleA = Guid.NewGuid(); var roleB = Guid.NewGuid(); var permission = Guid.NewGuid();
+        var commerceA = Guid.NewGuid(); var commerceB = Guid.NewGuid();
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "Comercios" ("Id","Nombre") VALUES ({commerceA},'A'),({commerceB},'B');
+            INSERT INTO "Roles" ("Id","Codigo","Nombre","ComercioId","TipoOrganizacion")
+                VALUES ({roleA},'dispatch','Dispatch A',{commerceA},'Comercio'),({roleB},'dispatch','Dispatch B',{commerceB},'Comercio');
+            INSERT INTO "Permisos" ("Id","Codigo","Nombre") VALUES ({permission},'envios.consultar','View shipments');
+            INSERT INTO "RolesPermisos" ("RolId","PermisoId") VALUES ({roleB},{permission});
+            """);
+        var rollback = await Assert.ThrowsAsync<PostgresException>(() => db.GetService<IMigrator>()
+            .MigrateAsync("20261012230124_AddUsuarioPasswordHash"));
         Assert.Contains("explicit consolidation", rollback.MessageText);
-        Assert.Equal(2, await db.Roles.CountAsync(r => r.Codigo != "despachador_operador"));
-        Assert.Equal(1, await db.RolesPermisos.CountAsync());
+        Assert.Equal(2, await db.Database.SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM \"Roles\"").SingleAsync());
+        Assert.Equal(1, await db.Database.SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM \"RolesPermisos\"").SingleAsync());
+        Assert.Equal("20261013010505_NormalizeCu01Initialization", (await db.Database.GetAppliedMigrationsAsync()).Last());
     }
 
     [Fact]

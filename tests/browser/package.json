@@ -1,0 +1,1 @@
+{"name":"nexoruta-integration-browser-checks","private":true,"version":"1.0.0","description":"Controlled Chromium checks only; no production frontend dependency","devDependencies":{"@axe-core/playwright":"4.14.0","playwright":"1.62.1"}}

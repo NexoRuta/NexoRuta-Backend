@@ -1,16 +1,10 @@
 using System.Diagnostics;
-using System.Net;
-using System.Net.Http.Headers;
-using System.Net.Http.Json;
-using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using NexoRuta.Domain.Administracion;
 using NexoRuta.Domain.Envios;
-using NexoRuta.Domain.ReglasOperativas;
 using NexoRuta.IntegrationTests.Fixtures;
-using NexoRuta.IntegrationTests.Seguridad;
 using NexoRuta.Infrastructure.Administracion;
 using NexoRuta.Infrastructure.Envios;
 using Xunit.Abstractions;
@@ -32,71 +26,79 @@ public sealed class EnvioHistoryMigrationTests(PostgresFixture postgres, ITestOu
         Guid canceledShipmentId;
         await using (var db = database.CreateDbContext())
         {
-            // This migration fixture intentionally starts before the history/deadline migrations, but
-            // seeding uses the current EF model. Add the later nullable mappings to this isolated
-            // legacy schema and mark those migrations as applied so the history cutover under test
-            // remains pending. Dedicated tests exercise the deadline migration on a normal upgrade.
-            await db.Database.ExecuteSqlRawAsync("""
-                ALTER TABLE public."VersionesReglasOperativas"
-                    ADD COLUMN "PlazoValidacionPruebaMinutos" integer NULL;
-                ALTER TABLE public."VersionesReglasOperativas"
-                    ADD CONSTRAINT "CK_VersionesReglasOperativas_ProofValidationDeadline"
-                    CHECK ("PlazoValidacionPruebaMinutos" IS NULL OR "PlazoValidacionPruebaMinutos" BETWEEN 1 AND 525600);
-                -- Current API compatibility column exists only while seeding/canceling this legacy fixture.
-                -- It is removed before the real date migration runs.
-                ALTER TABLE public."Envios" ADD COLUMN "CreadoEnUtc" timestamp with time zone NOT NULL DEFAULT now();
-                ALTER TABLE public."Envios"
-                    ADD COLUMN "EntregaFisicaRecibidaEnUtc" timestamp with time zone NULL,
-                    ADD COLUMN "PlazoPruebaVenceEnUtc" timestamp with time zone NULL;
-                ALTER TABLE public."Envios"
-                    ADD CONSTRAINT "CK_Envios_PhysicalDeliveryReceiptTime"
-                        CHECK ("EntregaFisicaRecibidaEnUtc" IS NULL OR "EntregaFisicaEnUtc" IS NOT NULL),
-                    ADD CONSTRAINT "CK_Envios_ProofDeadlineAfterReceipt"
-                        CHECK ("PlazoPruebaVenceEnUtc" IS NULL OR ("EntregaFisicaRecibidaEnUtc" IS NOT NULL
-                            AND "PlazoPruebaVenceEnUtc" > "EntregaFisicaRecibidaEnUtc"));
-                INSERT INTO public."__EFMigrationsHistory" ("MigrationId", "ProductVersion")
-                VALUES ('20261025233714_AddProofValidationDeadline', '10.0.0');
-                INSERT INTO public."__EFMigrationsHistory" ("MigrationId", "ProductVersion")
-                VALUES ('20261025234203_PersistShipmentProofDeadline', '10.0.0');
-                """);
+            // Seed only columns that existed at the cutover predecessor. Never
+            // synthesize future columns or forge the EF migration history.
             await AuthenticationTestData.Seeder(db,
                 new AccesoInicial(commerceEmail, "History operator", "History commerce", "history-operator@example.test"))
                 .SeedAsync();
-            await ReglasEnvioTestData.SembrarInicialesAsync(db);
             var access = await db.AccesosUsuario.SingleAsync(x => x.ComercioId != null);
             operatorId = await db.Operadores.Select(x => x.Id).SingleAsync();
             commerceId = access.ComercioId!.Value;
             userId = access.UsuarioId;
             accessId = access.Id;
-            var ruleVersion = await db.VersionesReglasOperativas.SingleAsync(x => x.OperadorId == operatorId
-                && x.Estado == EstadoVersionReglasOperativas.Publicada);
+            var ruleVersionId = Guid.NewGuid();
+            await using var rulesTransaction = await db.Database.BeginTransactionAsync();
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO public."ReglasOperativasOperador" ("OperadorId","ActualizadoUtc") VALUES ({operatorId},now());
+                INSERT INTO public."VersionesReglasOperativas"
+                    ("OperadorId","Id","Estado","NumeroVersionPublicada","MaxIntentosEntrega",
+                     "IntervaloEntreIntentosMinutos","PoliticaDevolucionAlAgotarIntentos",
+                     "PlazoEstandarMinutos","PlazoUrgenteMinutos","CreadaUtc","CreadaPorUsuarioId",
+                     "PublicadaUtc","PublicadaPorUsuarioId")
+                VALUES ({operatorId},{ruleVersionId},'Borrador',NULL,3,1,'DecisionOperativa',2880,1440,
+                    now(),{userId},NULL,NULL);
+                INSERT INTO public."RequisitosPruebaEntrega" ("OperadorId","VersionId","Tipo")
+                    VALUES ({operatorId},{ruleVersionId},'Fotografia');
+                INSERT INTO public."MotivosNoEntregaVersion" ("OperadorId","VersionId","Codigo","Descripcion","Disponible")
+                    VALUES ({operatorId},{ruleVersionId},'AUSENTE','Ausente',true);
+                UPDATE public."VersionesReglasOperativas" SET "Estado"='Publicada',"NumeroVersionPublicada"=1,
+                    "PublicadaUtc"=now(),"PublicadaPorUsuarioId"={userId}
+                    WHERE "OperadorId"={operatorId} AND "Id"={ruleVersionId};
+                UPDATE public."ReglasOperativasOperador" SET "VersionVigenteId"={ruleVersionId},
+                    "UltimoNumeroPublicacion"=1,"ActualizadoUtc"=now() WHERE "OperadorId"={operatorId};
+                """);
 
+            await rulesTransaction.CommitAsync();
             var shipments = new List<Envio>();
             for (var i = 0; i < shipmentCount; i++)
             {
                 var recipient = new Destinatario(operatorId, $"Recipient {i}", $"recipient-{i}@example.test");
                 var address = new Direccion(operatorId, $"History address {i}");
-                var shipment = new Envio(operatorId, commerceId, userId, recipient.Id, address.Id, ruleVersion.Id);
+                var shipment = new Envio(operatorId, commerceId, userId, recipient.Id, address.Id, ruleVersionId);
                 var parcel = new Bulto(operatorId, shipment.Id, $"HIST-{i:D3}", 500m, 20m, 10m, 5m);
                 db.AddRange(recipient, address);
                 await db.SaveChangesAsync();
-                // Seed the actual legacy columns; the current EF model also maps later shipment timestamps.
-                await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO public.\"Envios\" (\"Id\",\"OperadorId\",\"ComercioId\",\"CreadoPorUsuarioId\",\"DestinatarioId\",\"DireccionId\",\"VersionReglasId\",\"Estado\") VALUES ({shipment.Id},{operatorId},{commerceId},{userId},{recipient.Id},{address.Id},{ruleVersion.Id},'Admitido')");
-                db.Bultos.Add(parcel);
-                await db.SaveChangesAsync();
+                // Use the exact historical shipment columns.
+                await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO public.\"Envios\" (\"Id\",\"OperadorId\",\"ComercioId\",\"CreadoPorUsuarioId\",\"DestinatarioId\",\"DireccionId\",\"VersionReglasId\",\"Estado\") VALUES ({shipment.Id},{operatorId},{commerceId},{userId},{recipient.Id},{address.Id},{ruleVersionId},'Admitido')");
+                await db.Database.ExecuteSqlInterpolatedAsync($"""
+                    INSERT INTO public."Bultos" ("Id","OperadorId","EnvioId","Codigo","PesoGramos",
+                        "LargoCentimetros","AnchoCentimetros","AltoCentimetros")
+                    VALUES ({parcel.Id},{operatorId},{shipment.Id},{parcel.Codigo},500,20,10,5)
+                    """);
                 shipments.Add(shipment);
             }
             await db.SaveChangesAsync();
             canceledShipmentId = shipments[0].Id;
         }
 
-        var runtime = await RlsRestrictedHttpFlowTests.RestrictApiAsync(database);
-        using var api = new IntegrationApiFactory(runtime, settings: RlsRestrictedHttpFlowTests.ApiSettings());
-        using var client = api.CreateHttpClient();
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", await LoginAsync(client, commerceEmail));
-        using (var cancel = await client.PostAsJsonAsync($"/api/envios/{canceledShipmentId}/cancelacion",
-            new { Version = 0, Motivo = "Audit-backed cutover fixture." }))
-            Assert.Equal(HttpStatusCode.OK, cancel.StatusCode);
+        // Invoke the real historical cancellation function with the authenticated
+        // commerce scope. The current API deliberately targets the current schema.
+        await using (var db = database.CreateDbContext())
+        await using (var tx = await db.Database.BeginTransactionAsync())
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                SELECT set_config('nexoruta.actor_kind','comercio',true),
+                    set_config('nexoruta.user_id',{userId.ToString()},true),
+                    set_config('nexoruta.access_id',{accessId.ToString()},true),
+                    set_config('nexoruta.org_id',{commerceId.ToString()},true)
+                """);
+            var auditId = await db.Database.SqlQuery<Guid>($"""
+                SELECT nexoruta_app.cancel_shipment({canceledShipmentId},0::bigint,
+                    'Audit-backed cutover fixture.',{Guid.NewGuid()},{Guid.NewGuid()},{Guid.NewGuid()}) AS "Value"
+                """).SingleAsync();
+            Assert.NotEqual(Guid.Empty, auditId);
+            await tx.CommitAsync();
+        }
 
         int outboxCount;
         Guid cancellationId;
@@ -112,7 +114,6 @@ public sealed class EnvioHistoryMigrationTests(PostgresFixture postgres, ITestOu
         var stopwatch = Stopwatch.StartNew();
         await using (var db = database.CreateDbContext())
         {
-            await db.Database.ExecuteSqlRawAsync("ALTER TABLE public.\"Envios\" DROP COLUMN \"CreadoEnUtc\"");
             await db.GetService<IMigrator>().MigrateAsync();
         }
         stopwatch.Stop();
@@ -139,14 +140,4 @@ public sealed class EnvioHistoryMigrationTests(PostgresFixture postgres, ITestOu
         Assert.Equal(1, await verify.EnvioEventos.CountAsync(x => x.CancelacionEnvioId == cancellationId));
     }
 
-    private static async Task<string> LoginAsync(HttpClient client, string email)
-    {
-        using var response = await client.PostAsJsonAsync("/api/auth/login", new
-        {
-            Email = email,
-            Password = AuthenticationTestData.Password
-        });
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("accessToken").GetString()!;
-    }
 }

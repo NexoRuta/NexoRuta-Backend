@@ -44,7 +44,7 @@ public sealed class SesionWebBrowserTests(PostgresFixture postgres):IClassFixtur
             }
         }
         var restricted=await RlsRestrictedHttpFlowTests.RestrictApiAsync(data);var trace=new ConcurrentQueue<TraceRow>();var decisions=new AuthDecisionCapture();var faults=new Faults(data);
-        var workspace=Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,"../../../../../.."));var apiPort=Port();
+        var workspace=CompanionPortals.WorkspaceRoot;var apiPort=Port();
         IntegrationApiFactory? apiFactory=null;HttpClient? api=null;
         void StartApi()
         {
@@ -61,7 +61,7 @@ public sealed class SesionWebBrowserTests(PostgresFixture postgres):IClassFixtur
         {
             var project=portal=="backoffice"?"NexoRuta.Backoffice":"NexoRuta.Commerce";
             var start=new ProcessStartInfo("dotnet"){WorkingDirectory=Path.Combine(Environment.GetEnvironmentVariable("NEXORUTA_SESSION_PORTAL_ROOT") ?? Path.Combine(workspace,"frontend"),"src",project),RedirectStandardOutput=true,RedirectStandardError=true};
-            start.ArgumentList.Add(Path.Combine(start.WorkingDirectory,"bin/Debug/net10.0",project+".dll"));
+            start.ArgumentList.Add(Path.Combine(start.WorkingDirectory,"bin",CompanionPortals.Configuration,"net10.0",project+".dll"));
             start.Environment["ASPNETCORE_URLS"]=$"http://127.0.0.1:{ports[portal]}/";start.Environment["ASPNETCORE_ENVIRONMENT"]="Development";start.Environment["OpenTelemetry__Enabled"]="false";
             start.Environment["Api__BaseAddress"]=$"http://127.0.0.1:{apiPort}/";start.Environment["ConnectionStrings__DataProtection"]=data.ConnectionString;
             start.Environment["DataProtection__CertificatePath"]=certificatePath;start.Environment["DataProtection__CertificatePassword"]=certificatePassword;

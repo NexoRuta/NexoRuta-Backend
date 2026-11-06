@@ -13,7 +13,7 @@ public sealed class OrganizacionPropiedadMigrationTests(PostgresFixture postgres
     [Fact]
     public async Task UpgradePreservesOnlyUnambiguousLegacyCommerceOwnerEvidence()
     {
-        var database = await postgres.CreateDatabaseAsync();
+        var database = await postgres.CreateDatabaseAsync("20261016045116_AddPlatformRolePermissions");
         await using var db = database.CreateDbContext();
         var migrator = db.GetService<IMigrator>();
         await migrator.MigrateAsync("20261016045116_AddPlatformRolePermissions");

@@ -36,8 +36,8 @@ public sealed class RecepcionDepositoBrowserTests(PostgresFixture postgres):ICla
         var render=new ProcessStartInfo("pdftoppm"){RedirectStandardOutput=true,RedirectStandardError=true};
         foreach(var argument in new[]{"-f","1","-singlefile","-scale-to","1600","-png",Path.Combine(output,"etiqueta.pdf"),Path.Combine(output,"etiqueta")})render.ArgumentList.Add(argument);
         using(var process=Process.Start(render)!){await process.WaitForExitAsync();Assert.True(process.ExitCode==0,await process.StandardError.ReadToEndAsync());}
-        var workspace=Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,"../../../../../.."));
-        var dll=Path.Combine(workspace,"frontend/src/NexoRuta.Backoffice/bin/Debug/net10.0/NexoRuta.Backoffice.dll");Assert.True(File.Exists(dll));
+        var workspace=CompanionPortals.WorkspaceRoot;
+        var dll=Path.Combine(workspace,"frontend", "src", "NexoRuta.Backoffice", "bin", CompanionPortals.Configuration, "net10.0", "NexoRuta.Backoffice.dll");Assert.True(File.Exists(dll));
         var listener=new TcpListener(IPAddress.Loopback,0);listener.Start();var port=((IPEndPoint)listener.LocalEndpoint).Port;listener.Stop();var url=$"http://127.0.0.1:{port}/";
         var start=new ProcessStartInfo("dotnet"){WorkingDirectory=Path.Combine(workspace,"frontend/src/NexoRuta.Backoffice"),RedirectStandardOutput=true,RedirectStandardError=true};start.ArgumentList.Add(dll);
         start.Environment["ASPNETCORE_URLS"]=url;start.Environment["ASPNETCORE_ENVIRONMENT"]="Development";start.Environment["Api__BaseAddress"]=api.BaseAddress!.ToString();start.Environment["OpenTelemetry__Enabled"]="false";start.Environment["DataProtection__KeysDirectory"]=Path.Combine(output,"private-keys");

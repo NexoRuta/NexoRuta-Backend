@@ -127,17 +127,17 @@ public sealed class BasePlanificacionHttpTests(PostgresFixture postgres) : IClas
     public async Task AdditiveMigrationLeavesHistoricalSheetsWithoutInventedBaseOrDeparture()
     {
         var data=await postgres.CreateDatabaseAsync("20261101185119_EnforceFleetOccupationExclusivity");
-        using var factory=data.CreateApiFactory();using var client=factory.CreateHttpClient();
-        await using(var setup=data.CreateDbContext())
+        // Arrange the pre-B3 schema through its existing auth and fleet model;
+        // the current API and operational-rule model require later columns.
+        await using (var setup=data.CreateDbContext())
         {
+            await AuthenticationTestData.Seeder(setup, new NexoRuta.Infrastructure.Administracion.AccesoInicial(
+                "historical-commerce@example.test", "Historical operator", "Historical commerce", "historical-operator@example.test")).SeedAsync();
             var access=await setup.AccesosUsuario.SingleAsync(a=>a.OperadorId!=null);
-            await client.SetBearerForAccessAsync(data,access.Id);
-            using var config=await client.PutAsJsonAsync("/api/reparto/configuracion",Politica());
-            Assert.Equal(HttpStatusCode.OK,config.StatusCode);
-            using var profile=await client.PutAsJsonAsync($"/api/repartidores/{access.Id}",new {Nombre="Historical driver",Activo=true});
-            Assert.Equal(HttpStatusCode.OK,profile.StatusCode);
-            using var vehicle=await client.PutAsJsonAsync("/api/reparto/vehiculos",new {Matricula="HIS1234",PesoMaximoGramos=100000m,VolumenMaximoCm3=1000000m,Activo=true});
-            Assert.Equal(HttpStatusCode.OK,vehicle.StatusCode);
+            setup.Add(new NexoRuta.Domain.Reparto.ConfiguracionReparto(access.OperadorId!.Value,1,"America/Montevideo",30,false,true));
+            setup.Add(new NexoRuta.Domain.Reparto.Repartidor(access.Id,access.OperadorId!.Value,"Historical driver"));
+            setup.Vehiculos.Add(new NexoRuta.Domain.Reparto.Vehiculo(access.OperadorId!.Value,"HIS1234",100000m,1000000m));
+            await setup.SaveChangesAsync();
         }
         await using var db=data.CreateDbContext();var v=await db.Vehiculos.SingleAsync();var id=Guid.NewGuid();var day=new DateOnly(2020,1,2);var jornada=Guid.NewGuid();
         await db.Database.ExecuteSqlInterpolatedAsync($"""

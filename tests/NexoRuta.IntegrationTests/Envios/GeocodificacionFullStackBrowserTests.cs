@@ -59,9 +59,9 @@ public sealed class GeocodificacionFullStackBrowserTests(PostgresFixture postgre
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
             shipment = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
         }
-        var workspace = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../.."));
+        var workspace = CompanionPortals.WorkspaceRoot;
         var contentRoot = Path.Combine(workspace, "frontend/src/NexoRuta.Commerce");
-        var dll = Path.Combine(contentRoot, "bin/Debug/net10.0/NexoRuta.Commerce.dll");
+        var dll = Path.Combine(contentRoot, "bin", CompanionPortals.Configuration, "net10.0", "NexoRuta.Commerce.dll");
         Assert.True(File.Exists(dll), "Build current Commerce before the opt-in full-stack check.");
         var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start();
         var port = ((IPEndPoint)listener.LocalEndpoint).Port; listener.Stop();

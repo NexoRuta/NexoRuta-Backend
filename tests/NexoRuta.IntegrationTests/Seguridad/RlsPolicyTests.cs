@@ -872,7 +872,7 @@ public sealed class RlsPolicyTests(PostgresFixture postgres) : IClassFixture<Pos
     [Fact]
     public async Task DownMigrationRemovesPoliciesAndRestoresPreviousTableOwnership()
     {
-        var database = await postgres.CreateDatabaseAsync();
+        var database = await postgres.CreateDatabaseAsync("20261017201732_EnablePostgreSqlRls");
         await using (var db = database.CreateDbContext())
             await db.Database.MigrateAsync(PreviousMigration);
 

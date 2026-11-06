@@ -12,7 +12,7 @@ public sealed class OrganizationStateMigrationTests(PostgresFixture postgres) : 
     [Fact]
     public async Task UpgradePreservesMembershipAndSetsExistingOrganizationsActive()
     {
-        var database = await postgres.CreateDatabaseAsync();
+        var database = await postgres.CreateDatabaseAsync("20261016202513_UpdateOrganizationNameConcurrency");
         await using var db = database.CreateDbContext();
         var migrator = db.GetService<IMigrator>();
         await migrator.MigrateAsync("20261016202513_UpdateOrganizationNameConcurrency");

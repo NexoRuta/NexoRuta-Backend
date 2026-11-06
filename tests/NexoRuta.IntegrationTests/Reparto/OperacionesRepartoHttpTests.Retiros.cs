@@ -63,7 +63,7 @@ public sealed partial class OperacionesRepartoHttpTests
   Assert.Equal("Aplicada",(await Aplicar(client,hoja,Operacion(Guid.NewGuid(),1,"InicioJornada"))).Resultado);
   var entrega=hoja.Paradas[0];
   Assert.Equal("Aplicada",(await Aplicar(client,hoja,Operacion(Guid.NewGuid(),2,"CargarBulto",entrega.EnvioId,entrega.EnvioVersion,new{BultoId=entrega.Bultos[0].Id}))).Resultado);
-  Assert.Equal("Aplicada",(await Aplicar(client,hoja,Operacion(Guid.NewGuid(),3,"ConfirmarCarga"))).Resultado);
+  Assert.Equal("Aplicada",(await Aplicar(client,hoja,new { Id=Guid.NewGuid(), Secuencia=3, Tipo="ConfirmarCarga", OcurridaEn=DateTimeOffset.UtcNow, Datos=new {} })).Resultado);
   var retiro=hoja.Paradas[1];
   await VerificarRecorridoBultos(data,client,hoja,DateTimeOffset.UtcNow,4,entrega.EnvioId,retiroId);
   if(fallido)

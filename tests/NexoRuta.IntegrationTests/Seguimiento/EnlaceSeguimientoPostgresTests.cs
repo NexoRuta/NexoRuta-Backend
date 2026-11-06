@@ -36,6 +36,9 @@ public sealed class EnlaceSeguimientoPostgresTests(PostgresFixture postgres)
         await using (var db = database.CreateDbContext())
         {
             var envio = await SeguimientoTestData.CreateEnvioAsync(db);
+            db.Bultos.AddRange(new Bulto(envio.OperadorId, envio.Id, "PRIVATE-CODE-A", 500m, 20m, 10m, 5m),
+                new Bulto(envio.OperadorId, envio.Id, "PRIVATE-CODE-B", 500m, 20m, 10m, 5m));
+            await db.SaveChangesAsync();
             token = await SeguimientoTestData.CreateActiveLinkAsync(db, envio);
         }
 
@@ -46,8 +49,15 @@ public sealed class EnlaceSeguimientoPostgresTests(PostgresFixture postgres)
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal(new[] { "estado", "identidad" }, json.RootElement.EnumerateObject().Select(property => property.Name));
+        Assert.Equal(new[] { "estado", "identidad", "totalBultos", "bultosEntregados", "bultosDevueltos", "esRetiro" }, json.RootElement.EnumerateObject().Select(property => property.Name));
         Assert.Equal("Admitido", json.RootElement.GetProperty("estado").GetString());
+        Assert.Equal(2, json.RootElement.GetProperty("totalBultos").GetInt32());
+        Assert.Equal(0, json.RootElement.GetProperty("bultosEntregados").GetInt32());
+        Assert.Equal(0, json.RootElement.GetProperty("bultosDevueltos").GetInt32());
+        Assert.False(json.RootElement.GetProperty("esRetiro").GetBoolean());
+        // Exact allowlist above excludes parcel IDs/codes, reasons, addresses and recipient data.
+        Assert.DoesNotContain("PRIVATE-CODE", json.RootElement.GetRawText());
+
         Assert.Equal("Integration operator", json.RootElement.GetProperty("identidad").GetProperty("nombre").GetString());
         Assert.False(json.RootElement.GetProperty("identidad").TryGetProperty("nombreAdministrativo", out _));
     }
