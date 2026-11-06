@@ -66,15 +66,19 @@ public sealed class OperationalBrowserTests(PostgresFixture postgres, KafkaFixtu
 
         }
         // A manual arrival plus positive service duration is an estimate, never a promised slot.
-        JsonElement estimated = default;
-        for (var attempt = 0; attempt < 30; attempt++)
+        var caughtUp = false;
+        for (var attempt = 0; attempt < 45; attempt++)
         {
-            using var response = await api.GetAsync($"/api/public/seguimiento/{token}", ct);
-            Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync(ct));
-            estimated = await response.Content.ReadFromJsonAsync<JsonElement>(ct);
-            if (estimated.GetProperty("ventanaEstimada").ValueKind == JsonValueKind.Object) break;
+            using var status = await api.GetAsync("/api/operacion/fotografia", ct);
+            Assert.True(status.IsSuccessStatusCode, $"{status.StatusCode}: {await status.Content.ReadAsStringAsync(ct)}");
+            var snapshot = await status.Content.ReadFromJsonAsync<JsonElement>(ct);
+            if (snapshot.GetProperty("estadoProyeccion").GetString() == "Actualizada") { caughtUp = true; break; }
             await Task.Delay(1000, ct);
         }
+        Assert.True(caughtUp, "The private source frontier must catch up before checking the public estimate.");
+        using var estimateResponse = await api.GetAsync($"/api/public/seguimiento/{token}", ct);
+        Assert.True(estimateResponse.IsSuccessStatusCode, $"{estimateResponse.StatusCode}: {await estimateResponse.Content.ReadAsStringAsync(ct)}");
+        var estimated = await estimateResponse.Content.ReadFromJsonAsync<JsonElement>(ct);
         var window = estimated.GetProperty("ventanaEstimada");
         Assert.Equal(JsonValueKind.Object, window.ValueKind);
         Assert.Contains("manual", window.GetProperty("origen").GetString(), StringComparison.OrdinalIgnoreCase);

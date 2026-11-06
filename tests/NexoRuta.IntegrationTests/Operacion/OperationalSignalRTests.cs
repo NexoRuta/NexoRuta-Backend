@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using Xunit.Abstractions;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.AspNetCore.SignalR.Client;
@@ -11,7 +12,7 @@ using NexoRuta.Worker.Messaging;
 namespace NexoRuta.IntegrationTests.Operacion;
 
 [Collection(OperationalInfrastructureCollection.Name)]
-public sealed class OperationalSignalRTests(PostgresFixture postgres) : IClassFixture<PostgresFixture>
+public sealed class OperationalSignalRTests(PostgresFixture postgres, ITestOutputHelper output) : IClassFixture<PostgresFixture>
 {
     [Fact]
     public async Task TwoRealKestrelApisShareTenantScopedPhotographsAndReconnectWithoutRewinding()
@@ -29,13 +30,24 @@ public sealed class OperationalSignalRTests(PostgresFixture postgres) : IClassFi
         await using (var db = database.CreateDbContext()) { var actor = await db.AccesosUsuario.FirstAsync(x => x.OperadorId != null, ct); accessId = actor.Id; op = actor.OperadorId!.Value; }
         await clientA.SetBearerForAccessAsync(database, accessId); await clientB.SetBearerForAccessAsync(database, accessId);
         var token = clientA.DefaultRequestHeaders.Authorization!.Parameter;
-        await using var connectionA = new HubConnectionBuilder().WithUrl(new Uri(clientA.BaseAddress!, "hubs/operacion"), o => o.AccessTokenProvider = () => Task.FromResult(token)).Build();
-        await using var connectionB = new HubConnectionBuilder().WithUrl(new Uri(clientB.BaseAddress!, "hubs/operacion"), o => o.AccessTokenProvider = () => Task.FromResult(token)).Build();
+        await using var proxy = await OperationalWebSocketProxy.StartAsync(clientA.BaseAddress!, clientB.BaseAddress!, ct);
+        await using var connectionA = new HubConnectionBuilder().WithUrl(new Uri(proxy.Address, "hubs/operacion"), o =>
+        {
+            o.AccessTokenProvider = () => Task.FromResult(token);
+            o.SkipNegotiation = true;
+            o.Transports = Microsoft.AspNetCore.Http.Connections.HttpTransportType.WebSockets;
+        }).Build();
+        await using var connectionB = new HubConnectionBuilder().WithUrl(new Uri(proxy.Address, "hubs/operacion"), o =>
+        {
+            o.AccessTokenProvider = () => Task.FromResult(token);
+            o.SkipNegotiation = true;
+            o.Transports = Microsoft.AspNetCore.Http.Connections.HttpTransportType.WebSockets;
+        }).Build();
         var route = Guid.NewGuid(); var now = DateTimeOffset.UtcNow;
         EventoOperativo Position(Guid tenant, long version, DateTimeOffset physical, double latitude) => new(1, Guid.NewGuid(), tenant, null, "Posicion", route, null, route, version, Guid.NewGuid(), physical, DateTimeOffset.UtcNow, JsonSerializer.SerializeToElement(new { latitud = latitude, longitud = -56d, precisionMetros = 10d }));
         var initial = Position(op, 1, now, -34.8); var other = Position(Guid.NewGuid(), 1, now, -31.0);
         await Apply(initial); await Apply(other);
-        await Task.WhenAll(connectionA.StartAsync(ct), connectionB.StartAsync(ct));
+        await connectionA.StartAsync(ct); await connectionB.StartAsync(ct);
         var snapshotA = await Photograph(connectionA, ct); var snapshotB = await Photograph(connectionB, ct);
         Assert.Single(snapshotA.Entidades); Assert.Single(snapshotB.Entidades);
         Assert.Equal(initial.EventId, snapshotA.Entidades[0].EventId); Assert.Equal(snapshotA.Revision, snapshotB.Revision);
@@ -52,12 +64,19 @@ public sealed class OperationalSignalRTests(PostgresFixture postgres) : IClassFi
         await Apply(newer);
         var delayed = Position(op, 3, now.AddMinutes(-2), -35); await Apply(delayed); await Apply(newer);
         var onSecond = await Photograph(connectionB, ct); Assert.Equal(newer.EventId, Assert.Single(onSecond.Entidades).EventId);
+        await first.DisposeAsync(); // The load balancer must retry the surviving API.
         await connectionA.StartAsync(ct);
         var reconnected = await Photograph(connectionA, ct);
         Assert.True(reconnected.Revision > snapshotA.Revision); Assert.Equal(onSecond.Revision, reconnected.Revision);
         Assert.All(reconnected.Entidades, x => Assert.Equal(op, x.OperadorId));
         Assert.Equal(newer.EventId, Assert.Single(reconnected.Entidades).EventId);
-        using var anonymous = new HttpClient { BaseAddress = clientA.BaseAddress };
+        Assert.Contains(clientA.BaseAddress!.Authority, proxy.Selected);
+        Assert.Contains(clientB.BaseAddress!.Authority, proxy.Selected);
+        Assert.True(proxy.Failovers > 0);
+        output.WriteLine(JsonSerializer.Serialize(new { apiInstances = proxy.Selected.Distinct().Count(), failovers = proxy.Failovers,
+            webSocketsWithoutNegotiation = true, reconnectOnSurvivingApi = true, tenantsIsolated = true, outboxLagDetected = true,
+            revision = reconnected.Revision }));
+        using var anonymous = new HttpClient { BaseAddress = clientB.BaseAddress };
         using var denied = await anonymous.PostAsync("/hubs/operacion/negotiate?negotiateVersion=1", null, ct);
         Assert.Equal(System.Net.HttpStatusCode.Unauthorized, denied.StatusCode);
 
