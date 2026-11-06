@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using NexoRuta.Application.Administracion.Context;
@@ -34,7 +35,8 @@ public sealed class DatosDemoSeeder(
     IPermisosUsuarioRepository permisosUsuario,
     IUsuariosOrganizacionRepository usuariosOrganizacion,
     IRolesRepository roles,
-    IZonasCoberturaRepository zonasCobertura)
+    IZonasCoberturaRepository zonasCobertura,
+    UserManager<Usuario> identityUsers)
 {
     private static readonly TimeZoneInfo ZonaHoraria = TimeZoneInfo.FindSystemTimeZoneById("America/Montevideo");
     private static readonly string[] NombresOperadores = [
@@ -54,6 +56,10 @@ public sealed class DatosDemoSeeder(
     private const string CuentaPropietariaCarga = "opt06-fixture-owner@nexoruta.test";
     private const string CuentaComercioCarga = "opt06-fixture-commerce@nexoruta.test";
     private const string CodigoRolCarga = "opt06-load-driver";
+    private const string PasswordActoresDemo = "Demo12345!2026";
+    private static readonly string[] CorreosDespachadores = ["a1@demo.nexoruta.test", "a2@demo.nexoruta.test"];
+    private static readonly string[] CorreosRepartidores = ["r1@demo.nexoruta.test", "r2@demo.nexoruta.test"];
+    private const string CorreoSoloConsulta = "consulta@demo.nexoruta.test";
     private static readonly JsonSerializerOptions JsonOperacion = new(JsonSerializerDefaults.Web);
 
     public async Task<EstadoDatosDemo> ObtenerEstadoAsync(CancellationToken ct)
@@ -74,7 +80,23 @@ public sealed class DatosDemoSeeder(
             "SELECT pg_advisory_xact_lock(hashtextextended('nexoruta:demo-data-seed', 0))", ct);
         var anterior = await db.EjecucionesSeedDemo.AsNoTracking()
             .SingleOrDefaultAsync(x => x.Id == EjecucionSeedDemo.IdentificadorUnico, ct);
-        if (anterior is not null) return (true, EstadoDatosDemo.Desde(anterior));
+        if (anterior is not null)
+        {
+            var operadoresExistentes = new List<OrganizacionDemo>(NombresOperadores.Length);
+            var comerciosExistentes = new List<OrganizacionDemo>(NombresComercios.Length);
+            for (var i = 0; i < NombresOperadores.Length; i++)
+                operadoresExistentes.Add(await ObtenerOrganizacionFixtureAsync(TipoAccesoUsuario.Operador,
+                    $"admin.operador{i + 1}@demo.nexoruta.test", NombresOperadores[i], ct,
+                    requierePropietario: false)
+                    ?? throw new InvalidOperationException("Falta una cuenta de operador del seed demo."));
+            for (var i = 0; i < NombresComercios.Length; i++)
+                comerciosExistentes.Add(await ObtenerOrganizacionFixtureAsync(TipoAccesoUsuario.Comercio,
+                    $"admin.comercio{i + 1}@demo.nexoruta.test", NombresComercios[i], ct,
+                    requierePropietario: false)
+                    ?? throw new InvalidOperationException("Falta una cuenta de comercio del seed demo."));
+            await SincronizarActoresAsync(actor, operadoresExistentes, comerciosExistentes, ct);
+            return (true, EstadoDatosDemo.Desde(anterior));
+        }
 
         var operadores = new List<OrganizacionDemo>(NombresOperadores.Length);
         var comercios = new List<OrganizacionDemo>(NombresComercios.Length);
@@ -90,6 +112,7 @@ public sealed class DatosDemoSeeder(
             comercios.Add(await CrearOrganizacionAsync(TipoAccesoUsuario.Comercio, NombresComercios[i],
                 $"admin.comercio{i + 1}@demo.nexoruta.test", ct));
         }
+        await SincronizarActoresAsync(actor, operadores, comercios, ct);
 
         var instanteActual = DateTimeOffset.UtcNow;
         var fechaLocalHoy = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(instanteActual, ZonaHoraria).DateTime);
@@ -309,13 +332,17 @@ public sealed class DatosDemoSeeder(
     }
 
     private async Task<OrganizacionDemo?> ObtenerOrganizacionFixtureAsync(TipoAccesoUsuario tipo, string email,
-        string nombreFallback, CancellationToken ct)
+        string nombreFallback, CancellationToken ct, bool requierePropietario = true)
     {
         var usuario = await db.Usuarios.AsNoTracking().SingleOrDefaultAsync(x => x.Email == email, ct);
         if (usuario is null) return null;
-        var acceso = await db.AccesosUsuario.AsNoTracking().SingleOrDefaultAsync(x => x.UsuarioId == usuario.Id
-            && x.EsPropietario && x.TipoOrganizacion == tipo, ct)
-            ?? throw new InvalidOperationException("La identidad reservada para el fixture OPT-06 tiene un acceso incompatible.");
+        var accesos = db.AccesosUsuario.AsNoTracking().Where(x => x.UsuarioId == usuario.Id
+            && x.TipoOrganizacion == tipo);
+        if (requierePropietario) accesos = accesos.Where(x => x.EsPropietario);
+        var acceso = await accesos.SingleOrDefaultAsync(ct)
+            ?? throw new InvalidOperationException(requierePropietario
+                ? "La identidad reservada para el fixture OPT-06 tiene un acceso incompatible."
+                : $"La cuenta demo {email} no tiene un acceso compatible con {tipo}.");
         var rol = await db.Roles.AsNoTracking().SingleAsync(x => x.Id == acceso.RolId, ct);
         var nombre = tipo == TipoAccesoUsuario.Operador
             ? await db.Operadores.AsNoTracking().Where(x => x.Id == acceso.OperadorId).Select(x => x.Nombre).SingleAsync(ct)
@@ -448,12 +475,107 @@ public sealed class DatosDemoSeeder(
     private async Task<OrganizacionDemo> CrearOrganizacionAsync(TipoAccesoUsuario tipo, string nombre,
         string email, CancellationToken ct)
     {
-        var alta = await plataforma.CrearAsync(tipo, nombre, email, CrearPasswordAleatoria(), ct);
+        var alta = await plataforma.CrearAsync(tipo, nombre, email, PasswordActoresDemo, ct);
         var operadorId = tipo == TipoAccesoUsuario.Operador ? alta.Organizacion.Id : (Guid?)null;
         var comercioId = tipo == TipoAccesoUsuario.Comercio ? alta.Organizacion.Id : (Guid?)null;
         var contexto = new ContextoUsuario(alta.AccesoId, alta.UsuarioId, operadorId, comercioId, email,
             operadorId is null ? null : nombre, comercioId is null ? null : nombre, alta.RolId, "administrador");
         return new(alta.Organizacion.Id, nombre, email, alta.UsuarioId, alta.AccesoId, alta.RolId, contexto);
+    }
+
+    private async Task SincronizarActoresAsync(ContextoPlataforma actor,
+        IReadOnlyList<OrganizacionDemo> operadores, IReadOnlyList<OrganizacionDemo> comercios, CancellationToken ct)
+    {
+        await db.ApplyAsync(RlsActorContext.From(actor), ct);
+        await FijarPasswordAsync(actor.UsuarioEmail, ct);
+        foreach (var organizacion in operadores.Concat(comercios))
+            await FijarPasswordAsync(organizacion.Email, ct);
+
+        var operadorA = operadores[0];
+        await db.ApplyAsync(RlsActorContext.From(operadorA.Contexto), ct);
+        var rolesOperador = await roles.ListarAsync(operadorA.Contexto, ct);
+        var rolDespachador = rolesOperador.SingleOrDefault(x => x.Codigo == CodigosRolesSistema.DespachadorOperador)
+            ?? throw new InvalidOperationException("Falta el rol de despachador del operador demo A.");
+        var rolRepartidor = await ObtenerOCrearRolDemoAsync(operadorA, "demo-repartidor", "Repartidor demo",
+            ["reparto.ejecutar"], ct);
+        var rolConsulta = await ObtenerOCrearRolDemoAsync(operadorA, "demo-solo-consulta", "Solo consulta",
+            ["envios.consultar"], ct);
+
+        for (var i = 0; i < CorreosDespachadores.Length; i++)
+            await AsegurarActorAsync(operadorA, CorreosDespachadores[i], $"Despachador A{i + 1}",
+                rolDespachador.Id, ct);
+        for (var i = 0; i < CorreosRepartidores.Length; i++)
+        {
+            var email = CorreosRepartidores[i];
+            var accesoId = await AsegurarActorAsync(operadorA, email, $"Repartidor R{i + 1}", rolRepartidor.Id, ct);
+            var existente = (await repartidores.ListarAsync(operadorA.Id, ct))
+                .SingleOrDefault(x => x.AccesoId == accesoId);
+            if (await repartidores.GuardarAsync(operadorA.Id, accesoId, $"Repartidor R{i + 1}", activo: true,
+                existente?.Version, ct) is null)
+                throw new InvalidOperationException($"No se pudo habilitar el perfil de {email}.");
+        }
+        await AsegurarActorAsync(operadorA, CorreoSoloConsulta, "Solo consulta", rolConsulta.Id, ct);
+    }
+
+    private async Task<Rol> ObtenerOCrearRolDemoAsync(OrganizacionDemo operador, string codigo, string nombre,
+        IReadOnlyList<string> permisos, CancellationToken ct)
+    {
+        var existente = (await roles.ListarAsync(operador.Contexto, ct)).SingleOrDefault(x => x.Codigo == codigo);
+        var rol = existente is null
+            ? new Rol(codigo, nombre, operador.Id, null)
+            : await roles.ObtenerAsync(operador.Contexto, existente.Id, ct)
+                ?? throw new InvalidOperationException($"No se pudo cargar el rol demo {codigo}.");
+        if (existente is null) await roles.CrearAsync(rol, ct);
+        if (!await roles.ActualizarPermisosAsync(operador.Contexto, rol.Id, permisos, ct))
+            throw new InvalidOperationException($"No se pudieron actualizar los permisos del rol demo {codigo}.");
+        return rol;
+    }
+
+    private async Task<Guid> AsegurarActorAsync(OrganizacionDemo operador, string email, string nombre,
+        Guid rolId, CancellationToken ct)
+    {
+        await db.ApplyAsync(RlsActorContext.From(operador.Contexto), ct);
+        var usuario = await db.Usuarios.SingleOrDefaultAsync(x => x.Email == email, ct);
+        Guid accesoId;
+        if (usuario is null)
+        {
+            var creado = await new CrearUsuarioUseCase(new UsuarioActualDemo(operador.Contexto), permisosUsuario,
+                usuariosOrganizacion, roles).EjecutarAsync(email, PasswordActoresDemo, rolId, ct);
+            accesoId = creado.AccesoId;
+        }
+        else
+        {
+            var acceso = await db.AccesosUsuario.SingleOrDefaultAsync(x => x.UsuarioId == usuario.Id, ct)
+                ?? throw new InvalidOperationException($"La cuenta {email} no tiene acceso de organización.");
+            if (acceso.OperadorId != operador.Id || acceso.ComercioId is not null || acceso.EsPropietario)
+                throw new InvalidOperationException($"La cuenta {email} ya pertenece a otro ámbito y no se modificó.");
+            if (acceso.RolId != rolId && !await roles.AsignarAsync(operador.Contexto, acceso.Id, rolId,
+                puedeAsignarRolProtegido: true, ct))
+                throw new InvalidOperationException($"No se pudo asignar el rol demo a {email}.");
+            if (!acceso.Activo)
+            {
+                acceso.CambiarEstado(true);
+                await db.SaveChangesAsync(ct);
+            }
+            accesoId = acceso.Id;
+        }
+        await FijarPasswordAsync(email, ct);
+        return accesoId;
+    }
+
+    private async Task FijarPasswordAsync(string email, CancellationToken ct)
+    {
+        var usuario = await db.Usuarios.SingleOrDefaultAsync(x => x.Email == email, ct)
+            ?? throw new InvalidOperationException($"No se encontró la cuenta demo {email}.");
+        if (!string.IsNullOrWhiteSpace(usuario.PasswordHash)
+            && identityUsers.PasswordHasher.VerifyHashedPassword(usuario, usuario.PasswordHash, PasswordActoresDemo)
+                == PasswordVerificationResult.Success)
+            return;
+        usuario.ActualizarPasswordHash(identityUsers.PasswordHasher.HashPassword(usuario, PasswordActoresDemo));
+        usuario.RevocarSesionesPorCambioDePassword();
+        usuario.SecurityStamp = Guid.NewGuid().ToString("N");
+        usuario.ConcurrencyStamp = Guid.NewGuid().ToString("N");
+        await db.SaveChangesAsync(ct);
     }
 
     private async Task PublicarReglasAsync(OrganizacionDemo operador, DateTimeOffset publicadoEn, CancellationToken ct)
