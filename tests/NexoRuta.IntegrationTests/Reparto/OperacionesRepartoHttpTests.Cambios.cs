@@ -12,6 +12,65 @@ using static NexoRuta.IntegrationTests.Fixtures.RepartoHttpData;
 namespace NexoRuta.IntegrationTests.Reparto;
 public sealed partial class OperacionesRepartoHttpTests
 {
+    [Fact]
+    public async Task RejectedPickupResolutionPreservesExistingMessageAndBusinessState()
+    {
+        var data = await postgres.CreateDatabaseAsync();
+        using var factory = data.CreateApiFactory(); using var client = factory.CreateHttpClient();
+        var sheet = await Lista(data, client); var stop = sheet.Paradas.Single();
+        await using var db = data.CreateDbContext();
+        var before = await db.Bultos.AsNoTracking().SingleAsync(x => x.EnvioId == stop.EnvioId);
+        var command = Operacion(Guid.NewGuid(), 1, "RetirarBultos", stop.EnvioId, stop.EnvioVersion,
+            new { ResuelveOperacionId = Guid.NewGuid() });
+        var ack = await Aplicar(client, sheet, command); Assert.Equal("Conflicto", ack.Resultado);
+        var after = await db.Bultos.AsNoTracking().SingleAsync(x => x.Id == before.Id);
+        Assert.Equal(before.Version, after.Version); Assert.Equal(before.Custodia, after.Custodia);
+        Assert.Equal(JsonSerializer.Serialize(ack), JsonSerializer.Serialize(await Aplicar(client, sheet, command)));
+        Assert.Equal("La resolución debe referenciar un retiro rechazado de esta misma visita.", ack.Detalle);
+    }
+
+    [Fact]
+    public async Task DeliveryResolutionUsesNewLinkedCommandPreservesRejectedReceiptAndCannotDeliverAgain()
+    {
+        var data = await postgres.CreateDatabaseAsync();
+        using (var seed = data.CreateApiFactory()) using (seed.CreateHttpClient()) { }
+        var runtime = await RlsRestrictedHttpFlowTests.RestrictApiAsync(data);
+        var settings = RlsRestrictedHttpFlowTests.ApiSettings();
+        settings["Reparto:EvidenciasEncryptionKey"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+        using var factory = new IntegrationApiFactory(runtime, settings: settings); using var client = factory.CreateHttpClient();
+        var ready = await Preparar(data, client); var sheet = await PlanYDespacho(client, ready);
+        var stop = sheet.Paradas.Single(); var parcel = stop.Bultos.Single();
+        Assert.Equal("Aplicada", (await Aplicar(client, sheet, Operacion(Guid.NewGuid(), 1, "InicioJornada"))).Resultado);
+        var load = await Aplicar(client, sheet, Operacion(Guid.NewGuid(), 2, "CargarBulto", stop.EnvioId, stop.EnvioVersion, new { BultoId = parcel.Id }));
+        Assert.Equal("Aplicada", load.Resultado);
+        Assert.Equal("Aplicada", (await Aplicar(client, sheet, Operacion(Guid.NewGuid(), 3, "ConfirmarCarga"))).Resultado);
+        var rejectedId = Guid.NewGuid();
+        var rejected = await Aplicar(client, sheet, Operacion(rejectedId, 4, "EntregaBultos", stop.EnvioId, 0,
+            new { ResultadosBultos = new[] { new { BultoId = parcel.Id, parcel.Version, Entregado = true } } }));
+        Assert.Equal("Conflicto", rejected.Resultado);
+        await using var db = data.CreateDbContext();
+        var original = await db.OperacionesJornada.AsNoTracking().SingleAsync(o => o.Id == rejectedId);
+        var foto = Guid.NewGuid();
+        using var upload = await client.PutAsJsonAsync($"/api/mobile/jornadas/{sheet.JornadaId}/evidencias/{foto}",
+            new { stop.EnvioId, Tipo = "Foto", Contenido = FotoPrueba });
+        Assert.Equal(HttpStatusCode.NoContent, upload.StatusCode);
+        object proof(Guid rejection) => new { ResuelveOperacionId = rejection, FotoId = foto, Nombre = "Receptor sintético",
+            Latitud = -34.9, Longitud = -56.2, PrecisionMetros = 10, PosicionEnUtc = DateTimeOffset.UtcNow,
+            ResultadosBultos = new[] { new { BultoId = parcel.Id, Version = load.VersionesBulto[parcel.Id], Entregado = true } } };
+        Assert.Equal("Conflicto", (await Aplicar(client, sheet, Operacion(Guid.NewGuid(), 5, "EntregaBultos", stop.EnvioId, 0, proof(Guid.NewGuid())))).Resultado);
+        var resolution = Operacion(Guid.NewGuid(), 6, "EntregaBultos", stop.EnvioId, 0, proof(rejectedId));
+        var accepted = await Aplicar(client, sheet, resolution); Assert.Equal("Aplicada", accepted.Resultado);
+        Assert.Equal(JsonSerializer.Serialize(accepted), JsonSerializer.Serialize(await Aplicar(client, sheet, resolution)));
+        var retained = await db.OperacionesJornada.AsNoTracking().SingleAsync(o => o.Id == rejectedId);
+        Assert.Equal(original.Payload, retained.Payload); Assert.Equal(original.Respuesta, retained.Respuesta); Assert.Equal(original.Hash, retained.Hash);
+        var delivered = await db.Bultos.AsNoTracking().SingleAsync(b => b.Id == parcel.Id);
+        Assert.Equal(ResultadoBulto.Entregado, delivered.Resultado); Assert.Equal(EstadoCustodiaBulto.Destinatario, delivered.Custodia);
+        Assert.Equal("Conflicto", (await Aplicar(client, sheet, Operacion(Guid.NewGuid(), 7, "EntregaBultos", stop.EnvioId, 0, proof(rejectedId)))).Resultado);
+        Assert.Equal("Aplicada", (await Aplicar(client, sheet, Operacion(Guid.NewGuid(), 8, "FinJornada"))).Resultado);
+        Assert.Equal("Conflicto", (await Aplicar(client, sheet, Operacion(Guid.NewGuid(), 9, "EntregaBultos", stop.EnvioId, 0, proof(rejectedId)))).Resultado);
+        Assert.Equal(delivered.Version, (await db.Bultos.AsNoTracking().SingleAsync(b => b.Id == parcel.Id)).Version);
+    }
+
     [Theory]
     [InlineData(true, false)]
     [InlineData(false, false)]

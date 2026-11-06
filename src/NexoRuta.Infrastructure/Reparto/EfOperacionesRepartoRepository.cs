@@ -61,9 +61,11 @@ public sealed partial class EfOperacionesRepartoRepository(NexoRutaDbContext db,
             if (datos.ResuelveOperacionId is { } resuelta)
             {
                 var rechazo = await db.OperacionesJornada.AsNoTracking().SingleOrDefaultAsync(x => x.Id == resuelta, ct);
-                Exigir(operacion.Tipo == "RetirarBultos" && rechazo is not null && rechazo.Resultado == "Conflicto"
+                Exigir(operacion.Tipo is "RetirarBultos" or "EntregaBultos" && rechazo is not null && rechazo.Resultado == "Conflicto"
                     && rechazo.Tipo == operacion.Tipo && rechazo.EnvioId == operacion.EnvioId && rechazo.RutaId == hoja.Id
-                    && rechazo.AccesoId == accesoId, "La resolución debe referenciar un retiro rechazado de esta misma visita.");
+                    && rechazo.AccesoId == accesoId, operacion.Tipo == "EntregaBultos"
+                        ? "La resolución debe referenciar una entrega rechazada de esta misma visita."
+                        : "La resolución debe referenciar un retiro rechazado de esta misma visita.");
             }
             detalle = await Ejecutar(hoja, operacion, datos, ct);
         }
