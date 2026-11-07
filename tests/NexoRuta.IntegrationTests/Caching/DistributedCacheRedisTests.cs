@@ -18,12 +18,14 @@ public sealed class DistributedCacheRedisTests
         const string password = "redis-acl-test-only-" + "x7K2p9V4m6N8q3R5";
         using var administrator = await ConnectionMultiplexer.ConnectAsync(redis.ConnectionString + ",allowAdmin=true");
         var server = administrator.GetServer(administrator.GetEndPoints().Single());
-        await server.ExecuteAsync("ACL", "SETUSER", "default", "on", ">" + password,
-            "~nexoruta:acl-test:*", "-@all", "+ping", "+get", "+set", "+del", "+hmget", "+hmset",
+        const string cacheUser = "nexoruta-acl-test";
+        await server.ExecuteAsync("ACL", "SETUSER", cacheUser, "on", ">" + password,
+            "resetkeys", "~nexoruta:acl-test:*", "-@all", "+ping", "+get", "+set", "+del", "+hmget", "+hmset",
             "+hset", "+pexpire", "+eval", "+evalsha", "+client|setname", "+client|setinfo",
             "+info", "+command|info", "+hello", "+echo");
 
         var options = ConfigurationOptions.Parse(redis.ConnectionString);
+        options.User = cacheUser;
         options.Password = password;
         options.AbortOnConnectFail = false;
         options.AllowAdmin = false;
