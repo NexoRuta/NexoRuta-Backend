@@ -21,7 +21,7 @@ public sealed class DistributedCacheRedisTests
         const string cacheUser = "nexoruta-acl-test";
         await server.ExecuteAsync("ACL", "SETUSER", cacheUser, "on", ">" + password,
             "resetkeys", "~nexoruta:acl-test:*", "-@all", "+ping", "+get", "+set", "+del", "+hmget", "+hmset",
-            "+expire",
+            "+unlink", "+expire",
             "+hset", "+pexpire", "+eval", "+evalsha", "+client|setname", "+client|setinfo",
             "+info", "+command|info", "+hello", "+echo");
 
