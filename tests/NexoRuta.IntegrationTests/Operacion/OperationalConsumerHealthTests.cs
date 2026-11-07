@@ -25,7 +25,8 @@ public sealed class OperationalConsumerHealthTests(KafkaFixture kafka) : IClassF
         {
             ["Kafka:BootstrapServers"] = kafka.BootstrapServers,
             ["Operational:Topic"] = topic,
-            ["Operational:Partitions"] = "2"
+            ["Operational:Partitions"] = "2",
+            ["Operational:health-probe:Group"] = "health-probe-" + Guid.NewGuid().ToString("N")
         }).Build();
         using var consumer = new HealthProbe(config);
         await consumer.StartAsync(ct);
@@ -49,6 +50,17 @@ public sealed class OperationalConsumerHealthTests(KafkaFixture kafka) : IClassF
             await consumer.HealthAfterEvent.Task.WaitAsync(TimeSpan.FromSeconds(20), ct);
             Assert.Equal(1, consumer.Projected);
             Assert.All(consumer.Health.Values, sample => Assert.Equal((0L, true), sample));
+            await consumer.StopAsync(ct);
+            using var resumed = new HealthProbe(config);
+            await resumed.StartAsync(ct);
+            try
+            {
+                await resumed.EmptyHealth.Task.WaitAsync(TimeSpan.FromSeconds(20), ct);
+                Assert.Equal(0, resumed.Projected); // Same group resumes its committed end, without replay.
+                Assert.Equal(2, resumed.Health.Count);
+                Assert.All(resumed.Health.Values, sample => Assert.Equal((0L, false), sample));
+            }
+            finally { await resumed.StopAsync(CancellationToken.None); }
         }
         finally { await consumer.StopAsync(CancellationToken.None); }
     }
@@ -60,8 +72,7 @@ public sealed class OperationalConsumerHealthTests(KafkaFixture kafka) : IClassF
         public TaskCompletionSource HealthAfterEvent { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private int projected;
         public int Projected => Volatile.Read(ref projected);
-        protected override string Group => "health-probe-" + groupId;
-        private readonly Guid groupId = Guid.NewGuid();
+        protected override string Group => "health-probe";
         protected override Task ProjectAsync(EventoOperativo value, string payload, CancellationToken ct)
         { Interlocked.Increment(ref projected); return Task.CompletedTask; }
         protected override Task HealthAsync(int partition, int partitions, long lag, CancellationToken ct)

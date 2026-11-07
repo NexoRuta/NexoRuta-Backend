@@ -65,6 +65,10 @@ public abstract class OperationalConsumer(IConfiguration configuration, ILogger 
                         {
                             var watermarks = consumer.QueryWatermarkOffsets(partition, TimeSpan.FromSeconds(3));
                             var position = consumer.Position(partition);
+                            // Restarting an idle group can also leave Position unset;
+                            // its broker-confirmed offset remains the durable frontier.
+                            if (position.Value < 0 && watermarks.High != watermarks.Low)
+                                position = consumer.Committed([partition], TimeSpan.FromSeconds(3)).Single().Offset;
                             // Kafka keeps Position unset until the first record is consumed.
                             // Broker watermarks still prove that an assigned partition is empty.
                             // Unknown position with retained records must remain behind.
