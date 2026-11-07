@@ -213,6 +213,7 @@ builder.Services.AddAuthorization(options =>
 
 builder.Services.AddTrustedProxyHeaders(builder.Configuration);
 builder.Services.AddHostingTelemetry(builder.Configuration, "NexoRuta.Api");
+builder.Services.AddHostedService<DistributedCacheTelemetryInitializer>();
 var rateConnection = builder.Configuration.GetConnectionString("RateLimits");
 NpgsqlDataSource? rateDataSource = string.IsNullOrWhiteSpace(rateConnection) ? null : NpgsqlDataSource.Create(rateConnection);
 if (rateDataSource is not null) builder.Services.AddSingleton(rateDataSource);

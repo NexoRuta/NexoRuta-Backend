@@ -162,8 +162,13 @@ public static class DistributedCacheTelemetry
     private static readonly Histogram<double> OperationDuration = Meter.CreateHistogram<double>(
         "nexoruta.cache.distributed.operation.duration", "s", "Distributed cache backend operation duration.");
 
-    static DistributedCacheTelemetry()
+    private static int initialized;
+
+    public static void InitializeKnownSeries()
     {
+        if (Interlocked.Exchange(ref initialized, 1) != 0)
+            return;
+
         foreach (var cache in new[] { OperatorBranding, PublishedTariff })
         foreach (var result in new[] { "hit", "miss", "error", "bypass", "cancelled" })
             Requests.Add(0, new KeyValuePair<string, object?>("cache", cache),

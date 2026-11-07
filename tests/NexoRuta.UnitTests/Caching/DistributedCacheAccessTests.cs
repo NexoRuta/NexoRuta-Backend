@@ -11,6 +11,38 @@ namespace NexoRuta.UnitTests.Caching;
 public sealed class DistributedCacheAccessTests
 {
     [Fact]
+    public void StartupRegistersZeroSamplesForKnownCacheResultsAndOperationsOnce()
+    {
+        var samples = new ConcurrentBag<MetricSample>();
+        using var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, activeListener) =>
+        {
+            if (instrument.Meter.Name == "NexoRuta.Hosting"
+                && instrument.Name.StartsWith("nexoruta.cache.distributed.", StringComparison.Ordinal))
+                activeListener.EnableMeasurementEvents(instrument);
+        };
+        listener.SetMeasurementEventCallback<long>((instrument, value, tags, _) =>
+            samples.Add(new(instrument.Name, value, tags.ToArray())));
+        listener.SetMeasurementEventCallback<double>((instrument, value, tags, _) =>
+            samples.Add(new(instrument.Name, value, tags.ToArray())));
+        listener.Start();
+
+        DistributedCacheTelemetry.InitializeKnownSeries();
+        DistributedCacheTelemetry.InitializeKnownSeries();
+
+        var requests = samples.Where(sample => sample.Instrument == "nexoruta.cache.distributed.requests").ToArray();
+        var operations = samples.Where(sample => sample.Instrument == "nexoruta.cache.distributed.operations").ToArray();
+        Assert.Equal(10, requests.Length);
+        Assert.Equal(12, operations.Length);
+        Assert.All(requests, sample => Assert.Equal(0, sample.Value));
+        Assert.All(operations, sample => Assert.Equal(0, sample.Value));
+        Assert.Contains(requests, sample => Tag(sample, "cache") == DistributedCacheTelemetry.OperatorBranding
+            && Tag(sample, "result") == "miss");
+        Assert.Contains(requests, sample => Tag(sample, "cache") == DistributedCacheTelemetry.PublishedTariff
+            && Tag(sample, "result") == "hit");
+    }
+
+    [Fact]
     public async Task SnapshotRoundTripsThroughVersionedEnvelopeWithFiniteAbsoluteExpiration()
     {
         var redis = new InMemoryDistributedCache();

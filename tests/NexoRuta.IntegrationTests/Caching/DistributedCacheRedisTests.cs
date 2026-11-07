@@ -12,6 +12,42 @@ namespace NexoRuta.IntegrationTests.Caching;
 public sealed class DistributedCacheRedisTests
 {
     [Fact]
+    public async Task RedisAclAllowsTheDistributedCacheProviderAndRejectsAdministrativeCommands()
+    {
+        await using var redis = await RedisTestServer.CreateAsync();
+        const string password = "redis-acl-test-only-" + "x7K2p9V4m6N8q3R5";
+        using var administrator = await ConnectionMultiplexer.ConnectAsync(redis.ConnectionString + ",allowAdmin=true");
+        var server = administrator.GetServer(administrator.GetEndPoints().Single());
+        await server.ExecuteAsync("ACL", "SETUSER", "default", "on", ">" + password,
+            "~nexoruta:acl-test:*", "-@all", "+ping", "+get", "+set", "+del", "+hmget", "+hmset",
+            "+hset", "+pexpire", "+eval", "+evalsha", "+client|setname", "+client|setinfo",
+            "+info", "+command|info", "+hello", "+echo");
+
+        var options = ConfigurationOptions.Parse(redis.ConnectionString);
+        options.Password = password;
+        options.AbortOnConnectFail = false;
+        options.AllowAdmin = false;
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddStackExchangeRedisCache(configuration => configuration.ConfigurationOptions = options);
+        using var provider = services.BuildServiceProvider();
+        var cache = provider.GetRequiredService<IDistributedCache>();
+        const string key = "nexoruta:acl-test:entry";
+        await cache.SetStringAsync(key, "provider-works", new DistributedCacheEntryOptions
+        {
+            AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(30)
+        });
+
+        Assert.Equal("provider-works", await cache.GetStringAsync(key));
+        await cache.RemoveAsync(key);
+        Assert.Null(await cache.GetStringAsync(key));
+
+        using var restricted = await ConnectionMultiplexer.ConnectAsync(options);
+        await Assert.ThrowsAsync<RedisServerException>(async () =>
+            await restricted.GetDatabase().ExecuteAsync("FLUSHDB"));
+    }
+
+    [Fact]
     public async Task LruEvictedSnapshotIsReportedAsMiss()
     {
         await using var redis = await RedisTestServer.CreateAsync();

@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using OpenTelemetry;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
@@ -99,4 +100,22 @@ public static class HostingTelemetry
                 activity.SetStatus(ActivityStatusCode.Error);
         }
     }
+}
+
+public sealed class DistributedCacheTelemetryInitializer : IHostedLifecycleService
+{
+    public Task StartingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    // StartedAsync runs after every hosted service has started, including the
+    // OpenTelemetry MeterProvider that subscribes to this meter.
+    public Task StartedAsync(CancellationToken cancellationToken)
+    {
+        DistributedCacheTelemetry.InitializeKnownSeries();
+        return Task.CompletedTask;
+    }
+
+    public Task StoppingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    public Task StoppedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
