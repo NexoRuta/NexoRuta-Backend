@@ -78,10 +78,10 @@ public sealed class OperationalProjectionTests(PostgresFixture postgres, KafkaFi
         Assert.Equal(expected, await db.Database.SqlQueryRaw<int>("SELECT count(*)::integer AS \"Value\" FROM public.\"OperacionEventosProcesados\"").SingleAsync(ct));
         var eventJson = await db.Database.SqlQuery<string>($"SELECT \"Evento\"::text AS \"Value\" FROM public.\"OperacionProyeccion\" WHERE \"OperadorId\"={opA} AND \"Tipo\"='Posicion'").SingleAsync(ct);
         Assert.Equal(latest.EventId, JsonSerializer.Deserialize<EventoOperativo>(eventJson, OperationalConsumer.Json)!.EventId);
-        var store = new OperationalMongoStore(firstMongo);
+        var store = new OperationalMongoStore(firstMongo, TimeProvider.System);
         var history = await store.QueryAsync(opA, null, null, "Posicion", now.AddDays(-1), now.AddDays(1), 0, 100, ct);
         Assert.Equal(3, history.Count); // older physical position is preserved in history, never overwrites current.
-        Assert.All(history, x => Assert.Equal(opA, JsonSerializer.Deserialize<EventoOperativo>(x, OperationalConsumer.Json)!.OperadorId));
+        Assert.All(history, x => Assert.Equal(opA, x.OperadorId));
         var currentShipment = await db.Database.SqlQuery<string>($"SELECT \"Evento\"::text AS \"Value\" FROM public.\"OperacionProyeccion\" WHERE \"OperadorId\"={opA} AND \"Tipo\"='Envio'").SingleAsync(ct);
         Assert.Equal(partial.EventId,JsonSerializer.Deserialize<EventoOperativo>(currentShipment,OperationalConsumer.Json)!.EventId);
         Assert.Equal(9,stateA.Length);
@@ -103,7 +103,7 @@ public sealed class OperationalProjectionTests(PostgresFixture postgres, KafkaFi
         using var board = new OperationalBoardConsumer(config, provider.GetRequiredService<IServiceScopeFactory>(), NullLogger<OperationalBoardConsumer>.Instance);
         var recoveryExpected = recover is not null;
         var historyLog = new HistoryFailureLogger();
-        using var history = new OperationalHistoryConsumer(config, new OperationalMongoStore(mongo), provider.GetRequiredService<IServiceScopeFactory>(), historyLog);
+        using var history = new OperationalHistoryConsumer(config, new OperationalMongoStore(mongo, TimeProvider.System), provider.GetRequiredService<IServiceScopeFactory>(), historyLog);
         await board.StartAsync(ct);
         await history.StartAsync(ct);
         try

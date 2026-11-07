@@ -127,7 +127,7 @@ public sealed class OperationalHistoryConsumer(IConfiguration configuration, Ope
     }
     protected override async Task ProjectAsync(EventoOperativo value, string payload, CancellationToken ct)
     {
-        await store.InsertAsync(value, payload, ct);
+        await store.InsertAsync(value, ct);
         await using var scope = scopes.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<NexoRutaDbContext>();
         await db.Database.ExecuteSqlInterpolatedAsync($"SELECT nexoruta_app.ack_operational_document({value.EventId},{value.OperadorId})", ct);

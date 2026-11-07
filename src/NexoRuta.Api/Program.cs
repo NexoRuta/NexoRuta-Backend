@@ -21,6 +21,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
 using NexoRuta.Infrastructure.Administracion.Autenticacion;
 using NexoRuta.Infrastructure.ZonasCobertura;
+using NexoRuta.Infrastructure.Operacion;
 var platformCommand = args.FirstOrDefault() == "platform-admin";
 if (platformCommand && !args.SequenceEqual(["platform-admin", "create"]))
 {
@@ -83,14 +84,8 @@ builder.Services.AddOptions<PasswordRecoveryOptions>()
         && string.IsNullOrEmpty(url.UserInfo) && string.IsNullOrEmpty(url.Query) && string.IsNullOrEmpty(url.Fragment),
         "Password recovery requires an absolute trusted HTTPS reset page URL (HTTP only in Development) and a token lifespan under one hour.")
     .ValidateOnStart();
-builder.Services.AddScoped<NexoRuta.Infrastructure.Operacion.OperationalReadStore>();
-if (builder.Configuration["MongoDB:ConnectionString"] is { Length: > 0 } operationalMongo
-    && builder.Configuration["MongoDB:Database"] is { Length: > 0 } operationalDatabase)
-{
-    builder.Services.AddSingleton<MongoDB.Driver.IMongoClient>(_ => new MongoDB.Driver.MongoClient(operationalMongo));
-    builder.Services.AddSingleton(sp => sp.GetRequiredService<MongoDB.Driver.IMongoClient>().GetDatabase(operationalDatabase));
-    builder.Services.AddSingleton<NexoRuta.Infrastructure.Operacion.OperationalMongoStore>();
-}
+builder.Services.AddScoped<OperationalReadStore>();
+builder.Services.AddOperationalHistory(builder.Configuration);
 builder.Services.AddSignalR(options => options.MaximumParallelInvocationsPerClient = 1);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IUsuarioActual, UsuarioActualHttp>();

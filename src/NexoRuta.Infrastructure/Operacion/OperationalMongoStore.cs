@@ -2,15 +2,17 @@ using System.Text.Json;
 using MongoDB.Bson;
 using MongoDB.Driver;
 using NexoRuta.Application.Operacion;
+using NexoRuta.Application.Operacion.Exceptions;
+using NexoRuta.Application.Operacion.Repositories;
 
 namespace NexoRuta.Infrastructure.Operacion;
 
-public sealed class OperationalMongoStore(IMongoDatabase database)
+public sealed class OperationalMongoStore(IMongoDatabase database, TimeProvider clock) : IHistorialOperativoRepository
 {
     public const string CollectionName = "operational_history_v1";
-    public const int RetentionDays = 90;
     private readonly SemaphoreSlim initialization = new(1, 1);
     private bool initialized;
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private IMongoCollection<BsonDocument> Collection => database.GetCollection<BsonDocument>(CollectionName).WithReadPreference(ReadPreference.Primary).WithWriteConcern(WriteConcern.WMajority);
 
     public async Task InitializeAsync(CancellationToken ct)
@@ -32,10 +34,11 @@ public sealed class OperationalMongoStore(IMongoDatabase database)
         finally { initialization.Release(); }
     }
 
-    public async Task InsertAsync(EventoOperativo value, string payload, CancellationToken ct)
+    public async Task InsertAsync(EventoOperativo value, CancellationToken ct)
     {
         value.Validar();
         await InitializeAsync(ct);
+        var payload = JsonSerializer.Serialize(value, Json);
         // TTL is anchored to original recording, so replay never extends retention.
         var doc = new BsonDocument
         {
@@ -48,7 +51,7 @@ public sealed class OperationalMongoStore(IMongoDatabase database)
             ["correlacionId"] = value.CorrelacionId.ToString("D"),
             ["registradaEnUtc"] = value.RegistradaEnUtc.UtcDateTime,
             ["ocurridaEnUtc"] = value.OcurridaEnUtc is { } physical ? physical.UtcDateTime : BsonNull.Value,
-            ["expiresAt"] = value.RegistradaEnUtc.UtcDateTime.AddDays(RetentionDays),
+            ["expiresAt"] = value.RegistradaEnUtc.UtcDateTime.AddDays(PoliticaHistorialOperativo.RetencionDias),
             ["payload"] = BsonDocument.Parse(payload)
         };
         try { await Collection.InsertOneAsync(doc, cancellationToken: ct); }
@@ -60,7 +63,8 @@ public sealed class OperationalMongoStore(IMongoDatabase database)
             var format = new MongoDB.Bson.IO.JsonWriterSettings { OutputMode = MongoDB.Bson.IO.JsonOutputMode.RelaxedExtendedJson };
             using var previous = JsonDocument.Parse(existing["payload"].ToJson(format));
             using var incoming = JsonDocument.Parse(doc["payload"].ToJson(format));
-            if (!JsonElement.DeepEquals(previous.RootElement, incoming.RootElement))
+            if (!JsonElement.DeepEquals(previous.RootElement, incoming.RootElement)
+                || !SameMetadata(existing, doc))
                 throw new InvalidDataException("Event identity reused with different content.");
         }
     }
@@ -70,36 +74,62 @@ public sealed class OperationalMongoStore(IMongoDatabase database)
     {
         if (operatorId == Guid.Empty || commerceId == Guid.Empty || from >= to || to - from > TimeSpan.FromDays(31))
             throw new ArgumentException("Analytics require a tenant and a range of at most 31 days.");
+        var now = clock.GetUtcNow();
         var filter = new BsonDocument
         {
             ["operadorId"] = operatorId.ToString("D"),
             ["registradaEnUtc"] = new BsonDocument { ["$gte"] = from.UtcDateTime, ["$lt"] = to.UtcDateTime },
-            ["expiresAt"] = new BsonDocument("$gt", DateTime.UtcNow)
+            ["expiresAt"] = new BsonDocument("$gt", now.UtcDateTime)
         };
         if (commerceId is { } commerce) filter["comercioId"] = commerce.ToString("D");
-        var groups = await Collection.Aggregate(new AggregateOptions { MaxTime = TimeSpan.FromSeconds(3) })
-            .Match(filter).Group(new BsonDocument { ["_id"] = "$tipo", ["eventos"] = new BsonDocument("$sum", 1) })
-            .Sort(new BsonDocument("_id", 1)).ToListAsync(ct);
-        return groups.ToDictionary(x => x["_id"].AsString, x => x["eventos"].ToInt64());
+        try
+        {
+            var groups = await Collection.Aggregate(new AggregateOptions { MaxTime = TimeSpan.FromSeconds(3) })
+                .Match(filter).Group(new BsonDocument { ["_id"] = "$tipo", ["eventos"] = new BsonDocument("$sum", 1) })
+                .Sort(new BsonDocument("_id", 1)).ToListAsync(ct);
+            return groups.ToDictionary(x => x["_id"].AsString, x => x["eventos"].ToInt64());
+        }
+        catch (Exception error) when (error is MongoException or TimeoutException)
+        { throw new HistorialOperativoNoDisponibleException(innerException: error); }
     }
 
-    public async Task<IReadOnlyList<string>> QueryAsync(Guid operatorId, Guid? commerceId, Guid? shipmentId,
+    public async Task<IReadOnlyList<EventoOperativo>> QueryAsync(Guid operatorId, Guid? commerceId, Guid? shipmentId,
         string? type, DateTimeOffset from, DateTimeOffset to, int offset, int limit, CancellationToken ct)
     {
         if (operatorId == Guid.Empty || commerceId == Guid.Empty || shipmentId == Guid.Empty || limit is < 1 or > 100
             || offset is < 0 or > 10000 || from >= to || to - from > TimeSpan.FromDays(31))
             throw new ArgumentException("History queries require a tenant, 1-100 rows, offset <=10000 and a range of at most 31 days.");
+        var now = clock.GetUtcNow();
         var filter = new BsonDocument
         {
             ["operadorId"] = operatorId.ToString("D"),
             ["registradaEnUtc"] = new BsonDocument { ["$gte"] = from.UtcDateTime, ["$lt"] = to.UtcDateTime },
-            ["expiresAt"] = new BsonDocument("$gt", DateTime.UtcNow)
+            ["expiresAt"] = new BsonDocument("$gt", now.UtcDateTime)
         };
         if (commerceId is { } commerce) filter["comercioId"] = commerce.ToString("D");
         if (shipmentId is { } shipment) filter["envioId"] = shipment.ToString("D");
         if (type is not null) filter["tipo"] = type;
-        var docs = await Collection.Find(filter, new FindOptions { MaxTime = TimeSpan.FromSeconds(3) })
-            .Sort(new BsonDocument { ["registradaEnUtc"] = -1, ["_id"] = -1 }).Skip(offset).Limit(limit).ToListAsync(ct);
-        return docs.Select(x => x["payload"].ToJson(new MongoDB.Bson.IO.JsonWriterSettings { OutputMode = MongoDB.Bson.IO.JsonOutputMode.RelaxedExtendedJson })).ToArray();
+        try
+        {
+            var docs = await Collection.Find(filter, new FindOptions { MaxTime = TimeSpan.FromSeconds(3) })
+                .Sort(new BsonDocument { ["registradaEnUtc"] = -1, ["_id"] = -1 }).Skip(offset).Limit(limit).ToListAsync(ct);
+            return docs.Select(x => JsonSerializer.Deserialize<EventoOperativo>(x["payload"].ToJson(
+                new MongoDB.Bson.IO.JsonWriterSettings { OutputMode = MongoDB.Bson.IO.JsonOutputMode.RelaxedExtendedJson }), Json)
+                ?? throw new InvalidDataException("Stored operational event is empty.")).ToArray();
+        }
+        catch (Exception error) when (error is MongoException or TimeoutException)
+        { throw new HistorialOperativoNoDisponibleException(innerException: error); }
     }
+
+    private static bool SameMetadata(BsonDocument existing, BsonDocument incoming)
+        => existing["_id"] == incoming["_id"]
+           && existing["operadorId"] == incoming["operadorId"]
+           && existing["comercioId"] == incoming["comercioId"]
+           && existing["envioId"] == incoming["envioId"]
+           && existing["tipo"] == incoming["tipo"]
+           && existing["version"] == incoming["version"]
+           && existing["correlacionId"] == incoming["correlacionId"]
+           && existing["registradaEnUtc"] == incoming["registradaEnUtc"]
+           && existing["ocurridaEnUtc"] == incoming["ocurridaEnUtc"]
+           && existing["expiresAt"] == incoming["expiresAt"];
 }

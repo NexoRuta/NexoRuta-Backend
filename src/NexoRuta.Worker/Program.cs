@@ -106,7 +106,8 @@ else
         ?? throw new InvalidOperationException("MongoDB connection string is required.");
     var mongoDatabase = builder.Configuration[WorkerConfigurationKeys.MongoDatabase]
         ?? throw new InvalidOperationException("MongoDB database name is required.");
-    builder.Services.AddSingleton<IMongoClient>(_ => new MongoClient(mongoConnection));
+    var mongoSettings = NexoRuta.Infrastructure.Operacion.OperationalMongoClientSettings.Create(mongoConnection);
+    builder.Services.AddSingleton<IMongoClient>(_ => new MongoClient(mongoSettings));
     builder.Services.AddSingleton(provider => provider.GetRequiredService<IMongoClient>().GetDatabase(mongoDatabase));
     builder.Services.AddSingleton<PasswordRecoveryMongoStore>();
     builder.Services.AddHostedService<PasswordRecoveryMongoConsumer>();
