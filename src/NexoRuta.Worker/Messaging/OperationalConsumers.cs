@@ -65,9 +65,18 @@ public abstract class OperationalConsumer(IConfiguration configuration, ILogger 
                         {
                             var watermarks = consumer.QueryWatermarkOffsets(partition, TimeSpan.FromSeconds(3));
                             var position = consumer.Position(partition);
-                            if (position.Value >= 0)
-                                await HealthAsync(partition.Partition.Value, configuration.GetValue("Operational:Partitions", 3),
-                                    Math.Max(0, watermarks.High.Value - position.Value), ct);
+                            // Restarting an idle group can also leave Position unset;
+                            // its broker-confirmed offset remains the durable frontier.
+                            if (position.Value < 0 && watermarks.High != watermarks.Low)
+                                position = consumer.Committed([partition], TimeSpan.FromSeconds(3)).Single().Offset;
+                            // Kafka keeps Position unset until the first record is consumed.
+                            // Broker watermarks still prove that an assigned partition is empty.
+                            // Unknown position with retained records must remain behind.
+                            var lag = position.Value >= 0
+                                ? Math.Max(0, watermarks.High.Value - position.Value)
+                                : watermarks.High == watermarks.Low ? 0
+                                : Math.Max(1, watermarks.High.Value - watermarks.Low.Value);
+                            await HealthAsync(partition.Partition.Value, configuration.GetValue("Operational:Partitions", 3), lag, ct);
                         }
                         lastHealth = DateTimeOffset.UtcNow;
                     }
