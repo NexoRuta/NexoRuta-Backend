@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using NexoRuta.Application.Administracion.Context;
 using NexoRuta.Application.Administracion.Repositories;
 using NexoRuta.Infrastructure.Persistence;
@@ -41,7 +42,9 @@ public sealed class RlsTransactionMiddleware(RequestDelegate next)
             return;
         }
 
-        await using var transaction = await db.Database.BeginTransactionAsync(httpContext.RequestAborted);
+        await using var transaction = await db.Database.BeginTransactionAsync(
+            HttpMethods.IsGet(httpContext.Request.Method) && httpContext.Request.Path.StartsWithSegments("/api/gestion")
+                ? System.Data.IsolationLevel.RepeatableRead : System.Data.IsolationLevel.ReadCommitted, httpContext.RequestAborted);
         var originalBody = httpContext.Response.Body;
         // ponytail: endpoints return finite JSON; spill to disk if streaming is introduced.
         await using var bufferedResponse = new MemoryStream();

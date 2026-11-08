@@ -90,6 +90,7 @@ jobs:
       NEXORUTA_GEOCODING_FULLSTACK_DIR: ${{ github.workspace }}/backend/artifacts/browser/geocoding
       NEXORUTA_VEHICLES_E2E_DIR: ${{ github.workspace }}/backend/artifacts/browser/vehicles
       NEXORUTA_SESSION_E2E_DIR: ${{ github.workspace }}/backend/artifacts/browser/session
+      NEXORUTA_GESTION_E2E_DIR: ${{ github.workspace }}/backend/artifacts/browser/management
     timeout-minutes: 35
     strategy:
       fail-fast: false
@@ -103,7 +104,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: NexoRuta/NexoRuta-Frontend
-          ref: 7ce3e969924e1157d2eaa80b5c933bea9560f5b0
+          ref: fa94588955c9de877190b411ae6543fd4c3e9b98
           path: frontend
           token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
