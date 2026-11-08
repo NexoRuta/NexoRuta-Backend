@@ -154,5 +154,5 @@ DO $m$ DECLARE t text; BEGIN FOREACH t IN ARRAY ARRAY['LiquidacionLineas','Cargo
  FOREACH t IN ARRAY ARRAY['Liquidaciones','LiquidacionLineas','CargosLiquidados','LiquidacionTransiciones','CorreccionesCuenta','MovimientosCuenta'] LOOP EXECUTE format('ALTER %s public.%I OWNER TO nexoruta_schema_owner',CASE WHEN t='MovimientosCuenta' THEN 'VIEW' ELSE 'TABLE' END,t); END LOOP;
 END $m$;
 """);
-    protected override void Down(MigrationBuilder m) => throw new NotSupportedException("Economic documents and corrections must remain immutable.");
+    protected override void Down(MigrationBuilder m) => throw new NotSupportedException("Economic documents, corrections and accepted physical results must remain immutable.");
 }

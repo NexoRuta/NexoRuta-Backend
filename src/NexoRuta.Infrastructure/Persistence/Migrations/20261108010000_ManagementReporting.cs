@@ -151,5 +151,5 @@ REVOKE ALL ON FUNCTION nexoruta_app.management_compliance(timestamptz,timestampt
 GRANT EXECUTE ON FUNCTION nexoruta_app.management_compliance(timestamptz,timestamptz,boolean,boolean,boolean) TO nexoruta_api;
 DO $m$ DECLARE t text; BEGIN FOREACH t IN ARRAY ARRAY['GestionPendientes','GestionOperaciones','GestionBultos','GestionMotivos'] LOOP EXECUTE format('ALTER TABLE public.%I OWNER TO nexoruta_schema_owner',t); END LOOP; END $m$;
 """);
-    protected override void Down(MigrationBuilder m) => throw new NotSupportedException("Reconcile derived reports without deleting accepted facts.");
+    protected override void Down(MigrationBuilder m) => throw new NotSupportedException("Reconcile derived reports without deleting accepted physical results.");
 }
