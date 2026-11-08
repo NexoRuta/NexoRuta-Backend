@@ -30,7 +30,7 @@ public sealed class WebhooksHttpTests(PostgresFixture postgres):IClassFixture<Po
         Assert.Equal(v1.EventoId,v2.EventoId);Assert.Equal(shipment,v2.EnvioId);
         Assert.Equal(new[]{"comercioId","envioId","estado","operadorId"},JsonDocument.Parse(v1.Payload).RootElement.EnumerateObject().Select(x=>x.Name).Order());
         Assert.DoesNotContain("destinatario",v2.Payload,StringComparison.OrdinalIgnoreCase);Assert.DoesNotContain("token",v2.Payload,StringComparison.OrdinalIgnoreCase);
-        using(var update=await client.PutAsJsonAsync($"/api/webhooks/suscripciones/{sub.Id}",new SaveWebhook(op,Receiver, ["OperacionActualizada"],2,false,sub.Revision,Secret))) Assert.Equal(HttpStatusCode.OK,update.StatusCode);
+        using(var update=await client.PutAsJsonAsync($"/api/webhooks/suscripciones/{sub.Id}",new SaveWebhook(op,Receiver, ["OperacionActualizada"],2,false,sub.Revision,"whsec_"+Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))))) Assert.Equal(HttpStatusCode.OK,update.StatusCode);
         using(var conflict=await client.PutAsJsonAsync($"/api/webhooks/suscripciones/{sub.Id}",new SaveWebhook(op,Receiver,["EnvioCreado"],2,true,sub.Revision,null))) Assert.Equal(HttpStatusCode.Conflict,conflict.StatusCode);
         Assert.Equal(v2.Payload,(await store.Deliveries.SingleAsync(d=>d.Id==v2.Id)).Payload);Assert.Equal(1,(await store.Deliveries.SingleAsync(d=>d.Id==v2.Id)).Revision);
         using var listing=await client.GetAsync("/api/webhooks/suscripciones");var text=await listing.Content.ReadAsStringAsync();Assert.DoesNotContain(Secret,text);Assert.DoesNotContain("secretoProtegido",text,StringComparison.OrdinalIgnoreCase);
@@ -106,6 +106,7 @@ public sealed class WebhooksHttpTests(PostgresFixture postgres):IClassFixture<Po
         var delivery=await new WebhookStore(owner).Deliveries.SingleAsync(d=>d.Estado=="Cancelado");
         using var replay=await client.PostAsJsonAsync($"/api/webhooks/entregas/{delivery.Id}/reenvios",new{});Assert.Equal(HttpStatusCode.Conflict,replay.StatusCode);
         using var staleKey=await client.PutAsJsonAsync($"/api/webhooks/suscripciones/{subscription.Id}",new SaveWebhook(op,Receiver,["EnvioCreado"],2,true,row.Revision,null));Assert.Equal(HttpStatusCode.BadRequest,staleKey.StatusCode);
+        using var reused=await client.PutAsJsonAsync($"/api/webhooks/suscripciones/{subscription.Id}",new SaveWebhook(op,Receiver,["EnvioCreado"],2,true,row.Revision,Secret));Assert.Equal(HttpStatusCode.BadRequest,reused.StatusCode);
         using var enabled=await client.PutAsJsonAsync($"/api/webhooks/suscripciones/{subscription.Id}",new SaveWebhook(op,Receiver,["EnvioCreado"],2,true,row.Revision,"whsec_"+Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))));Assert.Equal(HttpStatusCode.OK,enabled.StatusCode);
         using var oldReplay=await client.PostAsJsonAsync($"/api/webhooks/entregas/{old.Id}/reenvios",new{});Assert.Equal(HttpStatusCode.Conflict,oldReplay.StatusCode);
         await Create(client,op);Assert.Equal(1,await new WebhookStore(owner).Deliveries.CountAsync(d=>d.Estado=="Pendiente"));

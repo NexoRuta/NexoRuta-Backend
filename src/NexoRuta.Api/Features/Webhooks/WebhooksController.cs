@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -32,6 +33,13 @@ public sealed class WebhooksController(NexoRutaDbContext db, WebhookStore store,
             if(existing is not null && (existing.OperadorId!=command.OperadorId || existing.ComercioId!=commerce)) return NotFound();
             if(existing is null && command.Revision!=0) return NotFound();
             if(existing is not null && existing.Revision!=command.Revision) return Problem("La suscripción cambió. Recargá antes de guardar.",statusCode:409);
+            if(existing is not null && !string.IsNullOrWhiteSpace(command.Secreto))
+            {
+                var encrypted=await db.Database.SqlQuery<string>($"""SELECT "SecretoProtegido" AS "Value" FROM public."WebhookSubscriptions" WHERE "Id"={id}""").SingleAsync(ct);
+                var oldKey=WebhookSecrets.Validate(secrets.Unprotect(encrypted));var newKey=WebhookSecrets.Validate(command.Secreto);
+                try{if(CryptographicOperations.FixedTimeEquals(oldKey,newKey))return Problem("La nueva clave debe ser distinta de la anterior.",statusCode:400);}
+                finally{CryptographicOperations.ZeroMemory(oldKey);CryptographicOperations.ZeroMemory(newKey);}
+            }
             var protectedSecret=string.IsNullOrWhiteSpace(command.Secreto) ? null : secrets.Protect(command.Secreto);
             if(existing is null && protectedSecret is null) return Problem("Ingresá la clave compartida del receptor.",statusCode:400);
             if(existing?.Revocada==true && command.Habilitada && protectedSecret is null) return Problem("Ingresá una nueva clave para habilitar una suscripción revocada.",statusCode:400);
