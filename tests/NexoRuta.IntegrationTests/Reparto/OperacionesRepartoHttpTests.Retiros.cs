@@ -29,6 +29,8 @@ public sealed partial class OperacionesRepartoHttpTests
   var runtime=await RlsRestrictedHttpFlowTests.RestrictApiAsync(data);
   var settings=RlsRestrictedHttpFlowTests.ApiSettings(); settings["Reparto:EvidenciasEncryptionKey"]=Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
   settings["RoutingGeoapify:PermitirLlamadasReales"]="true";settings["RoutingGeoapify:ApiKey"]="SYNTHETIC-NOT-A-CREDENTIAL";
+  await using var webhook=NexoRuta.IntegrationTests.Webhooks.WebhookAssay.Enabled && !fallido && cantidad==1 ? new NexoRuta.IntegrationTests.Webhooks.WebhookAssay() : null;
+  webhook?.Configure(settings);
   using var factory=new IntegrationApiFactory(runtime,settings:settings);
   using var host=factory.WithWebHostBuilder(b=>b.ConfigureTestServices(s=>s.AddHttpClient("RoutingGeoapify").ConfigurePrimaryHttpMessageHandler(()=>new RoutingBultosControlado())));
   using var client=host.CreateClient();
@@ -43,6 +45,7 @@ public sealed partial class OperacionesRepartoHttpTests
    v.Publicar(v.VersionConcurrencia,root.UltimoNumeroPublicacion+1,op.UsuarioId,new HashSet<Guid>{op.OperadorId.Value});await db.SaveChangesAsync();root.Publicar(v);await db.SaveChangesAsync();await tx.CommitAsync();
   }
   await client.SetBearerForAccessAsync(data,comercio.Id);
+  if(webhook is not null) await webhook.Subscribe(data,client);
   var llegada=DateTimeOffset.UtcNow.AddMinutes(15);
   var solicitud=new CrearEnvioRequest { OperadorId=op.OperadorId,DestinatarioNombre="Comprador sintético",DestinatarioEmail="comprador@example.test",Direccion="Domicilio sintético 123",
    Servicio=ServiciosEnvioTestData.Declarar(op.OperadorId),Retiro=new(){SolicitudId=Guid.NewGuid(),Motivo="Cambio de producto",DesdeUtc=DateTimeOffset.UtcNow.AddMinutes(1),HastaUtc=DateTimeOffset.UtcNow.AddDays(2)},
@@ -108,6 +111,7 @@ public sealed partial class OperacionesRepartoHttpTests
   Assert.All(await db.Bultos.AsNoTracking().Where(b=>b.EnvioId==retiroId).ToArrayAsync(),b=>Assert.Equal(EstadoCustodiaBulto.Comercio,b.Custodia));
   await CheckPublic("EntregadoComercio", "EntregadoComercio", true);
   Assert.Equal(cantidad,await db.PruebasEntrega.CountAsync(p=>p.EnvioId==retiroId)); Assert.All(await db.PruebasEntrega.Where(p=>p.EnvioId==retiroId).ToArrayAsync(),p=>Assert.Equal(foto,p.FotoId));
+  if(webhook is not null) await webhook.DeliverAndAssert(data,"pickup","RetiroSolicitado","RetiroRetirado","RetiroEntregadoComercio");
   async Task CheckPublic(string expectedState, string parcelState, bool completed = false)
   {
    var view = await publicClient.GetFromJsonAsync<JsonElement>($"/api/public/seguimiento/{publicToken}");

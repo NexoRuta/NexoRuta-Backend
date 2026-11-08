@@ -82,9 +82,12 @@ public sealed partial class OperacionesRepartoHttpTests
         await PublicarPoliticaParcial(data, permitida, devolver ? PoliticaPendientesParcial.DevolverComercio : PoliticaPendientesParcial.NuevaVisitaSinRecargo);
         var runtime = await RlsRestrictedHttpFlowTests.RestrictApiAsync(data);
         var settings = RlsRestrictedHttpFlowTests.ApiSettings(); settings["Reparto:EvidenciasEncryptionKey"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+        await using var webhook = NexoRuta.IntegrationTests.Webhooks.WebhookAssay.Enabled && permitida && !devolver ? new NexoRuta.IntegrationTests.Webhooks.WebhookAssay() : null;
+        webhook?.Configure(settings);
         var reloj = new ManualClock(DateTimeOffset.UtcNow);
         using var factory = new IntegrationApiFactory(runtime, settings: settings, timeProvider: reloj); using var client = factory.CreateHttpClient();
         var listo = await Preparar(data, client, bloquearDiscrepanciasCarga: false);
+        if(webhook is not null){await webhook.Subscribe(data,client);await client.SetBearerForAccessAsync(data,listo.AccesoId);}
         await using (var db = data.CreateDbContext())
         {
             var envio = await db.Envios.SingleAsync(e => e.Id == listo.EnvioId);
@@ -158,6 +161,7 @@ public sealed partial class OperacionesRepartoHttpTests
             Assert.Equal(ResultadoBulto.Entregado, (await verificar.Bultos.AsNoTracking().SingleAsync(b => b.Id == primero.Id)).Resultado);
             Assert.Equal(2, (await verificar.ParadasRuta.AsNoTracking().SingleAsync(p => p.RutaId == hoja.Id)).BultoIds.Length);
         }
+        if(webhook is not null) await webhook.DeliverAndAssert(data,"partial","BultoActualizado","OperacionActualizada","NuevaVisita");
         var remitidos = await verificar.OutboxMessages.Where(m => m.EnvioId == actual.Id && m.VersionContrato == 2).ToArrayAsync(); Assert.NotEmpty(remitidos);
         // Durable worker ingress is idempotent and verifies the exact persisted event; commerce never reads another tenant's inbox.
         foreach (var aviso in remitidos)

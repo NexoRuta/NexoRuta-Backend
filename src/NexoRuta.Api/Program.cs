@@ -84,6 +84,9 @@ builder.Services.AddOptions<PasswordRecoveryOptions>()
         && string.IsNullOrEmpty(url.UserInfo) && string.IsNullOrEmpty(url.Query) && string.IsNullOrEmpty(url.Fragment),
         "Password recovery requires an absolute trusted HTTPS reset page URL (HTTP only in Development) and a token lifespan under one hour.")
     .ValidateOnStart();
+builder.Services.AddScoped<NexoRuta.Infrastructure.Webhooks.WebhookStore>();
+builder.Services.AddSingleton<NexoRuta.Infrastructure.Webhooks.WebhookSecrets>();
+builder.Services.AddSingleton<NexoRuta.Infrastructure.Webhooks.WebhookDestinationPolicy>();
 builder.Services.AddScoped<OperationalReadStore>();
 builder.Services.AddOperationalHistory(builder.Configuration);
 builder.Services.AddSignalR(options => options.MaximumParallelInvocationsPerClient = 1);
