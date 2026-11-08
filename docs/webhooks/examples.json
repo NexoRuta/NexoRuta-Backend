@@ -1,0 +1,128 @@
+[
+  {
+    "tipo": "OperacionActualizada",
+    "bulto": null,
+    "estado": "EntregadoParcialmente",
+    "visita": null,
+    "envioId": "01a1b908-29cb-71ef-97af-ccd8537841bb",
+    "eventId": "183542a2-7d92-4a01-a1ad-2ac360d094bf",
+    "esRetiro": false,
+    "progreso": {
+      "total": 2,
+      "entregados": 1,
+      "pendientes": 1
+    },
+    "comercioId": "799607b0-aa18-4177-a4d3-ea54557fb090",
+    "operadorId": "a48f592e-db7c-48b0-9b6f-aeef6d040efe",
+    "ocurridaEnUtc": "2026-11-07T15:00:00+00:00",
+    "schemaVersion": 2,
+    "versionOperacion": 4
+  },
+  {
+    "tipo": "BultoActualizado",
+    "bulto": {
+      "codigo": "RUTA-TEST",
+      "bultoId": "01a1b908-29cb-7e1f-9824-e78b2cf18857",
+      "version": 4,
+      "custodia": "Destinatario",
+      "resultado": "Entregado"
+    },
+    "estado": "EntregadoParcialmente",
+    "visita": null,
+    "envioId": "01a1b908-29cb-71ef-97af-ccd8537841bb",
+    "eventId": "7cad2380-e5aa-4108-9a63-ec5c7b8fcba8",
+    "esRetiro": false,
+    "progreso": {
+      "total": 2,
+      "entregados": 1,
+      "pendientes": 1
+    },
+    "comercioId": "799607b0-aa18-4177-a4d3-ea54557fb090",
+    "operadorId": "a48f592e-db7c-48b0-9b6f-aeef6d040efe",
+    "ocurridaEnUtc": "2026-11-07T15:00:00+00:00",
+    "schemaVersion": 2,
+    "versionOperacion": 4
+  },
+  {
+    "tipo": "NuevaVisita",
+    "bulto": null,
+    "estado": "AsignadoRuta",
+    "visita": {
+      "orden": 1,
+      "rutaId": "01a1b908-2c81-7b31-bc72-32b2ca703dc2"
+    },
+    "envioId": "01a1b908-29cb-71ef-97af-ccd8537841bb",
+    "eventId": "669feb3c-0312-458a-80d5-a07af642be94",
+    "esRetiro": false,
+    "progreso": {
+      "total": 2,
+      "entregados": 0,
+      "pendientes": 2
+    },
+    "comercioId": "799607b0-aa18-4177-a4d3-ea54557fb090",
+    "operadorId": "a48f592e-db7c-48b0-9b6f-aeef6d040efe",
+    "ocurridaEnUtc": "2026-11-08T02:41:23.085138+00:00",
+    "schemaVersion": 2,
+    "versionOperacion": 2
+  },
+  {
+    "tipo": "RetiroSolicitado",
+    "bulto": null,
+    "estado": "RetiroSolicitado",
+    "visita": null,
+    "envioId": "01a1b911-5c7a-713a-9efe-dc6ee933dd90",
+    "eventId": "e540e595-ea13-4409-bf28-8ddaecc34f04",
+    "esRetiro": true,
+    "progreso": {
+      "total": 1,
+      "retirados": 0,
+      "entregados": 0,
+      "pendientes": 1
+    },
+    "comercioId": "8f9d110d-c035-4b47-b1af-ae95d4950b2d",
+    "operadorId": "ec503435-e8a3-40ff-8e34-28dd5f6dff86",
+    "ocurridaEnUtc": "2026-11-08T02:51:25.199994+00:00",
+    "schemaVersion": 2,
+    "versionOperacion": 1
+  },
+  {
+    "tipo": "RetiroRetirado",
+    "bulto": null,
+    "estado": "Retirado",
+    "visita": null,
+    "envioId": "01a1b911-5c7a-713a-9efe-dc6ee933dd90",
+    "eventId": "97b5485f-9756-4530-8098-32bbdea37f45",
+    "esRetiro": true,
+    "progreso": {
+      "total": 1,
+      "retirados": 1,
+      "entregados": 0,
+      "pendientes": 1
+    },
+    "comercioId": "8f9d110d-c035-4b47-b1af-ae95d4950b2d",
+    "operadorId": "ec503435-e8a3-40ff-8e34-28dd5f6dff86",
+    "ocurridaEnUtc": "2026-11-08T14:55:00+00:00",
+    "schemaVersion": 2,
+    "versionOperacion": 3
+  },
+  {
+    "tipo": "RetiroEntregadoComercio",
+    "bulto": null,
+    "estado": "EntregadoComercio",
+    "visita": null,
+    "envioId": "01a1b911-5c7a-713a-9efe-dc6ee933dd90",
+    "eventId": "d460cb8a-987d-47c5-8ca3-ba77341bd3b0",
+    "esRetiro": true,
+    "progreso": {
+      "total": 1,
+      "retirados": 1,
+      "entregados": 1,
+      "pendientes": 0
+    },
+    "comercioId": "8f9d110d-c035-4b47-b1af-ae95d4950b2d",
+    "operadorId": "ec503435-e8a3-40ff-8e34-28dd5f6dff86",
+    "ocurridaEnUtc": "2026-11-08T14:55:00+00:00",
+    "schemaVersion": 2,
+    "versionOperacion": 5
+  }
+]

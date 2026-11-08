@@ -24,8 +24,8 @@ builder.Services.AddHostingTelemetry(builder.Configuration, "NexoRuta.Worker." +
 builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.Warning);
 
 var transport = builder.Configuration[WorkerConfigurationKeys.Transport] ?? WorkerTransportNames.RabbitMq;
-if (transport is not (WorkerTransportNames.RabbitMq or WorkerTransportNames.Kafka or WorkerTransportNames.Push))
-    throw new InvalidOperationException("Messaging:Transport must be RabbitMq, Kafka or Push.");
+if (transport is not (WorkerTransportNames.RabbitMq or WorkerTransportNames.Kafka or WorkerTransportNames.Push or "HttpWebhooks"))
+    throw new InvalidOperationException("Messaging:Transport must be RabbitMq, Kafka, Push or HttpWebhooks.");
 WorkerTelemetry.UseTransport(transport);
 
 var connectionString = builder.Configuration.GetConnectionString("Postgres")
@@ -33,9 +33,23 @@ var connectionString = builder.Configuration.GetConnectionString("Postgres")
 builder.Services.AddDbContext<NexoRutaDbContext>(options => options.UseNexoRutaPostgres(connectionString));
 builder.Services.AddScoped<EfOutboxRepository>();
 builder.Services.AddSingleton<TimeProvider>(TimeProvider.System);
-builder.Services.AddHostedService<ProofValidationDeadlineWorker>();
+if (transport != "HttpWebhooks") builder.Services.AddHostedService<ProofValidationDeadlineWorker>();
 
-if (transport == WorkerTransportNames.RabbitMq)
+if (transport == "HttpWebhooks")
+{
+    builder.Services.AddScoped<NexoRuta.Infrastructure.Webhooks.WebhookStore>();
+    builder.Services.AddSingleton<NexoRuta.Infrastructure.Webhooks.WebhookDestinationPolicy>();
+    builder.Services.AddSingleton<NexoRuta.Infrastructure.Webhooks.WebhookSecrets>();
+    if (!builder.Services.AddSharedDataProtection(builder.Configuration, PasswordRecoveryDataProtection.ApplicationName, "api"))
+    {
+        var keys = builder.Configuration["DataProtection:KeysDirectory"];
+        if (string.IsNullOrWhiteSpace(keys)) throw new InvalidOperationException("HTTP webhooks require shared API/worker DataProtection keys.");
+        builder.Services.AddDataProtection().SetApplicationName(PasswordRecoveryDataProtection.ApplicationName)
+            .PersistKeysToFileSystem(new DirectoryInfo(keys));
+    }
+    builder.Services.AddHostedService<NexoRuta.Worker.Webhooks.HttpWebhookWorker>();
+}
+else if (transport == WorkerTransportNames.RabbitMq)
 {
     builder.Services.AddSingleton<RabbitMqOutboxPublisher>();
     builder.Services.AddSingleton<IOutboxMessageHandler, RabbitTrackingOutboxHandler>();

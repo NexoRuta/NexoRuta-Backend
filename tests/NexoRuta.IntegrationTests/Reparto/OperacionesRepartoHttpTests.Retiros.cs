@@ -29,8 +29,13 @@ public sealed partial class OperacionesRepartoHttpTests
   var runtime=await RlsRestrictedHttpFlowTests.RestrictApiAsync(data);
   var settings=RlsRestrictedHttpFlowTests.ApiSettings(); settings["Reparto:EvidenciasEncryptionKey"]=Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
   settings["RoutingGeoapify:PermitirLlamadasReales"]="true";settings["RoutingGeoapify:ApiKey"]="SYNTHETIC-NOT-A-CREDENTIAL";
-  using var factory=new IntegrationApiFactory(runtime,settings:settings);
-  using var host=factory.WithWebHostBuilder(b=>b.ConfigureTestServices(s=>s.AddHttpClient("RoutingGeoapify").ConfigurePrimaryHttpMessageHandler(()=>new RoutingBultosControlado())));
+  await using var webhook=NexoRuta.IntegrationTests.Webhooks.WebhookAssay.Enabled && !fallido && cantidad==1 ? new NexoRuta.IntegrationTests.Webhooks.WebhookAssay() : null;
+  webhook?.Configure(settings);
+  var relojRetiro=new ManualClock(DateTimeOffset.UtcNow);
+  object Operacion(Guid id,long secuencia,string tipo,Guid? envio=null,long? version=null,object? datos=null)=>new {Id=id,Secuencia=secuencia,Tipo=tipo,EnvioId=envio,VersionEnvio=version,OcurridaEn=relojRetiro.GetUtcNow(),Datos=datos??new{}};
+  using var factory=new IntegrationApiFactory(runtime,settings:settings,timeProvider:relojRetiro,configureTestServices:s=>s.AddHttpClient("RoutingGeoapify").ConfigurePrimaryHttpMessageHandler(()=>new RoutingBultosControlado()));
+  var host=factory;
+  if(webhook is not null) host.UseKestrel(0);
   using var client=host.CreateClient();
   var preparado=await Preparar(data,client);
   await using var db=data.CreateDbContext();
@@ -43,9 +48,13 @@ public sealed partial class OperacionesRepartoHttpTests
    v.Publicar(v.VersionConcurrencia,root.UltimoNumeroPublicacion+1,op.UsuarioId,new HashSet<Guid>{op.OperadorId.Value});await db.SaveChangesAsync();root.Publicar(v);await db.SaveChangesAsync();await tx.CommitAsync();
   }
   await client.SetBearerForAccessAsync(data,comercio.Id);
-  var llegada=DateTimeOffset.UtcNow.AddMinutes(15);
+  if(webhook is not null) await webhook.Subscribe(data,client);
+  // Schedule at noon next operator-local day: the fixture must not cross coverage midnight
+  // when CI happens to run at 23:45. Keep authentication on the real clock until planning ends.
+  var fechaRetiro=FechaOperacion.AddDays(1);
+  var llegada=new DateTimeOffset(fechaRetiro.ToDateTime(new TimeOnly(12,0)),TimeSpan.FromHours(-3));
   var solicitud=new CrearEnvioRequest { OperadorId=op.OperadorId,DestinatarioNombre="Comprador sintético",DestinatarioEmail="comprador@example.test",Direccion="Domicilio sintético 123",
-   Servicio=ServiciosEnvioTestData.Declarar(op.OperadorId),Retiro=new(){SolicitudId=Guid.NewGuid(),Motivo="Cambio de producto",DesdeUtc=DateTimeOffset.UtcNow.AddMinutes(1),HastaUtc=DateTimeOffset.UtcNow.AddDays(2)},
+   Servicio=ServiciosEnvioTestData.Declarar(op.OperadorId),Retiro=new(){SolicitudId=Guid.NewGuid(),Motivo="Cambio de producto",DesdeUtc=DateTimeOffset.UtcNow.AddMinutes(1),HastaUtc=llegada.AddDays(1).AddHours(2)},
    Bultos=Enumerable.Range(1,cantidad).Select(i => new BultoDeclaradoRequest { Codigo=$"RETIRO-{i}",PesoGramos=0.01m,LargoCentimetros=0.1m,AnchoCentimetros=0.1m,AltoCentimetros=0.1m }).ToList() };
   solicitud.Servicio.Modalidad="Retiro";
   using var creada=await client.PostAsJsonAsync("/api/retiros",solicitud);Assert.True(creada.StatusCode==HttpStatusCode.Created,await creada.Content.ReadAsStringAsync());
@@ -60,27 +69,28 @@ public sealed partial class OperacionesRepartoHttpTests
   using var limitar=await client.PutAsJsonAsync("/api/reparto/vehiculos",new{Id=preparado.VehiculoId,Version=(await db.Vehiculos.AsNoTracking().SingleAsync(v=>v.Id==preparado.VehiculoId)).Version,Matricula="SAB1234",PesoMaximoGramos=1000m,VolumenMaximoCm3=1000m,Activo=true});
   Assert.True(limitar.IsSuccessStatusCode,await limitar.Content.ReadAsStringAsync());
   await ConfigurarBaseVial(client,preparado.VehiculoId);
-  using var plan=await client.PostAsJsonAsync("/api/rutas",new{RepartidorAccesoId=op.Id,preparado.VehiculoId,Fecha=FechaOperacion,Paradas=new[]{new{EnvioId=preparado.EnvioId,LlegadaEstimadaUtc=llegada},new{EnvioId=retiroId,LlegadaEstimadaUtc=llegada.AddMinutes(20)}}});
+  using var plan=await client.PostAsJsonAsync("/api/rutas",new{RepartidorAccesoId=op.Id,preparado.VehiculoId,Fecha=fechaRetiro,Paradas=new[]{new{EnvioId=preparado.EnvioId,LlegadaEstimadaUtc=llegada},new{EnvioId=retiroId,LlegadaEstimadaUtc=llegada.AddMinutes(20)}}});
   Assert.True(plan.IsSuccessStatusCode,await plan.Content.ReadAsStringAsync());var hoja=(await plan.Content.ReadFromJsonAsync<HojaRutaResponse>())!;
+  relojRetiro.Set(llegada.AddMinutes(-5));
   using var despacho=await client.PostAsJsonAsync($"/api/rutas/{hoja.Id}/despacho",new{hoja.Version});Assert.Equal(HttpStatusCode.OK,despacho.StatusCode);hoja=(await despacho.Content.ReadFromJsonAsync<HojaRutaResponse>())!;
   Assert.True(hoja.Paradas[1].EsRetiro);
   Assert.Equal("Aplicada",(await Aplicar(client,hoja,Operacion(Guid.NewGuid(),1,"InicioJornada"))).Resultado);
   var entrega=hoja.Paradas[0];
   Assert.Equal("Aplicada",(await Aplicar(client,hoja,Operacion(Guid.NewGuid(),2,"CargarBulto",entrega.EnvioId,entrega.EnvioVersion,new{BultoId=entrega.Bultos[0].Id}))).Resultado);
-  Assert.Equal("Aplicada",(await Aplicar(client,hoja,new { Id=Guid.NewGuid(), Secuencia=3, Tipo="ConfirmarCarga", OcurridaEn=DateTimeOffset.UtcNow, Datos=new {} })).Resultado);
+  Assert.Equal("Aplicada",(await Aplicar(client,hoja,new { Id=Guid.NewGuid(), Secuencia=3, Tipo="ConfirmarCarga", OcurridaEn=relojRetiro.GetUtcNow(), Datos=new {} })).Resultado);
   var retiro=hoja.Paradas[1];
-  await VerificarRecorridoBultos(data,client,hoja,DateTimeOffset.UtcNow,4,entrega.EnvioId,retiroId);
+  await VerificarRecorridoBultos(data,client,hoja,relojRetiro.GetUtcNow(),4,entrega.EnvioId,retiroId);
   if(fallido)
   {
    Assert.Equal("Aplicada",(await Aplicar(client,hoja,Operacion(Guid.NewGuid(),5,"RetiroFallido",retiroId,retiro.EnvioVersion,new{Motivo="AUSENTE"}))).Resultado);
    Assert.Equal(EstadoEnvio.RetiroFallido,(await db.Envios.AsNoTracking().SingleAsync(e=>e.Id==retiroId)).Estado);
    Assert.Equal(EstadoCustodiaBulto.SinRecepcion,(await db.Bultos.SingleAsync(b=>b.EnvioId==retiroId)).Custodia);
-   using var reprogramar=await client.PostAsJsonAsync("/api/rutas",new{RepartidorAccesoId=op.Id,preparado.VehiculoId,Fecha=FechaOperacion.AddDays(1),Paradas=new[]{new{EnvioId=retiroId,LlegadaEstimadaUtc=llegada.AddDays(1)}}});
+   using var reprogramar=await client.PostAsJsonAsync("/api/rutas",new{RepartidorAccesoId=op.Id,preparado.VehiculoId,Fecha=fechaRetiro.AddDays(1),Paradas=new[]{new{EnvioId=retiroId,LlegadaEstimadaUtc=llegada.AddDays(1)}}});
    Assert.True(reprogramar.IsSuccessStatusCode,await reprogramar.Content.ReadAsStringAsync());
    Assert.Equal(EstadoEnvio.RetiroAsignado,(await db.Envios.AsNoTracking().SingleAsync(e=>e.Id==retiroId)).Estado);
    Assert.Equal(EstadoCustodiaBulto.SinRecepcion,(await db.Bultos.AsNoTracking().SingleAsync(b=>b.EnvioId==retiroId)).Custodia);
    await db.Database.ExecuteSqlRawAsync("SELECT nexoruta_app.reconcile_management(NULL,NULL,100)");
-   var report=await client.GetFromJsonAsync<NexoRuta.Application.Gestion.ReporteGestion>($"/api/gestion/operadores/{op.OperadorId}/reportes?desde={Uri.EscapeDataString(DateTimeOffset.UtcNow.AddDays(-1).ToString("O"))}&hasta={Uri.EscapeDataString(DateTimeOffset.UtcNow.AddDays(1).ToString("O"))}");
+   var report=await client.GetFromJsonAsync<NexoRuta.Application.Gestion.ReporteGestion>($"/api/gestion/operadores/{op.OperadorId}/reportes?desde={Uri.EscapeDataString(relojRetiro.GetUtcNow().AddDays(-1).ToString("O"))}&hasta={Uri.EscapeDataString(relojRetiro.GetUtcNow().AddDays(1).ToString("O"))}");
    Assert.Equal(1,Assert.Single(report!.Motivos,m=>m.Tipo=="FalloRetiro").Cantidad);
    Assert.DoesNotContain(report.Motivos,m=>m.Tipo=="IntentoFallido");return;
   }
@@ -108,6 +118,7 @@ public sealed partial class OperacionesRepartoHttpTests
   Assert.All(await db.Bultos.AsNoTracking().Where(b=>b.EnvioId==retiroId).ToArrayAsync(),b=>Assert.Equal(EstadoCustodiaBulto.Comercio,b.Custodia));
   await CheckPublic("EntregadoComercio", "EntregadoComercio", true);
   Assert.Equal(cantidad,await db.PruebasEntrega.CountAsync(p=>p.EnvioId==retiroId)); Assert.All(await db.PruebasEntrega.Where(p=>p.EnvioId==retiroId).ToArrayAsync(),p=>Assert.Equal(foto,p.FotoId));
+  if(webhook is not null) await webhook.DeliverAndAssert(data,"pickup","RetiroSolicitado","RetiroRetirado","RetiroEntregadoComercio");
   async Task CheckPublic(string expectedState, string parcelState, bool completed = false)
   {
    var view = await publicClient.GetFromJsonAsync<JsonElement>($"/api/public/seguimiento/{publicToken}");

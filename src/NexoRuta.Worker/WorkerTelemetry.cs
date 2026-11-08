@@ -13,7 +13,7 @@ public static class WorkerTelemetry
     [
         new("RabbitMq"),
         new("Kafka"),
-        new("Push")
+        new("Push"), new("HttpWebhooks")
     ];
     private static TransportProgress activeTransport = Transports[0];
 
@@ -24,7 +24,7 @@ public static class WorkerTelemetry
     private static readonly Counter<long> PushFailures = Meter.CreateCounter<long>(
         "nexoruta.worker.push.failures", "{error}", "Failed attempts to deliver push notifications to delivery workers.");
     private static readonly Counter<long> CommerceNotificationFailures = Meter.CreateCounter<long>(
-        "nexoruta.commerce.notifications.failed", "{error}", "Failed commerce notifications. No commerce notification flow is currently registered.");
+        "nexoruta.commerce.notifications.failed", "{error}", "Failed commerce notifications. Includes HTTP webhook delivery attempts.");
     private static readonly ObservableGauge<double> SqlContactAge = Meter.CreateObservableGauge(
         "nexoruta.worker.sql_contact.age", ObserveSqlContactAge, "s",
         "Seconds since a successful SQL reservation query; -1 until the first query completes.");
@@ -118,6 +118,7 @@ public static class WorkerTelemetry
         "RabbitMq" => Transports[0],
         "Kafka" => Transports[1],
         "Push" => Transports[2],
+        "HttpWebhooks" => Transports[3],
         _ => throw new ArgumentException("Unknown worker transport.", nameof(transport))
     };
 
