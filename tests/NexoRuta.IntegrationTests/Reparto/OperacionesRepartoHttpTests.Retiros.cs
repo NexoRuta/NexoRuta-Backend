@@ -54,7 +54,7 @@ public sealed partial class OperacionesRepartoHttpTests
   var fechaRetiro=FechaOperacion.AddDays(1);
   var llegada=new DateTimeOffset(fechaRetiro.ToDateTime(new TimeOnly(12,0)),TimeSpan.FromHours(-3));
   var solicitud=new CrearEnvioRequest { OperadorId=op.OperadorId,DestinatarioNombre="Comprador sintético",DestinatarioEmail="comprador@example.test",Direccion="Domicilio sintético 123",
-   Servicio=ServiciosEnvioTestData.Declarar(op.OperadorId),Retiro=new(){SolicitudId=Guid.NewGuid(),Motivo="Cambio de producto",DesdeUtc=DateTimeOffset.UtcNow.AddMinutes(1),HastaUtc=DateTimeOffset.UtcNow.AddDays(2)},
+   Servicio=ServiciosEnvioTestData.Declarar(op.OperadorId),Retiro=new(){SolicitudId=Guid.NewGuid(),Motivo="Cambio de producto",DesdeUtc=DateTimeOffset.UtcNow.AddMinutes(1),HastaUtc=llegada.AddDays(1).AddHours(2)},
    Bultos=Enumerable.Range(1,cantidad).Select(i => new BultoDeclaradoRequest { Codigo=$"RETIRO-{i}",PesoGramos=0.01m,LargoCentimetros=0.1m,AnchoCentimetros=0.1m,AltoCentimetros=0.1m }).ToList() };
   solicitud.Servicio.Modalidad="Retiro";
   using var creada=await client.PostAsJsonAsync("/api/retiros",solicitud);Assert.True(creada.StatusCode==HttpStatusCode.Created,await creada.Content.ReadAsStringAsync());
