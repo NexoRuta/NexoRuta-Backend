@@ -9,9 +9,9 @@ namespace NexoRuta.Api.Features.Gestion;
 [ApiController, Authorize(Policy="envios.consultar"), Route("api/gestion/operadores/{operador:guid}")]
 public sealed class GestionController(GestionUseCases casos) : ControllerBase
 {
-    [HttpGet("opciones/{tipo}")]
+    [HttpGet("opciones/{tipo}"), ProducesResponseType<OpcionesGestionResponse>(200)]
     public Task<IActionResult> Opciones(Guid operador, string tipo, [FromQuery] string? buscar, [FromQuery] int pagina=1, [FromQuery] Guid[]? seleccionado=null, CancellationToken ct=default)
-        => Ejecutar(async()=>await casos.OpcionesAsync(operador,tipo,buscar,pagina,seleccionado??[],ct));
+        => Ejecutar(async()=>OpcionesGestionResponse.Desde(await casos.OpcionesAsync(operador,tipo,buscar,pagina,seleccionado??[],ct)));
     [HttpGet("reportes"), ProducesResponseType<ReporteGestionResponse>(200)]
     public Task<IActionResult> Reporte(Guid operador, [FromQuery] DateTimeOffset desde, [FromQuery] DateTimeOffset hasta,
         [FromQuery] Guid? comercioId, [FromQuery] Guid? zonaId, [FromQuery] Guid? repartidorId, [FromQuery] int pagina=1, [FromQuery] int tamano=25, CancellationToken ct=default)
