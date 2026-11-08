@@ -17,7 +17,9 @@ public sealed class EfGestionRepository(NexoRutaDbContext db) : IGestionReposito
                 WHERE EXISTS(SELECT 1 FROM public."Envios" e WHERE e."OperadorId"={0} AND e."ComercioId"=c."Id")
                 """,
             "Zona" => """
-                SELECT "Id","Nombre" || ' · ' || "Estado" AS "Nombre" FROM public."ZonasCobertura" WHERE "OperadorId"={0}
+                SELECT "Id","Nombre" || ' · ' || "Estado" || CASE WHEN count(*) OVER(PARTITION BY "Nombre")>1
+                THEN ' · Creada ' || to_char("CreadaUtc" AT TIME ZONE 'America/Montevideo','DD/MM/YYYY HH24:MI:SS.US') ELSE '' END AS "Nombre"
+                FROM public."ZonasCobertura" WHERE "OperadorId"={0}
                 """,
             "Repartidor" => """
                 SELECT r."AccesoId" AS "Id",r."Nombre" || CASE WHEN count(*) OVER(PARTITION BY r."Nombre")>1 THEN ' · ' || coalesce((SELECT u."Email" FROM public."AccesosUsuario" a JOIN public."Usuarios" u ON u."Id"=a."UsuarioId" WHERE a."Id"=r."AccesoId"),'Sin contacto') ELSE '' END || CASE WHEN r."Activo" THEN '' ELSE ' · Inactivo' END AS "Nombre"

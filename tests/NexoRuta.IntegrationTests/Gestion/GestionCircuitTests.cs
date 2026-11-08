@@ -151,6 +151,8 @@ public sealed class GestionCircuitTests(PostgresFixture postgres):IClassFixture<
         Assert.False(commerce.HayMas);
         Assert.Empty((await client.GetFromJsonAsync<OpcionesGestion>(root+"Comercio?buscar=inexistente"))!.Opciones);
         await using(var db=s.Data.CreateDbContext()){
+            var zone=await db.ZonasCobertura.FirstAsync(x=>x.OperadorId==op);
+            db.Add(NexoRuta.Domain.ZonasCobertura.ZonaCobertura.Crear(op,zone.Nombre,zone.Geometria.Copy(),ahoraUtc:zone.CreadaUtc.AddSeconds(1)));
             var driver=await db.Repartidores.FirstAsync(x=>x.OperadorId==op);driver.Actualizar("Autor inactivo de prueba",false);
             for(var n=0;n<55;n++){
                 var user=new NexoRuta.Domain.Administracion.Usuario($"opcion-{n}@example.test",AuthenticationTestData.Hash($"opcion-{n}@example.test"));
@@ -159,6 +161,9 @@ public sealed class GestionCircuitTests(PostgresFixture postgres):IClassFixture<
             }
             await db.SaveChangesAsync();
         }
+        var zones=(await client.GetFromJsonAsync<OpcionesGestion>(root+"Zona"))!;
+        Assert.Equal(2,zones.Opciones.Count);Assert.Equal(2,zones.Opciones.Select(x=>x.Nombre).Distinct().Count());
+        Assert.All(zones.Opciones,x=>Assert.Contains("Creada",x.Nombre));
         var first=(await client.GetFromJsonAsync<OpcionesGestion>(root+"Repartidor?buscar=Opción"))!;
         Assert.Equal(50,first.Opciones.Count);Assert.True(first.HayMas);
         var second=(await client.GetFromJsonAsync<OpcionesGestion>(root+"Repartidor?buscar=Opción&pagina=2"))!;
