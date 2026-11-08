@@ -138,4 +138,63 @@ public sealed class GestionCircuitTests(PostgresFixture postgres):IClassFixture<
         Assert.Equal(0,await restricted.Database.SqlQuery<int>($"SELECT count(*)::int AS \"Value\" FROM public.\"Liquidaciones\" WHERE \"Id\"={winner.Documento.Id}").SingleAsync());
         Assert.False(await restricted.Database.SqlQueryRaw<bool>("SELECT has_table_privilege(current_user,'public.\"Liquidaciones\"','UPDATE') AS \"Value\"").SingleAsync());
     }
+
+    [Fact]
+    public async Task OpcionesAutorizadasBuscablesPaginadasIncluyenInactivosYSinMezclarComercios()
+    {
+        var s=await GestionScenario.CreateAsync(postgres);
+        using var factory=new IntegrationApiFactory(s.Runtime,settings:RlsRestrictedHttpFlowTests.ApiSettings());using var client=factory.CreateHttpClient();
+        var op=s.OperatorA.OperadorId!.Value;var root=$"api/gestion/operadores/{op}/opciones/";
+        await client.SetBearerForAccessAsync(s.Data,s.OperatorA.Id);
+        var commerce=(await client.GetFromJsonAsync<OpcionesGestion>(root+"Comercio"))!;
+        Assert.Contains(commerce.Opciones,o=>o.Id==s.CommerceA.ComercioId && o.Nombre.Contains("Comercio"));
+        Assert.False(commerce.HayMas);
+        Assert.Empty((await client.GetFromJsonAsync<OpcionesGestion>(root+"Comercio?buscar=inexistente"))!.Opciones);
+        await using(var db=s.Data.CreateDbContext()){
+            var driver=await db.Repartidores.FirstAsync(x=>x.OperadorId==op);driver.Actualizar("Autor inactivo de prueba",false);
+            for(var n=0;n<55;n++){
+                var user=new NexoRuta.Domain.Administracion.Usuario($"opcion-{n}@example.test",AuthenticationTestData.Hash($"opcion-{n}@example.test"));
+                var access=new NexoRuta.Domain.Administracion.AccesoUsuario(user.Id,op,null);db.AddRange(user,access);await db.SaveChangesAsync();
+                db.Add(new NexoRuta.Domain.Reparto.Repartidor(access.Id,op,n<2?"Opción repetida":"Opción "+n.ToString("D2")));
+            }
+            await db.SaveChangesAsync();
+        }
+        var first=(await client.GetFromJsonAsync<OpcionesGestion>(root+"Repartidor?buscar=Opción"))!;
+        Assert.Equal(50,first.Opciones.Count);Assert.True(first.HayMas);
+        var second=(await client.GetFromJsonAsync<OpcionesGestion>(root+"Repartidor?buscar=Opción&pagina=2"))!;
+        Assert.Equal(5,second.Opciones.Count);Assert.False(second.HayMas);
+        Assert.Empty(first.Opciones.Select(x=>x.Id).Intersect(second.Opciones.Select(x=>x.Id)));
+        var duplicates=(await client.GetFromJsonAsync<OpcionesGestion>(root+"Repartidor?buscar=repetida"))!;
+        Assert.Equal(2,duplicates.Opciones.Select(x=>x.Nombre).Distinct().Count());
+        Assert.All(duplicates.Opciones,x=>Assert.Contains("@example.test",x.Nombre));
+        var drivers=(await client.GetFromJsonAsync<OpcionesGestion>(root+"Repartidor?buscar=Autor"))!;
+        Assert.Contains(drivers.Opciones,o=>o.Nombre.Contains("Inactivo"));
+        Assert.Equal(HttpStatusCode.BadRequest,(await client.GetAsync(root+"Zona?pagina=0")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden,(await client.GetAsync($"api/gestion/operadores/{s.OperatorB.OperadorId}/opciones/Comercio")).StatusCode);
+        await client.SetBearerForAccessAsync(s.Data,s.CommerceA.Id);
+        Assert.Equal(HttpStatusCode.Forbidden,(await client.GetAsync(root+"Comercio")).StatusCode);
+        var own=(await client.GetFromJsonAsync<OpcionesGestion>(root+"Envio"))!;
+        Assert.NotEmpty(own.Opciones);
+        await client.SetBearerForAccessAsync(s.Data,s.CommerceB.Id);
+        var other=(await client.GetFromJsonAsync<OpcionesGestion>(root+"Envio?seleccionado="+s.PartialShipment))!;
+        Assert.Empty(other.Opciones);
+    }
+    [Fact]
+    public async Task PrecisionDeFechaCanonicaExplicaAtribucionAusenteSinReescribirHistoria()
+    {
+        var data=await postgres.CreateDatabaseAsync();await using var db=data.CreateDbContext();
+        var canonical=new DateTimeOffset(2026,11,7,23,19,46,TimeSpan.Zero).AddTicks(7);
+        // Npgsql sends timestamptz at microsecond precision; PostgreSQL's text parser rounds the JSON value.
+        var same=await db.Database.SqlQuery<bool>($"SELECT {canonical}::timestamptz = {canonical.ToString("O")}::timestamptz AS \"Value\"").SingleAsync();
+        Assert.False(same);
+        // Construct original immutable facts with sub-microsecond time; never update the journal.
+        var scenario=await GestionScenario.CreateAsync(postgres,precisionSubMicrosegundo:true);
+        await using var owned=scenario.Data.CreateDbContext();
+        var shipment=scenario.PartialShipment;
+        var physical=GestionScenario.Admission.AddHours(2).AddTicks(7);
+        await scenario.ReconcileAsync();
+        Assert.True(await owned.Database.SqlQuery<bool>($"""
+            SELECT EXISTS(SELECT 1 FROM public."GestionBultos" WHERE "EnvioId"={shipment} AND "EntregadoEnUtc"={physical} AND "RepartidorId" IS NULL AND "RutaId" IS NULL) AS "Value"
+            """).SingleAsync());
+    }
 }

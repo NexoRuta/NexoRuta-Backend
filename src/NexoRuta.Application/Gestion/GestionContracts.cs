@@ -42,8 +42,12 @@ public sealed record CorreccionRegistrada(Guid Id);
 public sealed record CorregirCuenta(Guid Id, Guid MovimientoOriginalId, decimal ImporteUyu, string Motivo);
 public sealed record PrepararLiquidacion(Guid Id, Guid ComercioId, DateTimeOffset DesdeUtc, DateTimeOffset HastaUtc);
 
+public sealed record OpcionGestion(Guid Id, string Nombre);
+public sealed record OpcionesGestion(IReadOnlyList<OpcionGestion> Opciones, bool HayMas);
+
 public interface IGestionRepository
 {
+    Task<OpcionesGestion> OpcionesAsync(Guid operador, string tipo, string buscar, int pagina, Guid[] seleccionado, CancellationToken ct);
     Task<ReporteGestion> ReporteAsync(FiltroGestion filtro, CancellationToken ct);
     Task<DetalleGestion?> DetalleAsync(Guid operador, Guid envio, CancellationToken ct);
     Task<Guid> CorregirAsync(CorregirCuenta command, CancellationToken ct);
@@ -65,6 +69,13 @@ public sealed class GestionUseCases(IUsuarioActual usuario, IGestionRepository r
         }
         if (actor.OperadorId != operador) throw new AccesoNoPermitidoException();
         return null;
+    }
+    public async Task<OpcionesGestion> OpcionesAsync(Guid operador, string tipo, string? buscar, int pagina, Guid[] seleccionado, CancellationToken ct)
+    {
+        await Ambito(operador, tipo is not ("Envio" or "Bulto"), ct);
+        if (tipo is not ("Comercio" or "Zona" or "Repartidor" or "Envio" or "Bulto" or "Ruta") || pagina is < 1 or > 10000 || buscar?.Length > 160 || seleccionado.Length > 100)
+            throw new ArgumentException("Revisá la búsqueda y la página.");
+        return await repository.OpcionesAsync(operador, tipo, buscar?.Trim() ?? "", pagina, seleccionado, ct);
     }
     public async Task<ReporteGestion> ReporteAsync(FiltroGestion f, CancellationToken ct)
     {

@@ -21,7 +21,7 @@ const report = {checks:[],views:[],externalBlocked:[]};
    return page;
   }
   async function visual(page,name){
-   for(const width of [1440,320]){
+   for(const width of [1440,768,375,320]){
     await page.setViewportSize({width,height:1000});
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`${name}: page overflow at ${width}`);
     const axe=await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa','wcag21aa','wcag22aa']).analyze();
@@ -45,18 +45,42 @@ const report = {checks:[],views:[],externalBlocked:[]};
   assert.match(await op.locator('main').innerText(),/Sin compromiso: 1/);
   await visual(op,'reportes');
   const from=await op.locator('#Desde').inputValue(),to=await op.locator('#Hasta').inputValue();
-  await op.locator('#ComercioId').fill(env.MANAGEMENT_COMMERCE_ID);await op.getByRole('button',{name:'Consultar indicadores',exact:true}).click();await op.waitForLoadState('networkidle');
+  for(const field of ['ZonaId','RepartidorId']){
+   const option=await op.locator('#'+field+' option').nth(1).getAttribute('value');
+   assert.ok(option);await op.locator('#'+field).selectOption(option);
+  }
+  await op.getByRole('button',{name:'Consultar indicadores',exact:true}).click();await op.waitForLoadState('networkidle');
+  assert.ok(await op.locator('#ZonaId').inputValue());assert.ok(await op.locator('#RepartidorId').inputValue());
+  await op.getByRole('link',{name:'Limpiar filtros',exact:true}).click();
+  await op.locator('#Desde').fill(from);await op.locator('#Hasta').fill(to);
+  await op.locator('#ComercioId').selectOption(env.MANAGEMENT_COMMERCE_ID);await op.getByRole('button',{name:'Consultar indicadores',exact:true}).click();await op.waitForLoadState('networkidle');
   assert.equal(await op.locator('#ComercioId').inputValue(),env.MANAGEMENT_COMMERCE_ID);
+  await op.reload();assert.equal(await op.locator('#ComercioId').inputValue(),env.MANAGEMENT_COMMERCE_ID);
+  const selector=op.locator('[data-nr-selector][data-tipo="Comercio"]');
+  await selector.locator('summary').click();
+  await selector.locator('input[type=search]').fill('inexistente');await selector.getByRole('button',{name:'Buscar',exact:true}).click();
+  await selector.getByRole('status').filter({hasText:'Sin coincidencias'}).waitFor();
+  assert.equal(await op.locator('#ComercioId').inputValue(),env.MANAGEMENT_COMMERCE_ID);
+  await op.route('**/ReporteOperaciones?handler=Opciones*',route=>route.fulfill({status:503,body:'synthetic outage'}));
+  await selector.getByRole('button',{name:'Buscar',exact:true}).click();await selector.getByRole('status').filter({hasText:'No pudimos cargar'}).waitFor();
+  await op.unroute('**/ReporteOperaciones?handler=Opciones*');
+  await selector.locator('input[type=search]').fill('');await selector.getByRole('button',{name:'Buscar',exact:true}).click();
+  await selector.getByRole('status').filter({hasText:'Opciones actualizadas'}).waitFor();
+  await selector.locator('summary').click();
+  await op.screenshot({path:path.join(output,'reportes-filtrados-1440.png'),fullPage:true});
   await op.locator(`a[href^="/reportes/operaciones/${env.MANAGEMENT_PARTIAL}"]`).click();
   await op.getByRole('heading',{name:'Detalle de indicador',exact:true}).waitFor();await visual(op,'detalle-bultos');
   await op.getByRole('link',{name:'Volver a los filtros del reporte'}).click();assert.equal(await op.locator('#ComercioId').inputValue(),env.MANAGEMENT_COMMERCE_ID);
-  await op.goto(env.MANAGEMENT_BACKOFFICE+`/liquidaciones?ComercioId=${env.MANAGEMENT_COMMERCE_ID}&Desde=${from}&Hasta=${to}`);
+  const accountLink=op.getByRole('link',{name:'Ver cuenta',exact:true}).first();
+  const target=new URL(await accountLink.getAttribute('href'),env.MANAGEMENT_BACKOFFICE);
+  assert.equal(target.searchParams.get('Desde'),from);assert.equal(target.searchParams.get('Hasta'),to);
+  await accountLink.click();
   await op.getByRole('heading',{name:'Cuenta del comercio',exact:true}).waitFor();await visual(op,'cuenta-operador');
   await op.getByRole('button',{name:'Preparar liquidación del período',exact:true}).click();
   const confirm=op.getByRole('button',{name:'Confirmar liquidación revisada',exact:true});await confirm.waitFor();
   assert.match(await op.locator('main').innerText(),/330[,.]70/);
   const documentId=new URL(op.url()).searchParams.get('DocumentoId');assert.ok(documentId);await visual(op,'borrador');
-  await confirm.click();await op.waitForLoadState('networkidle');assert.equal(await confirm.count(),0);assert.match(await op.locator('main').innerText(),/Confirmada por/);await visual(op,'confirmada');
+  await confirm.click();await op.waitForLoadState('networkidle');assert.equal(await confirm.count(),0);assert.match(await op.locator('main').textContent(),/Confirmada por/);await visual(op,'confirmada');
   report.checks.push('Operator filters, parcel authorship, prepares, reviews and confirms a real persisted settlement.');
   const commerce=await session(env.MANAGEMENT_COMMERCE,'gestion-a@example.test');
   await commerce.goto(env.MANAGEMENT_COMMERCE+`/cuenta?OperadorId=${env.MANAGEMENT_OPERATOR}&Desde=${from}&Hasta=${to}&DocumentoId=${documentId}`);
@@ -72,6 +96,23 @@ const report = {checks:[],views:[],externalBlocked:[]};
   report.checks.push('Commerce reads only its confirmed document and movements, sees loading, switches independent operator account and cannot enumerate another operator document.');
   const other=await session(env.MANAGEMENT_COMMERCE,'gestion-b@example.test');await other.goto(env.MANAGEMENT_COMMERCE+`/cuenta?OperadorId=${env.MANAGEMENT_OPERATOR}&Desde=${from}&Hasta=${to}&DocumentoId=${documentId}`);await other.getByRole('alert').filter({hasText:'no está disponible para tu cuenta y operador'}).waitFor();
   report.checks.push('Second commerce cannot open the first commerce settlement.');
+  for(const route of ['/','/rutas','/deposito','/vehiculos']){
+   const response=await op.goto(env.MANAGEMENT_BACKOFFICE+route);assert.ok(response.ok(),route);
+   await op.setViewportSize({width:375,height:900});
+   assert.equal(await op.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,route+' page overflow');
+   await op.screenshot({path:path.join(output,'relacionada-'+(route==='/'?'envios':route.slice(1))+'-375.png'),fullPage:true});
+  }
+  await op.goto(env.MANAGEMENT_BACKOFFICE+'/tablero');
+  await op.getByRole('link',{name:'Solicitudes de nueva visita',exact:true}).click();
+  await op.getByRole('heading',{name:'Solicitudes de nueva visita',exact:true}).waitFor();
+  await op.goto(env.MANAGEMENT_BACKOFFICE+'/ReporteOperaciones?Desde=2030-01-01&Hasta=2030-01-02');
+  await op.getByText('No hay operaciones admitidas en este período.',{exact:true}).waitFor();
+  await op.screenshot({path:path.join(output,'reportes-vacio-1440.png'),fullPage:true});
+  report.checks.push('Named filters, reload and direct URLs, empty results, recoverable option lookup failure and new-visit navigation.');
+  const nativeZoom=require('./native-zoom.cjs');
+  await nativeZoom(op,[env.MANAGEMENT_BACKOFFICE+'/ReporteOperaciones?Desde='+from+'&Hasta='+to,env.MANAGEMENT_BACKOFFICE+`/liquidaciones?ComercioId=${env.MANAGEMENT_COMMERCE_ID}&Desde=${from}&Hasta=${to}&DocumentoId=${documentId}`],output,'backoffice');
+  await nativeZoom(commerce,[env.MANAGEMENT_COMMERCE+`/cuenta?OperadorId=${env.MANAGEMENT_OPERATOR}&Desde=${from}&Hasta=${to}&DocumentoId=${documentId}`],output,'commerce');
+  report.checks.push('Actual Chromium zoom 200%: tabs.getZoom=2, innerWidth=720 and devicePixelRatio=2 at a 1440px viewport; keyboard and no page overflow.');
   assert.deepEqual(report.externalBlocked,[]);
   await fs.writeFile(path.join(output,'acceptance.json'),JSON.stringify(report,null,2));
   console.log('Management full-stack acceptance passed: '+report.views.length+' viewport checks, real API/PostgreSQL, distinct sessions.');

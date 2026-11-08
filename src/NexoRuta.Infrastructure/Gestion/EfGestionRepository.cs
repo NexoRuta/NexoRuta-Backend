@@ -5,6 +5,42 @@ namespace NexoRuta.Infrastructure.Gestion;
 
 public sealed class EfGestionRepository(NexoRutaDbContext db) : IGestionRepository
 {
+    public async Task<OpcionesGestion> OpcionesAsync(Guid operador, string tipo, string buscar, int pagina, Guid[] seleccionado, CancellationToken ct)
+    {
+        await db.SelectOperatorAsync(operador, ct);
+        // All sources retain their RLS policies. No active-only filter: historical queries need disabled entities.
+        var source = tipo switch
+        {
+            "Comercio" => """
+                SELECT c."Id",c."Nombre" || ' · ' || c."Estado" || CASE WHEN count(*) OVER(PARTITION BY c."Nombre")>1 THEN
+                ' · Envío ' || coalesce((SELECT min(b."Codigo") FROM public."Bultos" b JOIN public."Envios" e ON e."Id"=b."EnvioId" WHERE e."ComercioId"=c."Id" AND e."OperadorId"={0}),'sin referencia') ELSE '' END AS "Nombre" FROM public."Comercios" c
+                WHERE EXISTS(SELECT 1 FROM public."Envios" e WHERE e."OperadorId"={0} AND e."ComercioId"=c."Id")
+                """,
+            "Zona" => """
+                SELECT "Id","Nombre" || ' · ' || "Estado" AS "Nombre" FROM public."ZonasCobertura" WHERE "OperadorId"={0}
+                """,
+            "Repartidor" => """
+                SELECT r."AccesoId" AS "Id",r."Nombre" || CASE WHEN count(*) OVER(PARTITION BY r."Nombre")>1 THEN ' · ' || coalesce((SELECT u."Email" FROM public."AccesosUsuario" a JOIN public."Usuarios" u ON u."Id"=a."UsuarioId" WHERE a."Id"=r."AccesoId"),'Sin contacto') ELSE '' END || CASE WHEN r."Activo" THEN '' ELSE ' · Inactivo' END AS "Nombre"
+                FROM public."Repartidores" r WHERE r."OperadorId"={0}
+                """,
+            "Envio" => """
+                SELECT e."Id",(SELECT min(b."Codigo") FROM public."Bultos" b WHERE b."EnvioId"=e."Id") AS "Nombre"
+                FROM public."Envios" e WHERE e."OperadorId"={0}
+                """,
+            "Ruta" => """
+                SELECT "Id",to_char("Fecha",'DD/MM/YYYY') || ' · ' || "VehiculoMatricula" AS "Nombre" FROM public."HojasRuta" WHERE "OperadorId"={0}
+                """,
+            _ => """
+                SELECT "Id","Codigo" AS "Nombre" FROM public."Bultos" WHERE "OperadorId"={0}
+                """
+        };
+        var rows = await db.Database.SqlQueryRaw<OpcionGestion>("SELECT * FROM (" + source + """
+            ) o WHERE (cardinality({3}::uuid[])>0 AND "Id"=ANY({3})) OR (cardinality({3}::uuid[])=0 AND strpos(lower("Nombre"),lower({1}))>0)
+            ORDER BY "Nombre","Id" OFFSET {2} LIMIT 101
+            """,operador,buscar,(pagina-1)*50,seleccionado).ToArrayAsync(ct);
+        var size=seleccionado.Length>0?100:50;
+        return new(rows.Take(size).ToArray(),rows.Length>size);
+    }
     private const string Scope = """
         g."OperadorId"={0} AND ({3}::uuid IS NULL OR g."ComercioId"={3})
         AND ({4}::uuid IS NULL OR g."ZonaId"={4})
