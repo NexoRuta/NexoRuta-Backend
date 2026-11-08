@@ -90,7 +90,7 @@ public sealed partial class OperacionesRepartoHttpTests
    Assert.Equal(EstadoEnvio.RetiroAsignado,(await db.Envios.AsNoTracking().SingleAsync(e=>e.Id==retiroId)).Estado);
    Assert.Equal(EstadoCustodiaBulto.SinRecepcion,(await db.Bultos.AsNoTracking().SingleAsync(b=>b.EnvioId==retiroId)).Custodia);
    await db.Database.ExecuteSqlRawAsync("SELECT nexoruta_app.reconcile_management(NULL,NULL,100)");
-   var report=await client.GetFromJsonAsync<NexoRuta.Application.Gestion.ReporteGestion>($"/api/gestion/operadores/{op.OperadorId}/reportes?desde={Uri.EscapeDataString(DateTimeOffset.UtcNow.AddDays(-1).ToString("O"))}&hasta={Uri.EscapeDataString(DateTimeOffset.UtcNow.AddDays(1).ToString("O"))}");
+   var report=await client.GetFromJsonAsync<NexoRuta.Application.Gestion.ReporteGestion>($"/api/gestion/operadores/{op.OperadorId}/reportes?desde={Uri.EscapeDataString(relojRetiro.GetUtcNow().AddDays(-1).ToString("O"))}&hasta={Uri.EscapeDataString(relojRetiro.GetUtcNow().AddDays(1).ToString("O"))}");
    Assert.Equal(1,Assert.Single(report!.Motivos,m=>m.Tipo=="FalloRetiro").Cantidad);
    Assert.DoesNotContain(report.Motivos,m=>m.Tipo=="IntentoFallido");return;
   }
