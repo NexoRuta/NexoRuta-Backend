@@ -98,6 +98,7 @@ else
     builder.Services.AddSingleton<IOutboxMessageHandler>(sp => new CommerceNoticeOutboxHandler(sp.GetRequiredService<KafkaEnvioCreadoPublisher>(), "OperacionActualizada"));
     builder.Services.AddSingleton<IOutboxMessageHandler, OperationalOutboxHandler>();
     builder.Services.AddHostedService<OperationalBoardConsumer>();
+    builder.Services.AddHostedService<ManagementReportingConsumer>();
     builder.Services.AddSingleton<OperationalMongoStore>();
     builder.Services.AddHostedService<OperationalHistoryConsumer>();
     builder.Services.AddHostedService<KafkaOutboxWorker>();

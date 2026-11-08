@@ -90,6 +90,7 @@ jobs:
       NEXORUTA_GEOCODING_FULLSTACK_DIR: ${{ github.workspace }}/backend/artifacts/browser/geocoding
       NEXORUTA_VEHICLES_E2E_DIR: ${{ github.workspace }}/backend/artifacts/browser/vehicles
       NEXORUTA_SESSION_E2E_DIR: ${{ github.workspace }}/backend/artifacts/browser/session
+      NEXORUTA_GESTION_E2E_DIR: ${{ github.workspace }}/backend/artifacts/browser/management
     timeout-minutes: 35
     strategy:
       fail-fast: false
