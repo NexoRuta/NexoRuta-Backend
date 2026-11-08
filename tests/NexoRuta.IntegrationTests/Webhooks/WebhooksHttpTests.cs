@@ -99,12 +99,15 @@ public sealed class WebhooksHttpTests(PostgresFixture postgres):IClassFixture<Po
         var runtime=await RlsRestrictedHttpFlowTests.RestrictApiAsync(data);using var factory=new IntegrationApiFactory(runtime,settings:Settings());using var client=factory.CreateHttpClient();
         await using var owner=data.CreateDbContext();var op=(await owner.Operadores.SingleAsync()).Id;var actor=await owner.AccesosUsuario.SingleAsync(a=>a.ComercioId!=null);await client.SetBearerForAccessAsync(data,actor.Id);
         var subscription=await Subscribe(client,op,2,["EnvioCreado"]);await Create(client,op);
+        var worker=await WorkerDatabase(data);await using var workerDb=worker.CreateDbContext();var workerStore=new WebhookStore(workerDb);var lease=Guid.NewGuid();var old=await workerStore.Claim(lease,3,default);Assert.NotNull(old);Assert.True(await workerStore.Finish(old.Id,lease,200,"Confirmed fixture transport result",false,1,default));
+        await Create(client,op);
         using var revoke=await client.PostAsJsonAsync($"/api/webhooks/suscripciones/{subscription.Id}/revocaciones",subscription.Revision);Assert.Equal(HttpStatusCode.OK,revoke.StatusCode);
         var row=await new WebhookStore(owner).Subscriptions.SingleAsync();Assert.True(row.Revocada);Assert.False(row.Habilitada);
-        var delivery=await new WebhookStore(owner).Deliveries.SingleAsync();Assert.Equal("Cancelado",delivery.Estado);
+        var delivery=await new WebhookStore(owner).Deliveries.SingleAsync(d=>d.Estado=="Cancelado");
         using var replay=await client.PostAsJsonAsync($"/api/webhooks/entregas/{delivery.Id}/reenvios",new{});Assert.Equal(HttpStatusCode.Conflict,replay.StatusCode);
         using var staleKey=await client.PutAsJsonAsync($"/api/webhooks/suscripciones/{subscription.Id}",new SaveWebhook(op,Receiver,["EnvioCreado"],2,true,row.Revision,null));Assert.Equal(HttpStatusCode.BadRequest,staleKey.StatusCode);
         using var enabled=await client.PutAsJsonAsync($"/api/webhooks/suscripciones/{subscription.Id}",new SaveWebhook(op,Receiver,["EnvioCreado"],2,true,row.Revision,"whsec_"+Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))));Assert.Equal(HttpStatusCode.OK,enabled.StatusCode);
+        using var oldReplay=await client.PostAsJsonAsync($"/api/webhooks/entregas/{old.Id}/reenvios",new{});Assert.Equal(HttpStatusCode.Conflict,oldReplay.StatusCode);
         await Create(client,op);Assert.Equal(1,await new WebhookStore(owner).Deliveries.CountAsync(d=>d.Estado=="Pendiente"));
     }
     internal static async Task<WebhookSubscription> Subscribe(HttpClient client,Guid op,int version,string[] events)

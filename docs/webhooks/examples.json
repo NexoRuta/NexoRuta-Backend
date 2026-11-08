@@ -70,17 +70,18 @@
     "bulto": null,
     "estado": "RetiroSolicitado",
     "visita": null,
-    "envioId": "01a1b906-7b1c-7f12-b630-82b554764a15",
-    "eventId": "59b5bd14-23f0-40f1-b124-694c83ce4932",
+    "envioId": "01a1b911-5c7a-713a-9efe-dc6ee933dd90",
+    "eventId": "e540e595-ea13-4409-bf28-8ddaecc34f04",
     "esRetiro": true,
     "progreso": {
       "total": 1,
+      "retirados": 0,
       "entregados": 0,
       "pendientes": 1
     },
-    "comercioId": "44407bd1-e46f-41c1-bb44-1be0fa797e53",
-    "operadorId": "2396f222-3df3-4fc5-82bd-134c7ac001fd",
-    "ocurridaEnUtc": "2026-11-08T02:39:32.143338+00:00",
+    "comercioId": "8f9d110d-c035-4b47-b1af-ae95d4950b2d",
+    "operadorId": "ec503435-e8a3-40ff-8e34-28dd5f6dff86",
+    "ocurridaEnUtc": "2026-11-08T02:51:25.199994+00:00",
     "schemaVersion": 2,
     "versionOperacion": 1
   },
@@ -89,17 +90,18 @@
     "bulto": null,
     "estado": "Retirado",
     "visita": null,
-    "envioId": "01a1b906-7b1c-7f12-b630-82b554764a15",
-    "eventId": "2295644e-f0e9-429e-917a-ef2898baf0a7",
+    "envioId": "01a1b911-5c7a-713a-9efe-dc6ee933dd90",
+    "eventId": "97b5485f-9756-4530-8098-32bbdea37f45",
     "esRetiro": true,
     "progreso": {
       "total": 1,
+      "retirados": 1,
       "entregados": 0,
       "pendientes": 1
     },
-    "comercioId": "44407bd1-e46f-41c1-bb44-1be0fa797e53",
-    "operadorId": "2396f222-3df3-4fc5-82bd-134c7ac001fd",
-    "ocurridaEnUtc": "2026-11-07T15:00:00+00:00",
+    "comercioId": "8f9d110d-c035-4b47-b1af-ae95d4950b2d",
+    "operadorId": "ec503435-e8a3-40ff-8e34-28dd5f6dff86",
+    "ocurridaEnUtc": "2026-11-08T14:55:00+00:00",
     "schemaVersion": 2,
     "versionOperacion": 3
   },
@@ -108,17 +110,18 @@
     "bulto": null,
     "estado": "EntregadoComercio",
     "visita": null,
-    "envioId": "01a1b906-7b1c-7f12-b630-82b554764a15",
-    "eventId": "2342a2e2-b58d-4c28-83d7-a2f3f8968408",
+    "envioId": "01a1b911-5c7a-713a-9efe-dc6ee933dd90",
+    "eventId": "d460cb8a-987d-47c5-8ca3-ba77341bd3b0",
     "esRetiro": true,
     "progreso": {
       "total": 1,
-      "entregados": 0,
-      "pendientes": 1
+      "retirados": 1,
+      "entregados": 1,
+      "pendientes": 0
     },
-    "comercioId": "44407bd1-e46f-41c1-bb44-1be0fa797e53",
-    "operadorId": "2396f222-3df3-4fc5-82bd-134c7ac001fd",
-    "ocurridaEnUtc": "2026-11-08T02:39:33.496004+00:00",
+    "comercioId": "8f9d110d-c035-4b47-b1af-ae95d4950b2d",
+    "operadorId": "ec503435-e8a3-40ff-8e34-28dd5f6dff86",
+    "ocurridaEnUtc": "2026-11-08T14:55:00+00:00",
     "schemaVersion": 2,
     "versionOperacion": 5
   }

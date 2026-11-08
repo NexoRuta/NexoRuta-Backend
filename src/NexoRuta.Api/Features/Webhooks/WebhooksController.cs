@@ -88,6 +88,6 @@ public sealed class WebhooksController(NexoRutaDbContext db, WebhookStore store,
     {
         if(!await store.Deliveries.AnyAsync(x=>x.Id==id,ct)) return NotFound();
         var replay=await db.Database.SqlQuery<bool>($"""SELECT nexoruta_app.webhook_replay({id}) AS "Value" """).SingleAsync(ct);
-        return replay ? Ok(new {estado="Pendiente"}) : Problem("Solo se puede reenviar una entrega finalizada.",statusCode:409);
+        return replay ? Ok(new {estado="Pendiente"}) : Problem("Solo se pueden reenviar entregas finalizadas cuya revisión no fue revocada.",statusCode:409);
     }
 }

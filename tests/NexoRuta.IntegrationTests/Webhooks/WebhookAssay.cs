@@ -37,7 +37,8 @@ internal sealed class WebhookAssay : IAsyncDisposable
         for(var i=0;i<300;i++){rows=await new WebhookStore(db).Deliveries.ToArrayAsync();if(rows.Length>0 && rows.All(d=>d.Estado=="Entregado"))break;await Task.Delay(100);}
         Assert.NotEmpty(rows);Assert.All(rows,d=>{Assert.Equal("Entregado",d.Estado);Assert.Equal(200,d.CodigoHttp);});
         foreach(var type in required)Assert.Contains(rows,d=>d.Tipo==type);
-        var visits=rows.Where(d=>d.Tipo=="NuevaVisita").Select(d=>JsonDocument.Parse(d.Payload).RootElement.GetProperty("visita").GetProperty("rutaId").GetGuid()).ToArray();Assert.Equal(visits.Length,visits.Distinct().Count());
+        var visits=rows.Where(d=>d.Tipo=="NuevaVisita").Select(d=>(d.EnvioId,JsonDocument.Parse(d.Payload).RootElement.GetProperty("visita").GetProperty("rutaId").GetGuid())).ToArray();Assert.Equal(visits.Length,visits.Distinct().Count());
+        if(name=="pickup"){var final=Assert.Single(rows,d=>d.Tipo=="RetiroEntregadoComercio");var progress=JsonDocument.Parse(final.Payload).RootElement.GetProperty("progreso");Assert.Equal(progress.GetProperty("total").GetInt32(),progress.GetProperty("entregados").GetInt32());}
         if(name=="partial")Assert.Contains(rows,d=>JsonDocument.Parse(d.Payload).RootElement.GetProperty("estado").GetString()=="EntregadoParcialmente");
         var output=Environment.GetEnvironmentVariable("NEXORUTA_WEBHOOK_E2E_DIR")!;Directory.CreateDirectory(output);
         // Exact synthetic payloads transmitted and accepted by the real receiver; no secrets or personal data.

@@ -11,7 +11,7 @@ namespace NexoRuta.Infrastructure.Webhooks;
 public sealed class WebhookSecrets(IDataProtectionProvider protection)
 {
     private readonly IDataProtector protector = protection.CreateProtector("NexoRuta.CommerceWebhooks.Secrets.v1");
-    public string Protect(string secret) { Validate(secret); return protector.Protect(secret); }
+    public string Protect(string secret) { var key=Validate(secret); CryptographicOperations.ZeroMemory(key); return protector.Protect(secret); }
     public string Unprotect(string value) => protector.Unprotect(value);
     public static byte[] Validate(string secret)
     {

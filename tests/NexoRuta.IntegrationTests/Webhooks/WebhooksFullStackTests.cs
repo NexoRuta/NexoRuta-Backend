@@ -1,3 +1,6 @@
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.DependencyInjection;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
@@ -18,8 +21,14 @@ public sealed class WebhooksFullStackTests(PostgresFixture postgres):IClassFixtu
         var receiverAddress=$"http://127.0.0.1:{Port()}/";var commerceAddress=$"http://127.0.0.1:{Port()}/";
         var key="whsec_"+Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));var admin=Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
         var settings=WebhooksHttpTests.Settings();settings["Webhooks:DevelopmentReceiverUrl"]=receiverAddress+"comercio/webhook";settings["DataProtection:KeysDirectory"]=Path.Combine(scratch,"shared-keys");
-        using var factory=new IntegrationApiFactory(apiData,settings:settings);factory.UseKestrel(0);using var api=factory.CreateClient();
+        using var factory=new IntegrationApiFactory(apiData,settings:settings,configureTestServices:s=>s.AddSingleton<IStartupFilter>(new ViewFailureFilter(scratch)));factory.UseKestrel(0);using var api=factory.CreateClient();
         await using var db=data.CreateDbContext();var op=(await db.Operadores.SingleAsync()).Id;var actor=await db.AccesosUsuario.SingleAsync(a=>a.ComercioId!=null);var email=(await db.Usuarios.SingleAsync(u=>u.Id==actor.UsuarioId)).Email!;
+        var viewerEmail="webhook-viewer-"+Guid.NewGuid().ToString("N")+"@example.test";
+        var viewer=new NexoRuta.Domain.Administracion.Usuario(viewerEmail);
+        Assert.True((await AuthenticationTestData.UserManager(db).CreateAsync(viewer,AuthenticationTestData.Password)).Succeeded);
+        var viewerRole=new NexoRuta.Domain.Administracion.Rol("webhook_viewer","Consulta de webhooks",null,actor.ComercioId);
+        db.Add(viewerRole);db.Add(new NexoRuta.Domain.Administracion.RolPermiso(viewerRole.Id,(await db.Permisos.SingleAsync(p=>p.Codigo=="envios.consultar")).Id));
+        db.Add(new NexoRuta.Domain.Administracion.AccesoUsuario(viewer.Id,null,actor.ComercioId,viewerRole));await db.SaveChangesAsync();
         var workspace=CompanionPortals.WorkspaceRoot;
         var receiverEnv=new Dictionary<string,string>{{"ASPNETCORE_URLS",receiverAddress},{"CommerceDemo__Enabled","true"},{"CommerceDemo__AdminPassword",admin},{"CommerceDemo__SigningSecrets__0",key},{"CommerceDemo__DatabasePath",Path.Combine(scratch,"inbox.db")},{"DataProtection__KeysDirectory",Path.Combine(scratch,"receiver-keys")}};
         var commerceEnv=new Dictionary<string,string>{{"ASPNETCORE_URLS",commerceAddress},{"Api__BaseAddress",api.BaseAddress!.ToString()},{"Tracking__BaseAddress",receiverAddress},{"DataProtection__KeysDirectory",Path.Combine(scratch,"commerce-keys")}};
@@ -32,7 +41,7 @@ public sealed class WebhooksFullStackTests(PostgresFixture postgres):IClassFixtu
             tracking=Start("frontend","NexoRuta.Tracking",receiverEnv);workerA=Start("backend","NexoRuta.Worker",workerEnv);workerB=Start("backend","NexoRuta.Worker",workerEnv);
             await Ready(commerceAddress);await Ready(receiverAddress);
             var nodeInfo=new ProcessStartInfo("node"){UseShellExecute=false,RedirectStandardOutput=true,RedirectStandardError=true};nodeInfo.ArgumentList.Add(Path.Combine(workspace,"backend/tests/browser/webhooks.cjs"));
-            foreach(var (k,v) in new Dictionary<string,string>{{"WH_API",api.BaseAddress!.ToString()},{"WH_COMMERCE",commerceAddress},{"WH_RECEIVER",receiverAddress},{"WH_EMAIL",email},{"WH_PASSWORD",AuthenticationTestData.Password},{"WH_SIGNING",key},{"WH_ADMIN",admin},{"WH_OPERATOR",op.ToString()},{"WH_IPC",scratch}})nodeInfo.Environment[k]=v;
+            foreach(var (k,v) in new Dictionary<string,string>{{"WH_API",api.BaseAddress!.ToString()},{"WH_COMMERCE",commerceAddress},{"WH_RECEIVER",receiverAddress},{"WH_EMAIL",email},{"WH_VIEWER_EMAIL",viewerEmail},{"WH_PASSWORD",AuthenticationTestData.Password},{"WH_SIGNING",key},{"WH_ADMIN",admin},{"WH_OPERATOR",op.ToString()},{"WH_IPC",scratch}})nodeInfo.Environment[k]=v;
             using var node=Process.Start(nodeInfo)!;var error=node.StandardError.ReadToEndAsync();using var limit=new CancellationTokenSource(TimeSpan.FromMinutes(4));
             try
             {
@@ -71,6 +80,21 @@ public sealed class WebhooksFullStackTests(PostgresFixture postgres):IClassFixtu
         private readonly Process process;private readonly Task<string> output,error;
         public OwnedProcess(Process process){this.process=process;output=process.StandardOutput.ReadToEndAsync();error=process.StandardError.ReadToEndAsync();}
         public void Dispose(){if(!process.HasExited){process.Kill(true);process.WaitForExit(10000);}process.Dispose();}
+    }
+    private sealed class ViewFailureFilter(string directory):IStartupFilter
+    {
+        public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next)=>app=>
+        {
+            app.Use(async(context,proceed)=>
+            {
+                if(context.Request.Path.StartsWithSegments("/api/webhooks") && context.Request.Method=="GET")
+                {
+                    if(File.Exists(Path.Combine(directory,"view-error"))){context.Response.StatusCode=503;return;}
+                    if(File.Exists(Path.Combine(directory,"view-slow")))await Task.Delay(1200,context.RequestAborted);
+                }
+                await proceed();
+            });next(app);
+        };
     }
     private sealed class Blackhole:IDisposable
     {

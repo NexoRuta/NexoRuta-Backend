@@ -109,7 +109,7 @@ BEGIN
   IF NOT FOUND THEN RETURN NEW; END IF;
   kind:='NuevaVisita';
  END IF;
- SELECT jsonb_build_object('total',count(*),'entregados',count(*) FILTER(WHERE "Resultado"='Entregado'),'pendientes',count(*) FILTER(WHERE "Resultado" NOT IN('Entregado','Devuelto','Extraviado'))) INTO progress
+ SELECT jsonb_build_object('total',count(*),'entregados',count(*) FILTER(WHERE (NOT e."EsRetiro" AND "Resultado"='Entregado') OR (e."EsRetiro" AND "Custodia"='Comercio')),'retirados',count(*) FILTER(WHERE e."EsRetiro" AND "Custodia" IN('Repartidor','PendienteDeposito','Deposito','Comercio')),'pendientes',count(*) FILTER(WHERE (NOT e."EsRetiro" AND "Resultado" NOT IN('Entregado','Devuelto')) OR (e."EsRetiro" AND "Custodia"<>'Comercio'))) INTO progress
  FROM public."Bultos" WHERE "OperadorId"=e."OperadorId" AND "EnvioId"=shipment;
  FOR s IN SELECT * FROM public."WebhookSubscriptions" WHERE "OperadorId"=e."OperadorId" AND "ComercioId"=commerce AND "Habilitada" AND (kind=ANY("Eventos") OR "Contrato"=1 AND kind LIKE 'Retiro%' AND 'OperacionActualizada'=ANY("Eventos")) FOR SHARE LOOP
   IF s."Contrato"=1 THEN
@@ -158,7 +158,8 @@ END $$;
 CREATE FUNCTION nexoruta_app.webhook_replay(p_id uuid) RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE d public."WebhookDeliveries";
 BEGIN
- SELECT * INTO d FROM public."WebhookDeliveries" WHERE "Id"=p_id AND "Estado" IN('Fallido','Entregado') AND
+ SELECT * INTO d FROM public."WebhookDeliveries" WHERE "Id"=p_id AND "Estado" IN('Fallido','Entregado')
+ AND NOT EXISTS(SELECT 1 FROM public."WebhookRevisions" r WHERE r."Id"="WebhookDeliveries"."SuscripcionId" AND r."Revision">="WebhookDeliveries"."Revision" AND r."Accion"='Revocacion') AND
  ((nexoruta_app.setting('actor_kind')='comercio' AND "ComercioId"=nexoruta_app.ctx_uuid('org_id')) OR (nexoruta_app.setting('actor_kind')='operador' AND "OperadorId"=nexoruta_app.ctx_uuid('org_id'))) FOR UPDATE;
  IF NOT FOUND THEN RETURN false; END IF;
  INSERT INTO public."WebhookReplays"("EntregaId","Numero","OperadorId","ComercioId","ActorId","EstadoAnterior") VALUES(d."Id",d."Reenvios"+1,d."OperadorId",d."ComercioId",nexoruta_app.ctx_uuid('user_id'),d."Estado");

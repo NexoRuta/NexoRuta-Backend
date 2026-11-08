@@ -85,7 +85,7 @@ public sealed partial class OperacionesRepartoHttpTests
         await using var webhook = NexoRuta.IntegrationTests.Webhooks.WebhookAssay.Enabled && permitida && !devolver ? new NexoRuta.IntegrationTests.Webhooks.WebhookAssay() : null;
         webhook?.Configure(settings);
         var reloj = new ManualClock(DateTimeOffset.UtcNow);
-        using var factory = new IntegrationApiFactory(runtime, settings: settings, timeProvider: reloj); using var client = factory.CreateHttpClient();
+        using var factory = new IntegrationApiFactory(runtime, settings: settings, timeProvider: reloj); if(webhook is not null) factory.UseKestrel(0); using var client = webhook is null ? factory.CreateHttpClient() : factory.CreateClient();
         var listo = await Preparar(data, client, bloquearDiscrepanciasCarga: false);
         if(webhook is not null){await webhook.Subscribe(data,client);await client.SetBearerForAccessAsync(data,listo.AccesoId);}
         await using (var db = data.CreateDbContext())

@@ -11,7 +11,7 @@ Commerce `/webhooks` usa la identidad de comercio de la sesión validada. Cada s
 - `POST /api/webhooks/suscripciones/{id}/revocaciones`: cuerpo JSON con el número de revisión. Deshabilita nuevos avisos, cancela los pendientes e invalida reservas; registra la revisión y actor. Un HTTP ya iniciado puede haber tenido efecto. Retirar también la clave del receptor. Reactivar exige clave nueva.
 - `GET /api/webhooks/entregas?operadorId=…&estado=…&tipo=…&suscripcionId=…&pagina=1&tamano=25`: filtros, total y paginación en SQL (tamaño 1–100).
 - `GET /api/webhooks/entregas/{id}?pagina=1`: snapshot, intentos y reenvíos (25 por página).
-- `POST /api/webhooks/entregas/{id}/reenvios`: solo finalizadas (`Fallido`/`Entregado`). El segundo caso sirve para comprobar idempotencia. Siempre audita actor, fecha y estado anterior. No se reenvían avisos cancelados por revocación.
+- `POST /api/webhooks/entregas/{id}/reenvios`: solo finalizadas (`Fallido`/`Entregado`). El segundo caso sirve para comprobar idempotencia. Siempre audita actor, fecha y estado anterior. No se reenvían avisos de revisiones revocadas, aunque luego se reactive con una clave nueva.
 
 URL, eventos, versión, deshabilitación y rotación afectan **nuevos eventos**. Cada entrega existente conserva URL, revisión, contrato, bytes, clave cifrada y `ClaveId`. Editar una URL no redirige pendientes ni reenvíos. Deshabilitar permite drenar pendientes. Revocar los cancela. Al rotar se conserva la clave anterior en el receptor durante el drenaje y posibles reenvíos históricos. Para retirarla definitivamente, revocar la suscripción antigua y crear otra con una clave nueva.
 
