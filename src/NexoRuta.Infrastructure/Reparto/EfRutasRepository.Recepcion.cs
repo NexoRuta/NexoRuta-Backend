@@ -8,22 +8,6 @@ using NexoRuta.Infrastructure.Persistence;
 namespace NexoRuta.Infrastructure.Reparto;
 public sealed partial class EfRutasRepository
 {
-    public async Task<bool> DevolverBultosComercioAsync(Guid op, Guid id, long version, CancellationToken ct)
-    {
-        await using var tx = await db.BeginOrJoinAsync(ct); await Contexto(op, ct); await Bloquear(op, ct);
-        var envio = await db.Envios.SingleOrDefaultAsync(e => e.OperadorId == op && e.Id == id, ct);
-        if (envio is null) return false;
-        var bultos = await db.Bultos.Where(b => b.OperadorId == op && b.EnvioId == id).ToArrayAsync(ct);
-        if (envio.Version == version + 1 && bultos.Any(b => b.Resultado == ResultadoBulto.Devuelto) && bultos.All(b => b.Resultado != ResultadoBulto.EnDevolucion))
-        { await tx.CommitAsync(ct); return true; }
-        var devueltos = bultos.Where(b => b.Resultado == ResultadoBulto.EnDevolucion).ToArray();
-        if (envio.EsRetiro || envio.Version != version || devueltos.Length == 0 || devueltos.Any(b => b.Custodia != EstadoCustodiaBulto.Deposito))
-            throw new ConflictoRepartoException("La devolución requiere pendientes de esta versión recibidos en depósito.");
-        await db.SetShipmentHistoryContextAsync("DevolucionBultosComercio", id, id, reloj.GetUtcNow(), cancellationToken: ct);
-        foreach (var b in devueltos) { b.EntregarAlComercio(); b.RegistrarResultado(ResultadoBulto.Devuelto, b.Version); }
-        envio.ActualizarResultadoBultos(bultos, reloj.GetUtcNow());
-        await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return true;
-    }
     public async Task<bool> EntregarComercioAsync(Guid op, Guid id, long version, CancellationToken ct)
     {
         await using var tx = await db.BeginOrJoinAsync(ct); await Contexto(op, ct); await Bloquear(op, ct);

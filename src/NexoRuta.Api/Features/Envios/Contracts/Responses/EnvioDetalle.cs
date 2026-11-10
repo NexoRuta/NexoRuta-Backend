@@ -42,7 +42,7 @@ public sealed record EnvioDetalle(
             PesoGramos: bulto.PesoGramos,
             LargoCentimetros: bulto.LargoCentimetros,
             AnchoCentimetros: bulto.AnchoCentimetros,
-            AltoCentimetros: bulto.AltoCentimetros) { Custodia = bulto.Custodia, Resultado = bulto.Resultado, MotivoNoEntrega = bulto.MotivoNoEntrega }).ToArray())
+            AltoCentimetros: bulto.AltoCentimetros) { Id = bulto.Id, Version = bulto.Version, Custodia = bulto.Custodia, Resultado = bulto.Resultado, MotivoNoEntrega = bulto.MotivoNoEntrega }).ToArray())
     {
         Tarifa = envio.Tarifa is null ? null : TarifaEnvioResponse.Desde(envio.Tarifa),
         EsRetiro = envio.EsRetiro, MotivoRetiro = envio.MotivoRetiro, FranjaRetiroDesdeUtc = envio.FranjaRetiroDesdeUtc, FranjaRetiroHastaUtc = envio.FranjaRetiroHastaUtc,

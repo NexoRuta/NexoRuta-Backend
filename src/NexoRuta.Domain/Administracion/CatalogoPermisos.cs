@@ -20,6 +20,7 @@ public static class CatalogoPermisos
         new("envios.crear", "envios.crear", [TipoAccesoUsuario.Comercio]),
         new("envios.consultar", "envios.consultar", [TipoAccesoUsuario.Operador, TipoAccesoUsuario.Comercio]),
         new("envios.gestionar", "envios.gestionar", [TipoAccesoUsuario.Operador]),
+        new("devoluciones.gestionar", "devoluciones.gestionar", [TipoAccesoUsuario.Comercio]),
         new("reparto.ejecutar", "Ejecutar la hoja de ruta propia", [TipoAccesoUsuario.Operador])
     ]);
 

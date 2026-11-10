@@ -7,13 +7,6 @@ namespace NexoRuta.Api.Features.Reparto.Controllers;
 [ApiController, Authorize(Policy="envios.gestionar"), Route("api/deposito")]
 public sealed class RecepcionController(GestionarRutasUseCase casos) : ControllerBase
 {
-    [HttpPost("envios/{id:guid}/devolucion-comercio")]
-    public async Task<IActionResult> DevolverComercio(Guid id, NexoRuta.Api.Features.Reparto.Contracts.VersionRutaRequest datos, CancellationToken ct)
-    {
-        try { return await casos.DevolverBultosComercioAsync(id, datos.Version, ct) ? NoContent() : NotFound(); }
-        catch (RepartoNoPermitidoException) { return Forbid(); }
-        catch (ConflictoRepartoException e) { return Problem(e.Message, statusCode: 409); }
-    }
     [HttpPost("retiros/{id:guid}/entrega-comercio")]
     public async Task<IActionResult> EntregarComercio(Guid id, NexoRuta.Api.Features.Reparto.Contracts.VersionRutaRequest datos, CancellationToken ct)
     {

@@ -8,6 +8,7 @@ public sealed record BultoDetalle(
     decimal AnchoCentimetros,
     decimal AltoCentimetros)
 {
+    public long Version { get; init; }
     public string Resultado { get; init; } = "Pendiente";
     public string? MotivoNoEntrega { get; init; }
     public string Custodia { get; init; } = string.Empty;

@@ -269,7 +269,7 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
                 Detail = new BultoDetalle(
                 Id: x.Id, Codigo: x.Codigo, PesoGramos: x.PesoGramos, LargoCentimetros: x.LargoCentimetros,
                 AnchoCentimetros: x.AnchoCentimetros, AltoCentimetros: x.AltoCentimetros)
-                { Custodia = x.Custodia.ToString(), Resultado = x.Resultado.ToString(), MotivoNoEntrega = x.MotivoNoEntrega }
+                { Version = x.Version, Custodia = x.Custodia.ToString(), Resultado = x.Resultado.ToString(), MotivoNoEntrega = x.MotivoNoEntrega }
             })
             .ToListAsync(cancellationToken);
         var packagesByShipment = packages.ToLookup(x => x.EnvioId, x => x.Detail);

@@ -148,6 +148,8 @@ public static class DependencyInjection
         services.AddScoped<IOperadoresRepository, EfOperadoresRepository>();
         services.AddScoped<IComerciosRepository, EfComerciosRepository>();
         services.AddScoped<IEnviosRepository, EfEnviosRepository>();
+        services.AddScoped<NexoRuta.Application.Envios.Devoluciones.IDevolucionesRepository, EfDevolucionesRepository>();
+        services.AddScoped<NexoRuta.Application.Envios.Devoluciones.GestionarDevolucionesUseCase>();
         services.AddScoped<IServiciosEnvioRepository, EfServiciosEnvioRepository>();
         services.AddScoped<NexoRuta.Application.Seguimiento.Interfaces.ICancelacionPublica, NexoRuta.Infrastructure.Seguimiento.Processing.CancelacionPublica>();
         services.AddScoped<NexoRuta.Application.Envios.Repositories.ICancelacionesEnvioRepository, NexoRuta.Infrastructure.Envios.Repositories.EfCancelacionesEnvioRepository>();

@@ -22,6 +22,6 @@ public sealed record EnvioCreado(
         OperadorNombre: envio.Origen.OperadorNombre,
         ComercioNombre: envio.Origen.ComercioNombre,
         Bultos: envio.Bultos.Select(b => new BultoDetalle(b.Codigo, b.PesoGramos,
-            b.LargoCentimetros, b.AnchoCentimetros, b.AltoCentimetros) { Custodia = b.Custodia }).ToArray(),
+            b.LargoCentimetros, b.AnchoCentimetros, b.AltoCentimetros) { Id = b.Id, Version = b.Version, Custodia = b.Custodia }).ToArray(),
         CreadoEnUtc: envio.CreadoEnUtc, Tarifa: TarifaEnvioResponse.Desde(envio.Tarifa));
 }

@@ -5,7 +5,6 @@ namespace NexoRuta.Application.Reparto.Repositories;
 
 public interface IRutasRepository
 {
-    Task<bool> DevolverBultosComercioAsync(Guid operadorId, Guid envioId, long version, CancellationToken ct);
     Task<bool> EntregarComercioAsync(Guid operadorId, Guid envioId, long version, CancellationToken ct);
     Task<IReadOnlyList<HojaRutaDatos>> ListarAsync(Guid operadorId, Guid? repartidorId, DateOnly fecha, CancellationToken ct);
     Task<HojaRutaDatos?> ObtenerPropiaAsync(Guid operadorId, Guid repartidorId, Guid rutaId, CancellationToken ct);
