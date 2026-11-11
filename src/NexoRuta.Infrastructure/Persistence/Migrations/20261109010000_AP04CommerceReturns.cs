@@ -19,6 +19,17 @@ public sealed class AP04CommerceReturns : Migration
                     'envios.consultar','envios.gestionar','plataforma.organizaciones.gestionar',
                     'reparto.ejecutar','devoluciones.gestionar'));
 
+        -- The managed migrator has no runtime actor context. Allow only its
+        -- transaction to seed the catalog and backfill protected commerce roles.
+        CREATE POLICY migration_ap04_permissions ON public."Permisos" TO CURRENT_USER
+            USING (true) WITH CHECK (true);
+        CREATE POLICY migration_ap04_roles ON public."Roles" TO CURRENT_USER
+            USING (true) WITH CHECK (true);
+        CREATE POLICY migration_ap04_role_grants ON public."RolesPermisos" TO CURRENT_USER
+            USING (true) WITH CHECK (true);
+        CREATE POLICY migration_ap04_accesses ON public."AccesosUsuario" TO CURRENT_USER
+            USING (true) WITH CHECK (true);
+
         INSERT INTO public."Permisos" ("Id", "Codigo", "Nombre")
         VALUES (gen_random_uuid(), 'devoluciones.gestionar', 'devoluciones.gestionar')
         ON CONFLICT ("Codigo") DO NOTHING;
@@ -32,6 +43,11 @@ public sealed class AP04CommerceReturns : Migration
           AND r."ComercioId" = a."ComercioId" AND r."EsProtegidoSistema"
           AND p."Codigo" = 'devoluciones.gestionar'
         ON CONFLICT DO NOTHING;
+
+        DROP POLICY migration_ap04_permissions ON public."Permisos";
+        DROP POLICY migration_ap04_roles ON public."Roles";
+        DROP POLICY migration_ap04_role_grants ON public."RolesPermisos";
+        DROP POLICY migration_ap04_accesses ON public."AccesosUsuario";
 
         CREATE TABLE public."TransferenciasDevolucion" (
             "Id" uuid PRIMARY KEY,
