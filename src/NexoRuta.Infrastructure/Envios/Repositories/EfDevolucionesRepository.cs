@@ -51,7 +51,8 @@ public sealed class EfDevolucionesRepository(
                     SELECT max(h."OcurridaEnUtc") AS "ActividadRetornoUtc"
                     FROM public."EnvioEventos" h
                     WHERE h."OperadorId"=e."OperadorId" AND h."EnvioId"=e."Id"
-                        AND h."OrigenTipo" IN ('DecisionDevolucionEnvio','RecepcionDeposito','DevolucionBultosComercio')
+                        AND (h."OrigenTipo" IN ('DecisionDevolucionEnvio','DevolucionBultosComercio')
+                            OR (h."OrigenTipo"='RecepcionDeposito' AND h."EstadoNuevo" IN ('Devuelto','EnDevolucion')))
                 ) ev ON true
                 WHERE NOT e."EsRetiro" AND e."ComercioId"=@commerceId
                     AND (@operatorId IS NULL OR e."OperadorId"=@operatorId)
@@ -117,7 +118,9 @@ public sealed class EfDevolucionesRepository(
                 WHERE e."Id"=@shipmentId AND e."OperadorId"=@operatorId AND e."ComercioId"=@commerceId AND NOT e."EsRetiro"
                     AND (EXISTS(SELECT 1 FROM public."Bultos" b WHERE b."OperadorId"=e."OperadorId" AND b."EnvioId"=e."Id" AND b."Resultado"::text IN ('EnDevolucion','Devuelto'))
                         OR EXISTS(SELECT 1 FROM public."TransferenciasDevolucion" t WHERE t."OperadorId"=e."OperadorId" AND t."EnvioId"=e."Id")
-                        OR EXISTS(SELECT 1 FROM public."EnvioEventos" h WHERE h."OperadorId"=e."OperadorId" AND h."EnvioId"=e."Id" AND h."OrigenTipo" IN ('DecisionDevolucionEnvio','RecepcionDeposito','DevolucionBultosComercio')))
+                        OR EXISTS(SELECT 1 FROM public."EnvioEventos" h WHERE h."OperadorId"=e."OperadorId" AND h."EnvioId"=e."Id"
+                            AND (h."OrigenTipo" IN ('DecisionDevolucionEnvio','DevolucionBultosComercio')
+                                OR (h."OrigenTipo"='RecepcionDeposito' AND h."EstadoNuevo" IN ('Devuelto','EnDevolucion')))))
             ), bultos AS (
                 SELECT b."Id",b."Codigo",b."Resultado"::text AS "Resultado",b."Custodia"::text AS "Custodia",b."Version",
                     tl."TransferenciaId",t."RegistradaEnUtc" AS "TransferidaEnUtc",al."AcuseId",a."Resultado" AS "ResultadoAcuse",
@@ -167,7 +170,8 @@ public sealed class EfDevolucionesRepository(
                 CASE WHEN h."ActorTipo"='Usuario' THEN 'Operador' ELSE h."ActorTipo" END AS "Actor",
                 NULL::integer AS "Bultos",h."CodigoHecho" AS "Resultado",NULL::text AS "Observaciones"
             FROM public."EnvioEventos" h WHERE h."OperadorId"=@operatorId AND h."EnvioId"=@shipmentId
-                AND h."OrigenTipo" IN ('DecisionDevolucionEnvio','RecepcionDeposito','DevolucionBultosComercio')
+                AND (h."OrigenTipo" IN ('DecisionDevolucionEnvio','DevolucionBultosComercio')
+                    OR (h."OrigenTipo"='RecepcionDeposito' AND h."EstadoNuevo" IN ('Devuelto','EnDevolucion')))
             UNION ALL
             SELECT t."Id",'Transferencia fisica al comercio',t."RegistradaEnUtc",t."RegistradaEnUtc",'Operador',count(l."BultoId")::integer,'Transferida',NULL::text
             FROM public."TransferenciasDevolucion" t JOIN public."TransferenciasDevolucionBultos" l ON l."TransferenciaId"=t."Id"

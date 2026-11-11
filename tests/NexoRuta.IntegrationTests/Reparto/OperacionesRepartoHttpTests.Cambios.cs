@@ -87,6 +87,22 @@ public sealed partial class OperacionesRepartoHttpTests
         var reloj = new ManualClock(DateTimeOffset.UtcNow);
         using var factory = new IntegrationApiFactory(runtime, settings: settings, timeProvider: reloj); if(webhook is not null) factory.UseKestrel(0); using var client = webhook is null ? factory.CreateHttpClient() : factory.CreateClient();
         var listo = await Preparar(data, client, bloquearDiscrepanciasCarga: false);
+        await using (var beforeDb = data.CreateDbContext())
+        {
+            var shipment = await beforeDb.Envios.AsNoTracking().SingleAsync(e => e.Id == listo.EnvioId);
+            var commerceAccessId = await beforeDb.AccesosUsuario.AsNoTracking()
+                .Where(a => a.ComercioId == shipment.ComercioId).Select(a => a.Id).SingleAsync();
+            using var commerceBeforeReturn = factory.CreateHttpClient();
+            await commerceBeforeReturn.SetBearerForAccessAsync(data, commerceAccessId);
+            var from = shipment.CreadoEnUtc.AddDays(-1).ToString("O");
+            var to = DateTimeOffset.UtcNow.AddDays(1).ToString("O");
+            using var listBeforeReturn = await commerceBeforeReturn.GetAsync(
+                $"/api/devoluciones?operadorId={shipment.OperadorId:D}&desdeUtc={Uri.EscapeDataString(from)}&hastaUtc={Uri.EscapeDataString(to)}&limite=50");
+            Assert.Equal(HttpStatusCode.OK, listBeforeReturn.StatusCode);
+            var pageBeforeReturn = await listBeforeReturn.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.DoesNotContain(pageBeforeReturn.GetProperty("items").EnumerateArray(),
+                item => item.GetProperty("envioId").GetGuid() == listo.EnvioId);
+        }
         if(webhook is not null){await webhook.Subscribe(data,client);await client.SetBearerForAccessAsync(data,listo.AccesoId);}
         await using (var db = data.CreateDbContext())
         {
