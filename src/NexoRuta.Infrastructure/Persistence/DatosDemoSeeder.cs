@@ -503,7 +503,7 @@ public sealed class DatosDemoSeeder(
         IReadOnlyList<OrganizacionDemo> operadores, IReadOnlyList<OrganizacionDemo> comercios, CancellationToken ct)
     {
         await db.ApplyAsync(RlsActorContext.From(actor), ct);
-        await FijarPasswordAsync(actor.UsuarioEmail, ct);
+        // Platform credentials remain owned by PlatformInitialization/deployment secrets.
         foreach (var organizacion in operadores.Concat(comercios))
             await FijarPasswordAsync(organizacion.Email, ct);
 
