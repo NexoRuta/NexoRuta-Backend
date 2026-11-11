@@ -22,15 +22,13 @@ public sealed class DatosDemoController(DatosDemoSeeder seeder) : ControllerBase
 
     [HttpPost]
     [ProducesResponseType<DatosDemoStatusResponse>(StatusCodes.Status200OK)]
-    [ProducesResponseType<DatosDemoStatusResponse>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Sembrar(CancellationToken ct)
     {
         if (HttpContext.Items[typeof(ContextoPlataforma)] is not ContextoPlataforma actor)
             return Forbid();
 
-        var (yaEstabaSembrado, estado) = await seeder.SembrarAsync(actor, ct);
-        var response = DatosDemoStatusResponse.Desde(estado);
-        return yaEstabaSembrado ? Conflict(response) : Ok(response);
+        var (_, estado) = await seeder.SembrarAsync(actor, ct);
+        return Ok(DatosDemoStatusResponse.Desde(estado));
     }
 
     [HttpPost("load-fixture")]
