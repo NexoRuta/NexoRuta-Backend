@@ -17,6 +17,8 @@ using NexoRuta.Domain.Tarifas;
 using NexoRuta.Domain.ZonasCobertura;
 using NexoRuta.Application.ZonasCobertura.Repositories;
 using NexoRuta.Application.Envios.Commands;
+using NexoRuta.Application.Envios.Devoluciones;
+using NexoRuta.Application.Envios.Importacion;
 using NetTopologySuite;
 using NexoRuta.Domain.ReglasOperativas;
 using NexoRuta.Domain.Reparto;
@@ -28,6 +30,7 @@ public sealed class DatosDemoSeeder(
     NexoRutaDbContext db,
     IPlataformaRepository plataforma,
     IEnviosRepository envios,
+    IDevolucionesRepository devoluciones,
     IRepartidoresRepository repartidores,
     IConfiguracionRepartoRepository configuracionReparto,
     IRutasRepository rutas,
@@ -95,6 +98,7 @@ public sealed class DatosDemoSeeder(
                     requierePropietario: false)
                     ?? throw new InvalidOperationException("Falta una cuenta de comercio del seed demo."));
             await SincronizarActoresAsync(actor, operadoresExistentes, comerciosExistentes, ct);
+            await SembrarFixtureDevolucionAp04Async(comerciosExistentes[1], operadoresExistentes[0], ct);
             return (true, EstadoDatosDemo.Desde(anterior));
         }
 
@@ -238,6 +242,9 @@ public sealed class DatosDemoSeeder(
                 cantidadRutas++;
             }
         }
+
+        await db.ApplyAsync(RlsActorContext.From(actor), ct);
+        await SembrarFixtureDevolucionAp04Async(comercios[1], operadores[0], ct);
 
         await db.ApplyAsync(RlsActorContext.From(actor), ct);
         var resultado = new EjecucionSeedDemo(DateTimeOffset.UtcNow, operadores.Count, comercios.Count,
@@ -628,6 +635,153 @@ public sealed class DatosDemoSeeder(
         await envios.GuardarAsync(envio, destinatario, direccion, [bulto],
             new ServicioEnvioDeclarado(operador.Id, latitud, longitud, "Estandar"), ct);
         return new(envio, destinatario, bulto, latitud, longitud);
+    }
+
+    private async Task SembrarFixtureDevolucionAp04Async(OrganizacionDemo comercio, OrganizacionDemo operador,
+        CancellationToken ct)
+    {
+        const string referencia = "AP04-GCP-DEV-C2-01";
+        const string codigoBulto = "AP04-GCP-DEV-C2-01-P1";
+
+        await db.ApplyAsync(RlsActorContext.From(comercio.Contexto), ct);
+        await envios.BloquearReferenciasImportacionAsync([referencia], ct);
+        var identidades = await envios.BuscarIdentidadesImportacionAsync([referencia], ct);
+        if (identidades.Count > 1)
+            throw new InvalidOperationException("La referencia reservada de la fixture AP-04 no es única.");
+        if (identidades.Count == 1)
+        {
+            if (identidades[0].OperadorId != operador.Id)
+                throw new InvalidOperationException("La referencia reservada AP-04 pertenece a otro operador.");
+            await db.ApplyAsync(RlsActorContext.From(operador.Contexto), ct);
+            if (!await db.Bultos.AsNoTracking().AnyAsync(x => x.OperadorId == operador.Id
+                && x.EnvioId == identidades[0].EnvioId && x.Codigo == codigoBulto, ct))
+                throw new InvalidOperationException("La referencia AP-04 ya existe con una declaración distinta a la fixture reservada.");
+            return;
+        }
+
+        await db.ApplyAsync(RlsActorContext.From(operador.Contexto), ct);
+        var reglasId = await db.ReglasOperativasOperadores.AsNoTracking()
+            .Where(x => x.OperadorId == operador.Id).Select(x => x.VersionVigenteId)
+            .SingleAsync(ct) ?? throw new InvalidOperationException("El operador demo no tiene reglas publicadas para AP-04.");
+        var instanteActual = DateTimeOffset.UtcNow;
+        var hoyLocal = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(instanteActual, ZonaHoraria).DateTime);
+        var diasDesdeLunes = ((int)hoyLocal.DayOfWeek + 6) % 7;
+        var fechaOperativa = hoyLocal.AddDays(-diasDesdeLunes - (diasDesdeLunes == 0 ? 7 : 0));
+
+        var destinatario = new Destinatario(operador.Id, "Destinatario sintético AP-04", "ap04-destinatario@demo.nexoruta.test");
+        var direccion = new Direccion(operador.Id, "Av. 18 de Julio 1200, Montevideo");
+        var latitud = -34.905;
+        var longitud = -56.185;
+        var servicio = new ServicioEnvioDeclarado(operador.Id, latitud, longitud, "Estandar");
+        var comandoAlta = new CrearEnvioCommand(operador.Id, destinatario.Nombre, destinatario.Email,
+            "Av. 18 de Julio 1200, Montevideo", [new(codigoBulto, 500, 20, 15, 10)], servicio);
+        var envio = new Envio(operador.Id, comercio.Id, comercio.UsuarioId, destinatario.Id, direccion.Id,
+            reglasId, AFechaUtc(fechaOperativa, new TimeOnly(8, 45)));
+        var bulto = new Bulto(operador.Id, envio.Id, codigoBulto, 500, 20, 15, 10);
+        await db.ApplyAsync(RlsActorContext.From(comercio.Contexto), ct);
+        await db.SelectOperatorAsync(operador.Id, ct);
+        await envios.GuardarImportadosAsync(
+            [new(envio, destinatario, direccion, [bulto], servicio, referencia,
+                HuellaSolicitudEnvio.VersionActual,
+                HuellaSolicitudEnvio.Calcular(comercio.Id, operador.Id, comandoAlta))], ct);
+
+        await db.ApplyAsync(RlsActorContext.From(operador.Contexto), ct);
+        var reloj = new RelojDemo(AFechaUtc(fechaOperativa, new TimeOnly(8, 45)));
+        var rutasDemo = new EfRutasRepository(db, reloj);
+        var admision = await rutasDemo.CotejarBultoAsync(operador.Contexto, bulto.Id,
+            new(Guid.CreateVersion7(), envio.Version, bulto.Version, true, bulto.PesoGramos,
+                bulto.LargoCentimetros, bulto.AnchoCentimetros, bulto.AltoCentimetros,
+                "Recepción física sintética de la fixture AP-04."), ct);
+        if (admision?.Recepcion.EstadoEnvio != "EnDeposito")
+            throw new InvalidOperationException("No se pudo admitir la fixture sintética AP-04 en depósito.");
+
+        var repartidor = await repartidores.ObtenerActivoAsync(operador.Id, operador.AccesoId, ct)
+            ?? throw new InvalidOperationException("Falta el repartidor del operador demo para la fixture AP-04.");
+        var vehiculo = (await configuracionReparto.VehiculosAsync(operador.Id, ct))
+            .SingleOrDefault(x => x.Matricula == "SAA 1234" && x.Activo)
+            ?? throw new InvalidOperationException("Falta el vehículo demo disponible para la fixture AP-04.");
+        var operaciones = new EfOperacionesRepartoRepository(db, reloj, configuration);
+        var jornada = new EjecutarRepartoUseCase(new UsuarioActualDemo(operador.Contexto), repartidores, operaciones);
+
+        for (var intento = 1; intento <= 3; intento++)
+        {
+            var horaLlegada = new TimeOnly(9, 30).Add(TimeSpan.FromHours((intento - 1) * 2.5));
+            var inicio = AFechaUtc(fechaOperativa, horaLlegada.Add(TimeSpan.FromMinutes(-30)));
+            var llegada = AFechaUtc(fechaOperativa, horaLlegada);
+            reloj.AvanzarA(inicio);
+            var hoja = await rutasDemo.PlanificarAsync(operador.Id,
+                new(repartidor.AccesoId, vehiculo.Id, fechaOperativa,
+                    [new(envio.Id, llegada)]), ct);
+            var despachada = await rutasDemo.DespacharAsync(operador.Contexto, hoja.Id, hoja.Version, ct)
+                ?? throw new InvalidOperationException("No se pudo despachar la ruta sintética AP-04.");
+            long secuencia = 0;
+
+            async Task AplicarAsync(string tipo, DateTimeOffset ocurrida, object datos, bool conEnvio)
+            {
+                reloj.AvanzarA(ocurrida.AddMinutes(1));
+                var versionActual = conEnvio
+                    ? await db.Envios.AsNoTracking().Where(x => x.OperadorId == operador.Id && x.Id == envio.Id)
+                        .Select(x => (long?)x.Version).SingleAsync(ct)
+                    : null;
+                var resultado = await jornada.AplicarAsync(despachada.JornadaId,
+                    new(Guid.CreateVersion7(), ++secuencia, tipo, conEnvio ? envio.Id : null,
+                        versionActual, ocurrida, JsonSerializer.SerializeToElement(datos)), ct);
+                if (resultado is null || resultado.Resultado != "Aplicada")
+                    throw new InvalidOperationException($"No se pudo aplicar la operación sintética AP-04 {tipo}.");
+            }
+
+            await AplicarAsync("InicioJornada", inicio, new { }, conEnvio: false);
+            await AplicarAsync("CargarBulto", inicio.AddMinutes(10), new { bultoId = bulto.Id }, conEnvio: true);
+            await AplicarAsync("ConfirmarCarga", inicio.AddMinutes(20), new { }, conEnvio: false);
+            await AplicarAsync("IntentoFallido", llegada,
+                new { motivo = "DESTINATARIO_AUSENTE" }, conEnvio: true);
+            await AplicarAsync("Rendicion", llegada.AddMinutes(5),
+                new { bultoIds = new[] { bulto.Id } }, conEnvio: false);
+            await AplicarAsync("FinJornada", llegada.AddMinutes(10), new { }, conEnvio: false);
+
+            var versionEnvio = await db.Envios.AsNoTracking().Where(x => x.OperadorId == operador.Id && x.Id == envio.Id)
+                .Select(x => x.Version).SingleAsync(ct);
+            if (!await rutasDemo.RecibirAsync(operador.Id, envio.Id, versionEnvio, ct))
+                throw new InvalidOperationException("No se pudo recibir la rendición sintética AP-04 en depósito.");
+
+            var ocupacion = await db.OcupacionesRuta.SingleAsync(x => x.OperadorId == operador.Id && x.RutaId == hoja.Id, ct);
+            await rutasDemo.ConfirmarFlotaAsync(operador.Contexto, vehiculo.Id, "retorno",
+                new(Guid.CreateVersion7(), ocupacion.Id, ocupacion.Version, "Retorno de ruta sintética AP-04."), ct);
+            await rutasDemo.ConfirmarFlotaAsync(operador.Contexto, vehiculo.Id, "liberar",
+                new(Guid.CreateVersion7(), ocupacion.Id, ocupacion.Version,
+                    "Carga sintética recibida en depósito para AP-04."), ct);
+
+            if (intento < 3)
+            {
+                versionEnvio = await db.Envios.AsNoTracking().Where(x => x.OperadorId == operador.Id && x.Id == envio.Id)
+                    .Select(x => x.Version).SingleAsync(ct);
+                var reprogramacion = await rutasDemo.ReprogramarAsync(operador.Id, envio.Id,
+                    new(versionEnvio) { SolicitudPublicaId = Guid.CreateVersion7() }, ct);
+                if (reprogramacion is null)
+                    throw new InvalidOperationException("No se pudo reprogramar la fixture sintética AP-04.");
+            }
+        }
+
+        var versionFinalEnvio = await db.Envios.AsNoTracking().Where(x => x.OperadorId == operador.Id && x.Id == envio.Id)
+            .Select(x => x.Version).SingleAsync(ct);
+        var decision = await rutasDemo.IniciarDevolucionAsync(operador.Contexto, envio.Id,
+            new(versionFinalEnvio, Guid.CreateVersion7(), "Tres intentos sintéticos fallidos para verificar AP-04."), ct);
+        if (decision is null)
+            throw new InvalidOperationException("No se pudo iniciar la devolución sintética AP-04.");
+
+        versionFinalEnvio = await db.Envios.AsNoTracking().Where(x => x.OperadorId == operador.Id && x.Id == envio.Id)
+            .Select(x => x.Version).SingleAsync(ct);
+        if (!await rutasDemo.RecibirAsync(operador.Id, envio.Id, versionFinalEnvio, ct))
+            throw new InvalidOperationException("No se pudo cerrar la recepción sintética de la devolución AP-04.");
+
+        var bultoActual = await db.Bultos.AsNoTracking().SingleAsync(x => x.OperadorId == operador.Id && x.Id == bulto.Id, ct);
+        versionFinalEnvio = await db.Envios.AsNoTracking().Where(x => x.OperadorId == operador.Id && x.Id == envio.Id)
+            .Select(x => x.Version).SingleAsync(ct);
+        var transferencia = await devoluciones.TransferirAsync(operador.Contexto, envio.Id,
+            new(Guid.CreateVersion7(), versionFinalEnvio,
+                [new(bultoActual.Id, bultoActual.Version)], ConfirmarTransferenciaFisica: true), ct);
+        if (transferencia is null)
+            throw new InvalidOperationException("No se pudo registrar la transferencia física sintética AP-04 al comercio.");
     }
 
     // Only the explicitly requested demo seed creates this synthetic service, for its new operators.
