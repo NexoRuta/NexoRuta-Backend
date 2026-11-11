@@ -336,6 +336,7 @@ public sealed class DatosDemoSeeder(
     {
         var usuario = await db.Usuarios.AsNoTracking().SingleOrDefaultAsync(x => x.Email == email, ct);
         if (usuario is null) return null;
+        await db.SelectPlatformTargetUserAsync(usuario.Id, ct);
         var accesos = db.AccesosUsuario.AsNoTracking().Where(x => x.UsuarioId == usuario.Id
             && x.TipoOrganizacion == tipo);
         if (requierePropietario) accesos = accesos.Where(x => x.EsPropietario);
