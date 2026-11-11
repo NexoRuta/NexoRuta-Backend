@@ -13,15 +13,15 @@ public sealed class AP04CommerceReturns : Migration
         ALTER TABLE public."Bultos"
             ADD CONSTRAINT "AK_Bultos_Operador_Envio_Id" UNIQUE ("OperadorId", "EnvioId", "Id");
 
-        INSERT INTO public."Permisos" ("Id", "Codigo", "Nombre")
-        VALUES (gen_random_uuid(), 'devoluciones.gestionar', 'devoluciones.gestionar')
-        ON CONFLICT ("Codigo") DO NOTHING;
-
         ALTER POLICY permissions_catalog_insert ON public."Permisos"
             WITH CHECK (nexoruta_app.setting('actor_kind') IN ('plataforma','identidad','bootstrap')
                 AND "Codigo" IN ('usuarios.gestionar','configuracion.gestionar','envios.crear',
                     'envios.consultar','envios.gestionar','plataforma.organizaciones.gestionar',
                     'reparto.ejecutar','devoluciones.gestionar'));
+
+        INSERT INTO public."Permisos" ("Id", "Codigo", "Nombre")
+        VALUES (gen_random_uuid(), 'devoluciones.gestionar', 'devoluciones.gestionar')
+        ON CONFLICT ("Codigo") DO NOTHING;
 
         INSERT INTO public."RolesPermisos" ("RolId", "PermisoId")
         SELECT a."RolId", p."Id"
