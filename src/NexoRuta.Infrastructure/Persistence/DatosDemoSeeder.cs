@@ -23,6 +23,8 @@ using NetTopologySuite;
 using NexoRuta.Domain.ReglasOperativas;
 using NexoRuta.Domain.Reparto;
 using NexoRuta.Infrastructure.Reparto;
+using NexoRuta.Infrastructure.Envios.Repositories;
+using NexoRuta.Infrastructure.ZonasCobertura;
 
 namespace NexoRuta.Infrastructure.Persistence;
 
@@ -667,6 +669,7 @@ public sealed class DatosDemoSeeder(
         }
 
         await db.ApplyAsync(RlsActorContext.From(operador.Contexto), ct);
+        await AsegurarRevisionActualCoberturaAp04Async(operador, ct);
         var reglasId = await db.ReglasOperativasOperadores.AsNoTracking()
             .Where(x => x.OperadorId == operador.Id).Select(x => x.VersionVigenteId)
             .SingleAsync(ct) ?? throw new InvalidOperationException("El operador demo no tiene reglas publicadas para AP-04.");
@@ -793,6 +796,34 @@ public sealed class DatosDemoSeeder(
         // transfer's Operador context can still see the parcel lines.
         await db.Database.ExecuteSqlRawAsync(
             "SET CONSTRAINTS return_transfer_lines_required IMMEDIATE", ct);
+    }
+
+    private async Task AsegurarRevisionActualCoberturaAp04Async(OrganizacionDemo operador, CancellationToken ct)
+    {
+        const double latitud = -34.905;
+        const double longitud = -56.185;
+        const string modalidad = "Estandar";
+
+        var ofertas = await TarifasAdmision.OfertasAsync(db, operador.Id, latitud, longitud, ct);
+        var oferta = ofertas.SingleOrDefault(x => x.Tarifa.Modalidad.ToString() == modalidad)
+            ?? throw new InvalidOperationException("El operador demo no publica una oferta AP-04 inequívoca.");
+        var zona = await db.ZonasCobertura.Include(x => x.Franjas)
+            .SingleOrDefaultAsync(x => x.OperadorId == operador.Id && x.Id == oferta.Tarifa.ZonaId, ct)
+            ?? throw new InvalidOperationException("La cobertura publicada para AP-04 ya no existe.");
+
+        if (await db.ZonasCoberturaRevisiones.AsNoTracking().AnyAsync(x => x.OperadorId == operador.Id
+            && x.ZonaId == zona.Id && x.NumeroRevision == oferta.RevisionZona, ct))
+            return;
+
+        // The AP-04 shipment is quoted from the published state now. Restore a missing current snapshot only;
+        // a missing historical revision cannot be reconstructed from the mutable zone safely.
+        if (zona.RevisionActual != oferta.RevisionZona || zona.Version != oferta.VersionZona)
+            throw new InvalidOperationException("La oferta AP-04 refiere a una revisión histórica de cobertura no verificable.");
+
+        db.ZonasCoberturaRevisiones.Add(new ZonaCoberturaRevision(operador.Id, zona.Id,
+            zona.RevisionActual, zona.Version, zona.ActualizadaUtc, operador.UsuarioId,
+            ZonaCoberturaSnapshotJson.Crear(zona)));
+        await db.SaveChangesAsync(ct);
     }
 
     // Only the explicitly requested demo seed creates this synthetic service, for its new operators.
