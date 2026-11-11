@@ -142,7 +142,7 @@ public sealed class DatosDemoSeeder(
             await rutas.ConfirmarFlotaAsync(operador.Contexto, vehiculo.Id, "verificar-inicial",
                 new(Guid.CreateVersion7(), null, vehiculo.Version, "Verificación explícita del vehículo sintético demo."), ct);
             await PublicarReglasAsync(operador, fechaReglas, ct);
-            await PublicarServicioDemoAsync(operador, ct);
+            await PublicarServicioDemoAsync(operador, ct, calendarioCompleto: true);
             var versionReglasId = await db.ReglasOperativasOperadores.AsNoTracking()
                 .Where(x => x.OperadorId == operador.Id).Select(x => x.VersionVigenteId)
                 .SingleAsync(ct) ?? throw new InvalidOperationException("No se publicaron reglas operativas demo.");
@@ -168,8 +168,15 @@ public sealed class DatosDemoSeeder(
 
                 await db.ApplyAsync(RlsActorContext.From(operador.Contexto), ct);
                 foreach (var envio in enviosDia)
-                    if (!await rutas.RecibirAsync(operador.Id, envio.Envio.Id, envio.Envio.Version, ct))
-                        throw new InvalidOperationException("No se pudo recibir un envío demo en depósito.");
+                {
+                    var recepcion = await rutas.CotejarBultoAsync(operador.Contexto, envio.Bulto.Id,
+                        new(Guid.CreateVersion7(), envio.Envio.Version, envio.Bulto.Version, true,
+                            envio.Bulto.PesoGramos, envio.Bulto.LargoCentimetros,
+                            envio.Bulto.AnchoCentimetros, envio.Bulto.AltoCentimetros,
+                            "Recepción física sintética del seed general."), ct);
+                    if (recepcion?.Recepcion.EstadoEnvio != "EnDeposito")
+                        throw new InvalidOperationException("No se pudo registrar la recepción sintética inicial del envío demo.");
+                }
 
                 var paradas = enviosDia.Select((envio, index) => new ParadaPlanificadaDatos(
                     envio.Envio.Id, horaInicio.AddHours(1).AddMinutes(index * 45))).ToArray();
@@ -782,6 +789,10 @@ public sealed class DatosDemoSeeder(
                 [new(bultoActual.Id, bultoActual.Version)], ConfirmarTransferenciaFisica: true), ct);
         if (transferencia is null)
             throw new InvalidOperationException("No se pudo registrar la transferencia física sintética AP-04 al comercio.");
+        // The demo seed commits as Plataforma. Evaluate this deferred RLS-backed constraint while the
+        // transfer's Operador context can still see the parcel lines.
+        await db.Database.ExecuteSqlRawAsync(
+            "SET CONSTRAINTS return_transfer_lines_required IMMEDIATE", ct);
     }
 
     // Only the explicitly requested demo seed creates this synthetic service, for its new operators.
