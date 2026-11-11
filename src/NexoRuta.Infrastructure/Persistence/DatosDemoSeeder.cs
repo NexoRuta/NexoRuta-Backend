@@ -669,7 +669,7 @@ public sealed class DatosDemoSeeder(
         }
 
         await db.ApplyAsync(RlsActorContext.From(operador.Contexto), ct);
-        await AsegurarRevisionActualCoberturaAp04Async(operador, ct);
+        await AsegurarRevisionActualCoberturaAp04Async(comercio, operador, ct);
         var reglasId = await db.ReglasOperativasOperadores.AsNoTracking()
             .Where(x => x.OperadorId == operador.Id).Select(x => x.VersionVigenteId)
             .SingleAsync(ct) ?? throw new InvalidOperationException("El operador demo no tiene reglas publicadas para AP-04.");
@@ -798,15 +798,19 @@ public sealed class DatosDemoSeeder(
             "SET CONSTRAINTS return_transfer_lines_required IMMEDIATE", ct);
     }
 
-    private async Task AsegurarRevisionActualCoberturaAp04Async(OrganizacionDemo operador, CancellationToken ct)
+    private async Task AsegurarRevisionActualCoberturaAp04Async(
+        OrganizacionDemo comercio, OrganizacionDemo operador, CancellationToken ct)
     {
         const double latitud = -34.905;
         const double longitud = -56.185;
         const string modalidad = "Estandar";
 
+        await db.ApplyAsync(RlsActorContext.From(comercio.Contexto), ct);
         var ofertas = await TarifasAdmision.OfertasAsync(db, operador.Id, latitud, longitud, ct);
         var oferta = ofertas.SingleOrDefault(x => x.Tarifa.Modalidad.ToString() == modalidad)
             ?? throw new InvalidOperationException("El operador demo no publica una oferta AP-04 inequívoca.");
+
+        await db.ApplyAsync(RlsActorContext.From(operador.Contexto), ct);
         var zona = await db.ZonasCobertura.Include(x => x.Franjas)
             .SingleOrDefaultAsync(x => x.OperadorId == operador.Id && x.Id == oferta.Tarifa.ZonaId, ct)
             ?? throw new InvalidOperationException("La cobertura publicada para AP-04 ya no existe.");
