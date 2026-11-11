@@ -137,6 +137,17 @@ public static class RlsTransaction
             (RlsContextContract.TargetUserId, userId.ToString("D")));
     }
 
+    public static Task SelectPlatformTargetOrganizationAsync(
+        this NexoRutaDbContext db,
+        Guid organizationId,
+        CancellationToken cancellationToken = default)
+    {
+        if (organizationId == Guid.Empty || db.Database.CurrentTransaction is null)
+            throw new InvalidOperationException("Platform target organization selection requires a valid id and an active database transaction.");
+        return ExecuteSettingsAsync(db, null, cancellationToken,
+            (RlsContextContract.SelectedOrganizationId, organizationId.ToString("D")));
+    }
+
     public static Task SetBootstrapUserAsync(
         this NexoRutaDbContext db,
         Guid userId,

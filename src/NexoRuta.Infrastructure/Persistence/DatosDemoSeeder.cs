@@ -344,6 +344,7 @@ public sealed class DatosDemoSeeder(
             ?? throw new InvalidOperationException(requierePropietario
                 ? "La identidad reservada para el fixture OPT-06 tiene un acceso incompatible."
                 : $"La cuenta demo {email} no tiene un acceso compatible con {tipo}.");
+        await db.SelectPlatformTargetOrganizationAsync(acceso.OrganizacionId, ct);
         var rol = await db.Roles.AsNoTracking().SingleAsync(x => x.Id == acceso.RolId, ct);
         var nombre = tipo == TipoAccesoUsuario.Operador
             ? await db.Operadores.AsNoTracking().Where(x => x.Id == acceso.OperadorId).Select(x => x.Nombre).SingleAsync(ct)
