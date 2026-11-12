@@ -96,3 +96,10 @@ public sealed record TransicionLiquidacionResponse(string Estado, Guid ActorId, 
 {
     public static TransicionLiquidacionResponse Desde(App.TransicionLiquidacion value)=>new(value.Estado,value.ActorId,value.FechaUtc);
 }
+
+public sealed record OpcionGestionResponse(Guid Id, string Nombre);
+public sealed record OpcionesGestionResponse(IReadOnlyList<OpcionGestionResponse> Opciones, bool HayMas)
+{
+    public static OpcionesGestionResponse Desde(App.OpcionesGestion value)
+        => new(value.Opciones.Select(o=>new OpcionGestionResponse(o.Id,o.Nombre)).ToArray(),value.HayMas);
+}

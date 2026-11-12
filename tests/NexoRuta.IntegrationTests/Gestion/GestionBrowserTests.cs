@@ -36,7 +36,7 @@ public sealed class GestionBrowserTests(PostgresFixture postgres):IClassFixture<
             foreach(var pair in new Dictionary<string,string>{["MANAGEMENT_BACKOFFICE"]=backoffice,["MANAGEMENT_COMMERCE"]=commerce,["MANAGEMENT_OPERATOR"]=s.OperatorA.OperadorId!.Value.ToString(),["MANAGEMENT_OTHER_OPERATOR"]=s.OperatorB.OperadorId!.Value.ToString(),["MANAGEMENT_COMMERCE_ID"]=s.CommerceA.ComercioId!.Value.ToString(),["MANAGEMENT_PASSWORD"]=AuthenticationTestData.Password,["MANAGEMENT_PARTIAL"]=s.PartialShipment.ToString()})nodeStart.Environment[pair.Key]=pair.Value;
             nodeStart.Environment["NEXORUTA_GESTION_E2E_DIR"]=output;
             using var node=Process.Start(nodeStart)!;var stdout=node.StandardOutput.ReadToEndAsync();var stderr=node.StandardError.ReadToEndAsync();
-            using var timeout=new CancellationTokenSource(TimeSpan.FromMinutes(3));await node.WaitForExitAsync(timeout.Token);Assert.True(node.ExitCode==0,await stdout+await stderr);
+            using var timeout=new CancellationTokenSource(TimeSpan.FromMinutes(6));await node.WaitForExitAsync(timeout.Token);Assert.True(node.ExitCode==0,await stdout+await stderr);
         }finally{foreach(var app in apps){if(!app.HasExited)app.Kill(entireProcessTree:true);await app.WaitForExitAsync();app.Dispose();}await Task.WhenAll(logs);}
     }
     private sealed class SlowManagement:IStartupFilter

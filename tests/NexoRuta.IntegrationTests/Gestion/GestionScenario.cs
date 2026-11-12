@@ -30,7 +30,7 @@ internal sealed class GestionScenario
     internal static readonly DateTimeOffset Admission=new(2026,11,2,2,30,0,TimeSpan.Zero); // Nov 1, 23:30 in Montevideo.
     internal static readonly JsonSerializerOptions Json=new(){Converters={new JsonStringEnumConverter()}};
 
-    internal static async Task<GestionScenario> CreateAsync(PostgresFixture postgres)
+    internal static async Task<GestionScenario> CreateAsync(PostgresFixture postgres, bool precisionSubMicrosegundo=false)
     {
         var data=await postgres.CreateDatabaseAsync();await using var db=data.CreateDbContext();
         await AuthenticationTestData.Seeder(db,new AccesoInicial("gestion-a@example.test","Operador A sintético","Comercio A sintético","gestion-op-a@example.test")).SeedAsync();
@@ -96,7 +96,7 @@ internal sealed class GestionScenario
                 foreach(var box in boxes){box.DeclararRendicion(op.Id,route.Id);box.RecibirEnDeposito();}e.CambiarEstado(EstadoEnvio.RetiroEnDeposito,e.Version);await db.SaveChangesAsync();
                 foreach(var box in boxes)box.EntregarAlComercio();e.CambiarEstado(EstadoEnvio.EntregadoComercio,e.Version);await db.SaveChangesAsync();return e;
             }
-            var time=Admission.AddHours(2);
+            var time=Admission.AddHours(2).AddTicks(precisionSubMicrosegundo?7:0);
             boxes[0].Entregar(op.Id,route.Id);boxes[0].RegistrarResultado(outcome=="proof"?ResultadoBulto.EntregaPendienteValidacion:ResultadoBulto.Entregado,boxes[0].Version,entregadoEn:time,vence:DateTimeOffset.UtcNow.AddHours(1));
             if(parcels>1)boxes[1].RegistrarPendiente("AUSENTE",boxes[1].Version);
             e.ActualizarResultadoBultos(boxes,DateTimeOffset.UtcNow);await db.SaveChangesAsync();
