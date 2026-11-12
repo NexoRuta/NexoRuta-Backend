@@ -50,7 +50,7 @@ public sealed class PublicCancellationTests(PostgresFixture postgres) : IClassFi
         Assert.Empty(await db.AvisosReparto.ToArrayAsync());
         Assert.DoesNotContain("destinatario", await respuesta.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
         var error = await Assert.ThrowsAsync<NotSupportedException>(() => db.GetService<IMigrator>().MigrateAsync("20261019225313_RequireRecipientEmail"));
-        Assert.Contains("AP-04 contains immutable physical and commercial facts", error.Message);
+        Assert.Contains("AP-04 contains immutable physical and commercial audit facts", error.Message);
         Assert.Single(await db.CancelacionesEnvio.ToArrayAsync());
         Assert.NotNull((await db.CodigosCancelacionPublica.SingleAsync()).ConsumidoEnUtc);
     }
