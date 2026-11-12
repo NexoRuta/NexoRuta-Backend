@@ -160,6 +160,7 @@ public sealed class PlatformSeederTests(PostgresFixture postgres) : IClassFixtur
         Assert.Equal(
             new[]
             {
+                "devoluciones.gestionar",
                 "envios.consultar",
                 "envios.gestionar",
                 "plataforma.organizaciones.gestionar"
@@ -247,6 +248,7 @@ public sealed class PlatformSeederTests(PostgresFixture postgres) : IClassFixtur
         Assert.Equal(
             new[]
             {
+                "devoluciones.gestionar",
                 "envios.consultar",
                 "envios.gestionar",
                 "plataforma.organizaciones.gestionar"
