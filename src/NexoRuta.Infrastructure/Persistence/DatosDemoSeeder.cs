@@ -913,6 +913,9 @@ public sealed class DatosDemoSeeder(
             RecargoNuevaVisitaUyu = fuente.RecargoNuevaVisitaUyu
         };
         version.ReemplazarConfiguracion(0, configuracion);
+        // Persist the edited draft version before publication so its concurrency
+        // counter matches the database row when the publication guard runs.
+        await db.SaveChangesAsync(ct);
         version.Publicar(1, checked(raiz.UltimoNumeroPublicacion + 1), operador.UsuarioId, publicadaEnUtc);
         // Persist publication metadata before moving the root pointer: its BEFORE trigger
         // validates the referenced version from PostgreSQL, not EF's in-memory graph.
