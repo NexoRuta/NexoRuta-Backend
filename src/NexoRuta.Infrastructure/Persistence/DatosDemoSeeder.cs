@@ -914,6 +914,9 @@ public sealed class DatosDemoSeeder(
         };
         version.ReemplazarConfiguracion(0, configuracion);
         version.Publicar(1, checked(raiz.UltimoNumeroPublicacion + 1), operador.UsuarioId, publicadaEnUtc);
+        // Persist publication metadata before moving the root pointer: its BEFORE trigger
+        // validates the referenced version from PostgreSQL, not EF's in-memory graph.
+        await db.SaveChangesAsync(ct);
         raiz.Publicar(version, publicadaEnUtc);
         await db.SaveChangesAsync(ct);
         await db.Database.ExecuteSqlRawAsync(
@@ -936,6 +939,9 @@ public sealed class DatosDemoSeeder(
         db.VersionesReglasOperativas.Add(restauracion);
         await db.SaveChangesAsync(ct);
         restauracion.Publicar(0, checked(raiz.UltimoNumeroPublicacion + 1), operador.UsuarioId, publicadaEnUtc);
+        // See the temporary publication above: persist the Published row first so the
+        // root's immediate trigger sees the new state while validating its foreign pointer.
+        await db.SaveChangesAsync(ct);
         raiz.Publicar(restauracion, publicadaEnUtc);
         await db.SaveChangesAsync(ct);
     }
