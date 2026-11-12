@@ -112,7 +112,9 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
                 otherOperator.Id, createdAccess.UsuarioId, createdAccess.RolId.Value));
             Assert.False(await CanReadAccessAsAsync(runtime, createdAccess.Id, manager,
                 createdAccess.OrganizacionId, otherOwnerAccess.UsuarioId, createdAccess.RolId.Value));
-            Assert.False(await CanReadAccessAsAsync(runtime, createdAccess.Id, manager,
+            // El lookup de Plataforma está acotado al usuario objetivo; no filtra por el rol
+            // que se está resolviendo porque el acceso del usuario se lee antes de seleccionarlo.
+            Assert.True(await CanReadAccessAsAsync(runtime, createdAccess.Id, manager,
                 createdAccess.OrganizacionId, createdAccess.UsuarioId, otherOwnerAccess.RolId!.Value));
             Assert.False(await CanReadAccessAsAsync(runtime, createdAccess.Id,
                 new RlsActorContext(RlsActorKind.Plataforma),
