@@ -297,7 +297,8 @@ public sealed class AltaPropiaHttpTests(PostgresFixture postgres) : IClassFixtur
         Assert.Equal(HttpStatusCode.Created, creation.StatusCode);
         var owner = (await creation.Content.ReadFromJsonAsync<AltaOrganizacion>())!;
         await Login(client, "roles-owner@example.test");
-        var expected = new[] { "configuracion.gestionar", "envios.consultar", "envios.crear", "usuarios.gestionar" };
+        var expected = new[] { "configuracion.gestionar", "devoluciones.gestionar", "envios.consultar", "envios.crear", "usuarios.gestionar" };
+        Assert.Contains("devoluciones.gestionar", expected);
         Assert.Equal(expected, await client.GetFromJsonAsync<string[]>("/api/usuarios/actual/permisos"));
         var catalog = await client.GetFromJsonAsync<JsonElement>("/api/roles/permisos");
         Assert.Equal(expected, catalog.EnumerateArray().Select(x => x.GetProperty("codigo").GetString()).Order());

@@ -3,9 +3,12 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
+using NexoRuta.Domain.Administracion;
 using NexoRuta.Api.Features.Reparto.Contracts;
 using NexoRuta.Domain.Envios;
 using NexoRuta.Domain.ReglasOperativas;
+using NexoRuta.Infrastructure.Administracion;
 using NexoRuta.IntegrationTests.Fixtures;
 using NexoRuta.IntegrationTests.Seguridad;
 using static NexoRuta.IntegrationTests.Fixtures.RepartoHttpData;
@@ -72,10 +75,11 @@ public sealed partial class OperacionesRepartoHttpTests
     }
 
     [Theory]
-    [InlineData(true, false)]
-    [InlineData(false, false)]
-    [InlineData(true, true)]
-    public async Task C31_EntregaParcialRespetaPoliticaCustodiaPruebaReintentosYConflictoPorBulto(bool permitida, bool devolver)
+    [InlineData(true, false, true)]
+    [InlineData(false, false, true)]
+    [InlineData(true, true, true)]
+    [InlineData(true, true, false)]
+    public async Task C31_EntregaParcialRespetaPoliticaCustodiaPruebaReintentosYConflictoPorBulto(bool permitida, bool devolver, bool conforme)
     {
         var data = await postgres.CreateDatabaseAsync();
         using (var seed = data.CreateApiFactory()) using (seed.CreateHttpClient()) { }
@@ -134,6 +138,7 @@ public sealed partial class OperacionesRepartoHttpTests
         var bultos = await verificar.Bultos.Where(b => b.EnvioId == actual.Id).ToArrayAsync();
         Assert.Equal(ResultadoBulto.Entregado, bultos.Single(b => b.Id == primero.Id).Resultado);
         Assert.Equal(EstadoCustodiaBulto.Deposito, bultos.Single(b => b.Id == segundo.Id).Custodia);
+        var deliveredBeforeTransfer = bultos.Single(b => b.Id == primero.Id);
         var prueba = Assert.Single(await verificar.PruebasEntrega.Where(e => e.EnvioId == actual.Id).ToArrayAsync()); Assert.Equal(primero.Id, prueba.BultoId); Assert.Equal(foto, prueba.FotoId);
         Assert.Equal("Conflicto", (await Aplicar(client, hoja, Operacion(Guid.NewGuid(), 5, "EntregaBultos", p.EnvioId, actual.Version,
             new { ResultadosBultos = new[] { new { BultoId = primero.Id, Version = primero.Version + 1, Entregado = true } } }))).Resultado);
@@ -149,10 +154,56 @@ public sealed partial class OperacionesRepartoHttpTests
             var transferencia = (await devuelta.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("transferenciaId").GetGuid();
             var b = await verificar.Bultos.AsNoTracking().SingleAsync(b => b.Id == segundo.Id);
             Assert.Equal(ResultadoBulto.Devuelto, b.Resultado); Assert.Equal(EstadoCustodiaBulto.Comercio, b.Custodia);
+            var shipmentBeforeAck = await verificar.Envios.AsNoTracking().SingleAsync(shipment => shipment.Id == actual.Id);
+            var outboxCountBeforeAck = await verificar.OutboxMessages.CountAsync();
 
             var commerceAccess = await verificar.AccesosUsuario.AsNoTracking().SingleAsync(a => a.ComercioId == actual.ComercioId);
             using var commerce = factory.CreateHttpClient();
             await commerce.SetBearerForAccessAsync(data, commerceAccess.Id);
+            const string secondaryCommerceEmail = "ap04-concurrency-commerce@example.test";
+            Guid secondaryCommerceAccessId;
+            await using (var identity = data.CreateDbContext())
+            {
+                var commerceRoleId = commerceAccess.RolId
+                    ?? throw new InvalidOperationException("The seeded commerce actor must have a role.");
+                var commerceRole = await identity.Roles.SingleAsync(role => role.Id == commerceRoleId);
+                var secondaryUser = new Usuario(secondaryCommerceEmail, AuthenticationTestData.Hash(secondaryCommerceEmail));
+                var secondaryAccess = new AccesoUsuario(secondaryUser.Id, null, actual.ComercioId, commerceRole);
+                identity.AddRange(secondaryUser, secondaryAccess);
+                await identity.SaveChangesAsync();
+                secondaryCommerceAccessId = secondaryAccess.Id;
+            }
+            using var secondApiFactory = new IntegrationApiFactory(runtime, settings: settings);
+            using var commerceOnSecondApi = secondApiFactory.CreateHttpClient();
+            await commerceOnSecondApi.SetBearerForAccessAsync(data, commerceAccess.Id);
+            using var secondCommerceActor = secondApiFactory.CreateHttpClient();
+            await secondCommerceActor.SetBearerForAccessAsync(data, secondaryCommerceAccessId);
+            Guid foreignCommerceId;
+            Guid foreignCommerceAccessId;
+            await using (var foreignSetup = data.CreateDbContext())
+            {
+                await AuthenticationTestData.Seeder(foreignSetup, new AccesoInicial(
+                    "ap04-foreign-commerce@example.test", "AP04 foreign operator", "AP04 foreign commerce",
+                    "ap04-foreign-operator@example.test")).SeedAsync();
+                var foreignAccessId = await (from access in foreignSetup.AccesosUsuario.AsNoTracking()
+                    join user in foreignSetup.Usuarios.AsNoTracking() on access.UsuarioId equals user.Id
+                    where access.ComercioId != null && user.Email == "ap04-foreign-commerce@example.test"
+                    select access.Id).SingleAsync();
+                var foreignAccess = await foreignSetup.AccesosUsuario.AsNoTracking()
+                    .SingleAsync(access => access.Id == foreignAccessId);
+                foreignCommerceId = foreignAccess.ComercioId!.Value;
+                foreignCommerceAccessId = foreignAccess.Id;
+                var permissionId = await foreignSetup.Permisos.AsNoTracking()
+                    .Where(permission => permission.Codigo == "devoluciones.gestionar")
+                    .Select(permission => permission.Id).SingleAsync();
+                if (!await foreignSetup.RolesPermisos.AnyAsync(grant => grant.RolId == foreignAccess.RolId && grant.PermisoId == permissionId))
+                {
+                    foreignSetup.RolesPermisos.Add(new RolPermiso(foreignAccess.RolId!.Value, permissionId));
+                    await foreignSetup.SaveChangesAsync();
+                }
+            }
+            using var foreignCommerceActor = secondApiFactory.CreateHttpClient();
+            await foreignCommerceActor.SetBearerForAccessAsync(data, foreignCommerceAccessId);
             var from = actual.CreadoEnUtc.AddDays(-1).ToString("O");
             var to = DateTimeOffset.UtcNow.AddDays(1).ToString("O");
             using var list = await commerce.GetAsync($"/api/devoluciones?operadorId={actual.OperadorId:D}&desdeUtc={Uri.EscapeDataString(from)}&hastaUtc={Uri.EscapeDataString(to)}&limite=50");
@@ -164,10 +215,26 @@ public sealed partial class OperacionesRepartoHttpTests
             var detail = await detailResponse.Content.ReadFromJsonAsync<JsonElement>();
             var returnedParcel = Assert.Single(detail.GetProperty("bultos").EnumerateArray(), item => item.GetProperty("id").GetGuid() == segundo.Id);
             Assert.True(returnedParcel.GetProperty("puedeAcusar").GetBoolean());
+            using var foreignList = await foreignCommerceActor.GetAsync($"/api/devoluciones?operadorId={actual.OperadorId:D}&desdeUtc={Uri.EscapeDataString(from)}&hastaUtc={Uri.EscapeDataString(to)}&limite=50");
+            Assert.Equal(HttpStatusCode.OK, foreignList.StatusCode);
+            Assert.Empty((await foreignList.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("items").EnumerateArray());
+            using var foreignDetail = await foreignCommerceActor.GetAsync($"/api/devoluciones/envios/{actual.Id:D}?operadorId={actual.OperadorId:D}");
+            Assert.Equal(HttpStatusCode.NotFound, foreignDetail.StatusCode);
+            using var foreignAck = await foreignCommerceActor.PostAsJsonAsync(
+                $"/api/devoluciones/transferencias/{transferencia:D}/acuses?operadorId={actual.OperadorId:D}", new
+                {
+                    ComandoId = Guid.NewGuid(), VersionTransferencia = 1, Conforme = true,
+                    Bultos = new[] { new { BultoId = segundo.Id, VersionBulto = returnedParcel.GetProperty("version").GetInt64(), Observacion = (string?)null } }
+                });
+            Assert.Equal(HttpStatusCode.NotFound, foreignAck.StatusCode);
+            Assert.Equal(0, await verificar.Database.SqlQuery<int>($"""
+                SELECT count(*)::int AS "Value" FROM public."AcusesDevolucionComercio"
+                WHERE "ComercioId"={foreignCommerceId}
+                """).SingleAsync());
             var ackCommand = new
             {
-                ComandoId = Guid.NewGuid(), VersionTransferencia = 1, Conforme = true,
-                Bultos = new[] { new { BultoId = segundo.Id, VersionBulto = returnedParcel.GetProperty("version").GetInt64(), Observacion = (string?)null } }
+                ComandoId = Guid.NewGuid(), VersionTransferencia = 1, Conforme = conforme,
+                Bultos = new[] { new { BultoId = segundo.Id, VersionBulto = returnedParcel.GetProperty("version").GetInt64(), Observacion = conforme ? null : "La caja llegó abierta." } }
             };
             await verificar.Database.ExecuteSqlInterpolatedAsync($"""
                 DELETE FROM public."RolesPermisos" rp USING public."Permisos" p
@@ -185,16 +252,45 @@ public sealed partial class OperacionesRepartoHttpTests
                 WHERE a."Id"={commerceAccess.Id} AND p."Codigo"='devoluciones.gestionar'
                 ON CONFLICT DO NOTHING
                 """);
-            using var ack = await commerce.PostAsJsonAsync($"/api/devoluciones/transferencias/{transferencia:D}/acuses?operadorId={actual.OperadorId:D}", ackCommand);
+            var concurrentResponses = await Task.WhenAll(
+                commerce.PostAsJsonAsync($"/api/devoluciones/transferencias/{transferencia:D}/acuses?operadorId={actual.OperadorId:D}", ackCommand),
+                commerceOnSecondApi.PostAsJsonAsync($"/api/devoluciones/transferencias/{transferencia:D}/acuses?operadorId={actual.OperadorId:D}", ackCommand));
+            using var ack = concurrentResponses[0];
+            using var ackFromSecondApi = concurrentResponses[1];
             Assert.Equal(HttpStatusCode.OK, ack.StatusCode);
+            Assert.Equal(HttpStatusCode.OK, ackFromSecondApi.StatusCode);
             var ackFirst = await ack.Content.ReadFromJsonAsync<JsonElement>();
-            using var replay = await commerce.PostAsJsonAsync($"/api/devoluciones/transferencias/{transferencia:D}/acuses?operadorId={actual.OperadorId:D}", ackCommand);
+            var ackSecond = await ackFromSecondApi.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal(ackFirst.GetProperty("acuseId").GetGuid(), ackSecond.GetProperty("acuseId").GetGuid());
+            Assert.Equal(conforme ? "Conforme" : "ConObservaciones", ackFirst.GetProperty("resultado").GetString());
+
+            using var differentActorReplay = await secondCommerceActor.PostAsJsonAsync(
+                $"/api/devoluciones/transferencias/{transferencia:D}/acuses?operadorId={actual.OperadorId:D}", ackCommand);
+            Assert.Equal(HttpStatusCode.Conflict, differentActorReplay.StatusCode);
+
+            await verificar.Database.ExecuteSqlInterpolatedAsync($"""
+                DELETE FROM public."RolesPermisos" rp USING public."Permisos" p
+                WHERE rp."PermisoId"=p."Id" AND p."Codigo"='devoluciones.gestionar'
+                    AND rp."RolId"=(SELECT a."RolId" FROM public."AccesosUsuario" a WHERE a."Id"={commerceAccess.Id})
+                """);
+            using var revokedReplay = await commerceOnSecondApi.PostAsJsonAsync(
+                $"/api/devoluciones/transferencias/{transferencia:D}/acuses?operadorId={actual.OperadorId:D}", ackCommand);
+            Assert.Equal(HttpStatusCode.Forbidden, revokedReplay.StatusCode);
+            await verificar.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO public."RolesPermisos" ("RolId","PermisoId")
+                SELECT a."RolId",p."Id" FROM public."AccesosUsuario" a CROSS JOIN public."Permisos" p
+                WHERE a."Id"={commerceAccess.Id} AND p."Codigo"='devoluciones.gestionar'
+                ON CONFLICT DO NOTHING
+                """);
+            using var replay = await commerceOnSecondApi.PostAsJsonAsync(
+                $"/api/devoluciones/transferencias/{transferencia:D}/acuses?operadorId={actual.OperadorId:D}", ackCommand);
             Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
             Assert.Equal(ackFirst.GetProperty("acuseId").GetGuid(), (await replay.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("acuseId").GetGuid());
+            var ackId = ackFirst.GetProperty("acuseId").GetGuid();
             var alteredAckCommand = new
             {
-                ackCommand.ComandoId, ackCommand.VersionTransferencia, Conforme = false,
-                Bultos = new[] { new { BultoId = segundo.Id, VersionBulto = returnedParcel.GetProperty("version").GetInt64(), Observacion = "La caja llegó abierta." } }
+                ackCommand.ComandoId, ackCommand.VersionTransferencia, Conforme = !conforme,
+                Bultos = new[] { new { BultoId = segundo.Id, VersionBulto = returnedParcel.GetProperty("version").GetInt64(), Observacion = conforme ? "La caja llegó abierta." : null } }
             };
             using var alteredReplay = await commerce.PostAsJsonAsync($"/api/devoluciones/transferencias/{transferencia:D}/acuses?operadorId={actual.OperadorId:D}", alteredAckCommand);
             Assert.Equal(HttpStatusCode.Conflict, alteredReplay.StatusCode);
@@ -202,10 +298,32 @@ public sealed partial class OperacionesRepartoHttpTests
             Assert.Equal(b.Version, afterAck.Version);
             Assert.Equal(b.Resultado, afterAck.Resultado);
             Assert.Equal(b.Custodia, afterAck.Custodia);
-            Assert.Equal(1, await verificar.Database.SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM public.\"AcusesDevolucionComercio\"").SingleAsync());
+            var afterAckShipment = await verificar.Envios.AsNoTracking().SingleAsync(shipment => shipment.Id == actual.Id);
+            Assert.Equal(shipmentBeforeAck.Version, afterAckShipment.Version);
+            Assert.Equal(shipmentBeforeAck.Estado, afterAckShipment.Estado);
+            Assert.Equal(outboxCountBeforeAck, await verificar.OutboxMessages.CountAsync());
             using var readOnlyAck = await commerce.GetAsync($"/api/devoluciones/envios/{actual.Id:D}?operadorId={actual.OperadorId:D}");
             Assert.Equal(HttpStatusCode.OK, readOnlyAck.StatusCode);
-            Assert.False(Assert.Single((await readOnlyAck.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("bultos").EnumerateArray(), item => item.GetProperty("id").GetGuid() == segundo.Id).GetProperty("puedeAcusar").GetBoolean());
+            var acknowledgedParcel = Assert.Single((await readOnlyAck.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("bultos").EnumerateArray(), item => item.GetProperty("id").GetGuid() == segundo.Id);
+            Assert.Equal(conforme ? "Conforme" : "ConObservaciones", acknowledgedParcel.GetProperty("resultadoAcuse").GetString());
+            Assert.Equal(conforme ? null : "La caja llegó abierta.", acknowledgedParcel.GetProperty("observacion").GetString());
+            Assert.Equal(1, await verificar.Database.SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM public.\"AcusesDevolucionComercio\"").SingleAsync());
+            var deliveredAfterAck = await verificar.Bultos.AsNoTracking().SingleAsync(parcel => parcel.Id == primero.Id);
+            Assert.Equal(deliveredBeforeTransfer.Version, deliveredAfterAck.Version);
+            Assert.Equal(deliveredBeforeTransfer.Resultado, deliveredAfterAck.Resultado);
+            Assert.Equal(deliveredBeforeTransfer.Custodia, deliveredAfterAck.Custodia);
+            using var finalDetail = await commerce.GetAsync($"/api/devoluciones/envios/{actual.Id:D}?operadorId={actual.OperadorId:D}");
+            Assert.Equal(HttpStatusCode.OK, finalDetail.StatusCode);
+            Assert.False(Assert.Single((await finalDetail.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("bultos").EnumerateArray(), item => item.GetProperty("id").GetGuid() == segundo.Id).GetProperty("puedeAcusar").GetBoolean());
+            using var history = await commerce.GetAsync($"/api/devoluciones/envios/{actual.Id:D}/historial?operadorId={actual.OperadorId:D}");
+            Assert.Equal(HttpStatusCode.OK, history.StatusCode);
+            var facts = (await history.Content.ReadFromJsonAsync<JsonElement>()).EnumerateArray().ToArray();
+            Assert.Contains(facts, fact => fact.GetProperty("tipo").GetString() == "Acuse del comercio"
+                && fact.GetProperty("resultado").GetString() == (conforme ? "Conforme" : "ConObservaciones"));
+            await using var immutableProbe = data.CreateDbContext();
+            var immutableError = await Assert.ThrowsAsync<PostgresException>(() => immutableProbe.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE public.\"AcusesDevolucionComercio\" SET \"Resultado\"={(conforme ? "ConObservaciones" : "Conforme")} WHERE \"Id\"={ackId}"));
+            Assert.Equal("55000", immutableError.SqlState);
         }
         else
         {

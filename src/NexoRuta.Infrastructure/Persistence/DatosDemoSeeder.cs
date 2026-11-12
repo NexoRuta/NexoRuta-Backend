@@ -100,7 +100,8 @@ public sealed class DatosDemoSeeder(
                     requierePropietario: false)
                     ?? throw new InvalidOperationException("Falta una cuenta de comercio del seed demo."));
             await SincronizarActoresAsync(actor, operadoresExistentes, comerciosExistentes, ct);
-            await SembrarFixtureDevolucionAp04Async(comerciosExistentes[1], operadoresExistentes[0], ct);
+            await SembrarFixtureDevolucionAp04Async(comerciosExistentes[1], operadoresExistentes[0], 1, ct);
+            await SembrarFixtureDevolucionAp04Async(comerciosExistentes[1], operadoresExistentes[0], 2, ct);
             return (true, EstadoDatosDemo.Desde(anterior));
         }
 
@@ -253,7 +254,8 @@ public sealed class DatosDemoSeeder(
         }
 
         await db.ApplyAsync(RlsActorContext.From(actor), ct);
-        await SembrarFixtureDevolucionAp04Async(comercios[1], operadores[0], ct);
+        await SembrarFixtureDevolucionAp04Async(comercios[1], operadores[0], 1, ct);
+        await SembrarFixtureDevolucionAp04Async(comercios[1], operadores[0], 2, ct);
 
         await db.ApplyAsync(RlsActorContext.From(actor), ct);
         var resultado = new EjecucionSeedDemo(DateTimeOffset.UtcNow, operadores.Count, comercios.Count,
@@ -647,10 +649,13 @@ public sealed class DatosDemoSeeder(
     }
 
     private async Task SembrarFixtureDevolucionAp04Async(OrganizacionDemo comercio, OrganizacionDemo operador,
-        CancellationToken ct)
+        int ordinal, CancellationToken ct)
     {
-        const string referencia = "AP04-GCP-DEV-C2-01";
-        const string codigoBulto = "AP04-GCP-DEV-C2-01-P1";
+        if (ordinal is < 1 or > 2)
+            throw new ArgumentOutOfRangeException(nameof(ordinal));
+        var sufijo = ordinal.ToString("00", System.Globalization.CultureInfo.InvariantCulture);
+        var referencia = $"AP04-GCP-DEV-C2-{sufijo}";
+        var codigoBulto = $"AP04-GCP-DEV-C2-{sufijo}-P1";
 
         await db.ApplyAsync(RlsActorContext.From(comercio.Contexto), ct);
         await envios.BloquearReferenciasImportacionAsync([referencia], ct);
@@ -676,9 +681,13 @@ public sealed class DatosDemoSeeder(
         var instanteActual = DateTimeOffset.UtcNow;
         var hoyLocal = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(instanteActual, ZonaHoraria).DateTime);
         var diasDesdeLunes = ((int)hoyLocal.DayOfWeek + 6) % 7;
-        var fechaOperativa = hoyLocal.AddDays(-diasDesdeLunes - (diasDesdeLunes == 0 ? 7 : 0));
+        // Keep the second fixture inside the default Commerce date range while avoiding
+        // the seven recent route dates occupied by the general demo seed.
+        var fechaOperativa = hoyLocal.AddDays(-diasDesdeLunes - (diasDesdeLunes == 0 ? 7 : 0))
+            .AddDays(-21 * (ordinal - 1));
 
-        var destinatario = new Destinatario(operador.Id, "Destinatario sintético AP-04", "ap04-destinatario@demo.nexoruta.test");
+        var destinatario = new Destinatario(operador.Id, $"Destinatario sintético AP-04 {sufijo}",
+            $"ap04-destinatario-{sufijo}@demo.nexoruta.test");
         var direccion = new Direccion(operador.Id, "Av. 18 de Julio 1200, Montevideo");
         var latitud = -34.905;
         var longitud = -56.185;
