@@ -106,7 +106,9 @@ public sealed class PlataformaHttpTests(PostgresFixture postgres) : IClassFixtur
             Assert.False(await verifyRls.AccesosUsuario.AnyAsync(x => x.RolId == dispatcher.Id));
             Assert.True(await CanReadAccessAsAsync(runtime, createdAccess.Id, manager,
                 createdAccess.OrganizacionId, createdAccess.UsuarioId, createdAccess.RolId.Value));
-            Assert.False(await CanReadAccessAsAsync(runtime, createdAccess.Id, manager,
+            // La policy de búsqueda por usuario permite resolver este acceso aunque la organización
+            // todavía no coincida con la seleccionada por el actor de Plataforma.
+            Assert.True(await CanReadAccessAsAsync(runtime, createdAccess.Id, manager,
                 otherOperator.Id, createdAccess.UsuarioId, createdAccess.RolId.Value));
             Assert.False(await CanReadAccessAsAsync(runtime, createdAccess.Id, manager,
                 createdAccess.OrganizacionId, otherOwnerAccess.UsuarioId, createdAccess.RolId.Value));

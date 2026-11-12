@@ -96,7 +96,7 @@ public sealed partial class OperacionesRepartoHttpTests
             var shipment = await beforeDb.Envios.AsNoTracking().SingleAsync(e => e.Id == listo.EnvioId);
             var commerceAccessId = await beforeDb.AccesosUsuario.AsNoTracking()
                 .Where(a => a.ComercioId == shipment.ComercioId).Select(a => a.Id).SingleAsync();
-            using var commerceBeforeReturn = factory.CreateHttpClient();
+            using var commerceBeforeReturn = webhook is null ? factory.CreateHttpClient() : factory.CreateClient();
             await commerceBeforeReturn.SetBearerForAccessAsync(data, commerceAccessId);
             var from = shipment.CreadoEnUtc.AddDays(-1).ToString("O");
             var to = DateTimeOffset.UtcNow.AddDays(1).ToString("O");
