@@ -103,6 +103,7 @@ public sealed class DatosDemoSeeder(
             await SembrarFixtureDevolucionAp04Async(comerciosExistentes[1], operadoresExistentes[0], 1, ct);
             await SembrarFixtureDevolucionAp04Async(comerciosExistentes[1], operadoresExistentes[0], 2, ct);
             await SembrarFixtureDevolucionAp04Async(comerciosExistentes[1], operadoresExistentes[0], 3, ct);
+            await SembrarFixtureDevolucionAp04Async(comerciosExistentes[1], operadoresExistentes[0], 4, ct);
             return (true, EstadoDatosDemo.Desde(anterior));
         }
 
@@ -258,6 +259,7 @@ public sealed class DatosDemoSeeder(
         await SembrarFixtureDevolucionAp04Async(comercios[1], operadores[0], 1, ct);
         await SembrarFixtureDevolucionAp04Async(comercios[1], operadores[0], 2, ct);
         await SembrarFixtureDevolucionAp04Async(comercios[1], operadores[0], 3, ct);
+        await SembrarFixtureDevolucionAp04Async(comercios[1], operadores[0], 4, ct);
 
         await db.ApplyAsync(RlsActorContext.From(actor), ct);
         var resultado = new EjecucionSeedDemo(DateTimeOffset.UtcNow, operadores.Count, comercios.Count,
@@ -653,13 +655,15 @@ public sealed class DatosDemoSeeder(
     private async Task SembrarFixtureDevolucionAp04Async(OrganizacionDemo comercio, OrganizacionDemo operador,
         int ordinal, CancellationToken ct)
     {
-        if (ordinal is < 1 or > 3)
+        if (ordinal is < 1 or > 4)
             throw new ArgumentOutOfRangeException(nameof(ordinal));
         var sufijo = ordinal.ToString("00", System.Globalization.CultureInfo.InvariantCulture);
-        var referencia = $"AP04-GCP-DEV-C2-{sufijo}";
+        var referencia = ordinal == 4 ? $"AP04-GCP-DEV-C2-{sufijo}-HIST" : $"AP04-GCP-DEV-C2-{sufijo}";
         var codigosBulto = ordinal == 3
             ? new[] { $"AP04-GCP-DEV-C2-{sufijo}-P1", $"AP04-GCP-DEV-C2-{sufijo}-P2" }
-            : [$"AP04-GCP-DEV-C2-{sufijo}-P1"];
+            : ordinal == 4
+                ? [$"AP04-GCP-DEV-C2-{sufijo}-HIST-P1"]
+                : [$"AP04-GCP-DEV-C2-{sufijo}-P1"];
 
         await db.ApplyAsync(RlsActorContext.From(comercio.Contexto), ct);
         await envios.BloquearReferenciasImportacionAsync([referencia], ct);
@@ -690,8 +694,11 @@ public sealed class DatosDemoSeeder(
         var diasDesdeLunes = ((int)hoyLocal.DayOfWeek + 6) % 7;
         // Keep the second fixture inside the default Commerce date range while avoiding
         // the seven recent route dates occupied by the general demo seed.
-        var fechaOperativa = hoyLocal.AddDays(-diasDesdeLunes - (diasDesdeLunes == 0 ? 7 : 0))
-            .AddDays(-21 * (ordinal - 1));
+        var lunesMasReciente = hoyLocal.AddDays(-diasDesdeLunes - (diasDesdeLunes == 0 ? 7 : 0));
+        var fechaOperativa = ordinal == 4
+            // Keep the historical sample inside Commerce's default 30-day range.
+            ? lunesMasReciente.AddDays(-14)
+            : lunesMasReciente.AddDays(-21 * (ordinal - 1));
         var reglasId = ordinal == 3
             ? await AsegurarReglasEntregaParcialAp04Async(operador, reglasBaseId, instanteActual, ct)
             : reglasBaseId;
@@ -857,6 +864,19 @@ public sealed class DatosDemoSeeder(
             .OrderBy(x => x.Codigo).ToArrayAsync(ct);
         if (bultosADevolver.Length != 1)
             throw new InvalidOperationException("La fixture AP-04 debe dejar exactamente un bulto devuelto elegible para transferencia.");
+        if (ordinal == 4)
+        {
+            // Historical sample: the synthetic legacy custody is Comercio, while no AP-04
+            // transfer record exists to attribute a current handoff or permit an ack.
+            await db.ApplyAsync(RlsActorContext.From(operador.Contexto), ct);
+            var historico = await db.Bultos.SingleAsync(x => x.OperadorId == operador.Id
+                && x.EnvioId == envio.Id && x.Id == bultosADevolver[0].Id, ct);
+            if (historico.Resultado != ResultadoBulto.Devuelto || historico.Custodia != EstadoCustodiaBulto.Deposito)
+                throw new InvalidOperationException("La fixture histórica AP-04 requiere un retorno recibido en depósito.");
+            historico.EntregarAlComercio();
+            await db.SaveChangesAsync(ct);
+            return;
+        }
         versionFinalEnvio = await db.Envios.AsNoTracking().Where(x => x.OperadorId == operador.Id && x.Id == envio.Id)
             .Select(x => x.Version).SingleAsync(ct);
         var transferencia = await devoluciones.TransferirAsync(operador.Contexto, envio.Id,
