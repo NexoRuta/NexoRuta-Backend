@@ -870,7 +870,16 @@ public sealed class DatosDemoSeeder(
         await db.Database.ExecuteSqlRawAsync(
             "SET CONSTRAINTS return_transfer_lines_required IMMEDIATE", ct);
         if (ordinal == 3)
+        {
+            // The temporary publication is checked eagerly above. Defer this constraint
+            // again so EF can persist the restoration version and current-root pointer in
+            // one transaction before PostgreSQL evaluates the published-version guard.
+            await db.Database.ExecuteSqlRawAsync(
+                "SET CONSTRAINTS operational_rules_current_publication_check DEFERRED", ct);
             await RestaurarReglasActivasAp04Async(operador, reglasBaseId, reglasId, DateTimeOffset.UtcNow, ct);
+            await db.Database.ExecuteSqlRawAsync(
+                "SET CONSTRAINTS operational_rules_current_publication_check IMMEDIATE", ct);
+        }
     }
 
     private async Task<Guid> AsegurarReglasEntregaParcialAp04Async(OrganizacionDemo operador,
