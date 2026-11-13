@@ -36,7 +36,7 @@ public sealed class PasswordRecoveryHttpTests(PostgresFixture postgres) : IClass
             using (var firstFactory = new IntegrationApiFactory(database, settings: settings))
             using (var firstClient = firstFactory.CreateHttpClient())
             {
-                Assert.Equal(HttpStatusCode.OK, (await firstClient.GetAsync("/health/live")).StatusCode);
+                Assert.Equal(HttpStatusCode.OK, (await firstClient.GetAsync("/live")).StatusCode);
                 await using var db = database.CreateDbContext();
                 var ownerAccess = await db.AccesosUsuario.SingleAsync(x => x.ComercioId != null && x.EsPropietario);
                 var owner = await db.Usuarios.SingleAsync(x => x.Id == ownerAccess.UsuarioId);
@@ -58,7 +58,7 @@ public sealed class PasswordRecoveryHttpTests(PostgresFixture postgres) : IClass
             using (var secondFactory = new IntegrationApiFactory(database, settings: settings))
             using (var client = secondFactory.CreateHttpClient())
             {
-                Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/live")).StatusCode);
+                Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/live")).StatusCode);
                 using var weakPassword = await ResetAsync(client, link.UserId, link.Token, "short");
                 Assert.Equal(HttpStatusCode.BadRequest, weakPassword.StatusCode);
                 Assert.Contains("12 caracteres", await weakPassword.Content.ReadAsStringAsync(), StringComparison.Ordinal);
@@ -92,7 +92,7 @@ public sealed class PasswordRecoveryHttpTests(PostgresFixture postgres) : IClass
         var database = await postgres.CreateDatabaseAsync();
         using var factory = new IntegrationApiFactory(database);
         using var client = factory.CreateHttpClient();
-        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/live")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/live")).StatusCode);
         await using var db = database.CreateDbContext();
         var owner = await db.Usuarios.FirstAsync();
 
@@ -140,7 +140,7 @@ public sealed class PasswordRecoveryHttpTests(PostgresFixture postgres) : IClass
             };
             using var factory = new IntegrationApiFactory(database, settings: settings);
             using var client = factory.CreateHttpClient();
-            Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/live")).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/live")).StatusCode);
             await using var db = database.CreateDbContext();
             var ownerAccess = await db.AccesosUsuario.SingleAsync(x => x.ComercioId != null && x.EsPropietario);
             var owner = await db.Usuarios.SingleAsync(x => x.Id == ownerAccess.UsuarioId);
@@ -169,7 +169,7 @@ public sealed class PasswordRecoveryHttpTests(PostgresFixture postgres) : IClass
             using var factory = new IntegrationApiFactory(database,
                 settings: new Dictionary<string, string?> { ["DataProtection:KeysDirectory"] = keyDirectory.FullName });
             using var client = factory.CreateHttpClient();
-            Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/live")).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/live")).StatusCode);
 
             const string platformEmail = "platform-reset@example.test";
             await using (var db = database.CreateDbContext())
@@ -276,7 +276,7 @@ public sealed class PasswordRecoveryHttpTests(PostgresFixture postgres) : IClass
             using var factory = new IntegrationApiFactory(database,
                 settings: new Dictionary<string, string?> { ["DataProtection:KeysDirectory"] = keyDirectory.FullName });
             using var client = factory.CreateHttpClient();
-            Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/live")).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/live")).StatusCode);
 
             await using var db = database.CreateDbContext();
             var access = await db.AccesosUsuario.SingleAsync(x => x.OperadorId != null);

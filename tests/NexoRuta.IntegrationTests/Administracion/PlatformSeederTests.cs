@@ -28,7 +28,7 @@ public sealed class PlatformSeederTests(PostgresFixture postgres) : IClassFixtur
             ["PlatformInitialization:Password"] = AuthenticationTestData.Password
         });
         using var client = factory.CreateHttpClient();
-        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/live")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/live")).StatusCode);
         await using var db = database.CreateDbContext();
         Assert.Empty(await db.AccesosPlataforma.ToListAsync());
         Assert.Empty(await db.Usuarios.ToListAsync());

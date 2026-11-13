@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "shard_count": 3,
-  "duration_source": "Local TRX baseline 2026-10-28 (456 cases); case counts include cache integration coverage. Identity class updated to 7 cases and about 51s for its slow-reader race; Redis TTL plus forced-eviction tests estimated at 76s; the expanded tariff cache test is estimated at 38s. Fresh full-suite TRX measurements are still pending; other historical weights are unchanged.",
+  "duration_source": "Local TRX baseline 2026-10-28 (456 cases). NFR-13 health, outbox reservation and reparto weights use recent local partial runs and discovered case counts; fresh full-suite TRX measurements remain pending. Other historical weights are unchanged.",
   "classes": {
     "NexoRuta.IntegrationTests.Administracion.AltaPropiaHttpTests": {
       "duration_ms": 61777,
@@ -22,6 +22,26 @@
     "NexoRuta.IntegrationTests.Administracion.HostingStateTests": {
       "duration_ms": 8370,
       "test_cases": 3
+    },
+    "NexoRuta.IntegrationTests.Administracion.SharedRateLimitHttpTests": {
+      "duration_ms": 60000,
+      "test_cases": 2
+    },
+    "NexoRuta.IntegrationTests.Seguridad.PortalCrossNodeTests": {
+      "duration_ms": 45000,
+      "test_cases": 1
+    },
+    "NexoRuta.IntegrationTests.Hosting.HealthEndpointTests": {
+      "duration_ms": 50000,
+      "test_cases": 6
+    },
+    "NexoRuta.IntegrationTests.Hosting.ApiShutdownProcessTests": {
+      "duration_ms": 30000,
+      "test_cases": 1
+    },
+    "NexoRuta.IntegrationTests.Hosting.WorkerShutdownProcessTests": {
+      "duration_ms": 90000,
+      "test_cases": 1
     },
     "NexoRuta.IntegrationTests.Administracion.IdentidadVisualOperadorHttpTests": {
       "duration_ms": 51000,
@@ -120,8 +140,8 @@
       "test_cases": 1
     },
     "NexoRuta.IntegrationTests.Messaging.KafkaOutboxReservationTests": {
-      "duration_ms": 18930,
-      "test_cases": 6
+      "duration_ms": 54000,
+      "test_cases": 7
     },
     "NexoRuta.IntegrationTests.Messaging.KafkaOutboxTests": {
       "duration_ms": 52094,
@@ -148,8 +168,8 @@
       "test_cases": 6
     },
     "NexoRuta.IntegrationTests.Reparto.OperacionesRepartoHttpTests": {
-      "duration_ms": 104771,
-      "test_cases": 18
+      "duration_ms": 900000,
+      "test_cases": 81
     },
     "NexoRuta.IntegrationTests.Reparto.RepartidoresHttpTests": {
       "duration_ms": 24894,
@@ -217,7 +237,7 @@
     },
     "NexoRuta.IntegrationTests.Seguridad.RlsSqlFunctionContractTests": {
       "duration_ms": 2967,
-      "test_cases": 1
+      "test_cases": 2
     },
     "NexoRuta.IntegrationTests.Seguridad.SesionesMovilesHttpTests": {
       "duration_ms": 75091,

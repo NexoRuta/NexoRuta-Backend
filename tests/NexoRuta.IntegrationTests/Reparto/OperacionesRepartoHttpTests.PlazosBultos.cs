@@ -10,15 +10,17 @@ using NexoRuta.Domain.Envios;
 using NexoRuta.Domain.ReglasOperativas;
 using NexoRuta.IntegrationTests.Fixtures;
 using NexoRuta.IntegrationTests.Seguridad;
+using Npgsql;
 using static NexoRuta.IntegrationTests.Fixtures.RepartoHttpData;
 namespace NexoRuta.IntegrationTests.Reparto;
 public sealed partial class OperacionesRepartoHttpTests
 {
     [Theory]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
-    [InlineData(false, false)]
-    public async Task H1H2_SegundaVisitaPersisteYPlazosDeBultosSeResuelvenIndependientemente(bool primeraCompleta, bool completarSegunda)
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(false, false, false)]
+    [InlineData(false, false, true)]
+    public async Task H1H2_SegundaVisitaPersisteYPlazosDeBultosSeResuelvenIndependientemente(bool primeraCompleta, bool completarSegunda, bool carreraParcial)
     {
         var data = await postgres.CreateDatabaseAsync("20261105063923_SnapshotParcelsPerVisit");
         await using (var actualizar = data.CreateDbContext()) await actualizar.Database.MigrateAsync();
@@ -71,6 +73,49 @@ public sealed partial class OperacionesRepartoHttpTests
         await using var verificar = data.CreateDbContext();
         var actual = await verificar.Envios.AsNoTracking().SingleAsync(e => e.Id == p.EnvioId);
         var fisica = actual.EntregaFisicaEnUtc; var recibida = actual.EntregaFisicaRecibidaEnUtc; var plazo = actual.PlazoPruebaVenceEnUtc;
+        if (carreraParcial)
+        {
+            Assert.Equal(EstadoEnvio.EntregadoParcialmente, actual.Estado);
+            var firstBefore = await verificar.Bultos.AsNoTracking().SingleAsync(b => b.Id == primero.Id);
+            var secondBefore = await verificar.Bultos.AsNoTracking().SingleAsync(b => b.Id == segundo.Id);
+            var deadline = Assert.IsType<DateTimeOffset>(firstBefore.PruebaVenceEnUtc);
+            Assert.Equal(ResultadoBulto.EntregaPendienteValidacion, firstBefore.Resultado);
+            Assert.Equal(ResultadoBulto.Pendiente, secondBefore.Resultado);
+            await using var blocker = new NpgsqlConnection(data.ConnectionString);
+            await blocker.OpenAsync();
+            await using var transaction = await blocker.BeginTransactionAsync();
+            await using (var hold = new NpgsqlCommand("SELECT 1 FROM public.\"Envios\" WHERE \"Id\"=@id FOR UPDATE", blocker, transaction))
+            {
+                hold.Parameters.AddWithValue("id", p.EnvioId);
+                Assert.NotNull(await hold.ExecuteScalarAsync());
+            }
+            var name = $"nfr13_partial_{Guid.NewGuid():N}";
+            var worker = new NpgsqlConnectionStringBuilder(await CreateWorkerClient(data)) { ApplicationName = name };
+            await using var first = await CreateWorkerConnection(worker.ConnectionString);
+            var sweep = ExpireResult(first, deadline);
+            await WaitForDatabaseLock(data, name);
+            var competitor = await ExpireResult(await CreateWorkerClient(data), deadline);
+            Assert.Equal(new DeadlineSweepOutcome("Contended", 0, false), competitor);
+            await transaction.CommitAsync();
+            Assert.Equal(new DeadlineSweepOutcome("Completed", 1, false), await sweep);
+            var after = await verificar.Envios.AsNoTracking().SingleAsync(e => e.Id == p.EnvioId);
+            var firstAfter = await verificar.Bultos.AsNoTracking().SingleAsync(b => b.Id == primero.Id);
+            var secondAfter = await verificar.Bultos.AsNoTracking().SingleAsync(b => b.Id == segundo.Id);
+            Assert.Equal(EstadoEnvio.EntregadoParcialmente, after.Estado);
+            Assert.Equal(actual.Version + 1, after.Version);
+            Assert.Equal(ResultadoBulto.EntregaSinValidacion, firstAfter.Resultado);
+            Assert.Equal(firstBefore.Version + 1, firstAfter.Version);
+            Assert.Equal(secondBefore.Resultado, secondAfter.Resultado);
+            Assert.Equal(secondBefore.Version, secondAfter.Version);
+            var history = await verificar.EnvioEventos.Where(e => e.EnvioId == p.EnvioId && e.OrigenTipo == "PlazoValidacionPrueba").ToArrayAsync();
+            Assert.Single(history);
+            var outboxCount = await verificar.OutboxMessages.CountAsync(e => e.EnvioId == p.EnvioId);
+            Assert.Equal(new DeadlineSweepOutcome("NotDue", 0, false), await ExpireResult(await CreateWorkerClient(data), deadline));
+            Assert.Equal(after.Version, (await verificar.Envios.AsNoTracking().SingleAsync(e => e.Id == p.EnvioId)).Version);
+            Assert.Equal(1, await verificar.EnvioEventos.CountAsync(e => e.EnvioId == p.EnvioId && e.OrigenTipo == "PlazoValidacionPrueba"));
+            Assert.Equal(outboxCount, await verificar.OutboxMessages.CountAsync(e => e.EnvioId == p.EnvioId));
+            return;
+        }
         // A second courier can revisit while the first one's proof remains pending.
         Guid segundoAcceso;
         await using (var seed = data.CreateDbContext())
@@ -126,10 +171,22 @@ public sealed partial class OperacionesRepartoHttpTests
                 new { FotoId = foto2, Nombre = "Segundo receptor", Latitud = -34.9, Longitud = -56.2, PrecisionMetros = 10, PosicionEnUtc = t0, ResultadosBultos = new[] { new { BultoId = segundo.Id, b2.Version, Entregado = true } } }));
             Assert.Equal("Aplicada", evidencia.Resultado);
         }
-        else Assert.Equal(1, await Expire(data.ConnectionString, t0.AddMinutes(80)));
+        else
+        {
+            var before = await verificar.Envios.AsNoTracking().SingleAsync(e => e.Id == actual.Id);
+            var historyBefore = await verificar.EnvioEventos.CountAsync(e => e.EnvioId == actual.Id && e.OrigenTipo == "PlazoValidacionPrueba");
+            Assert.Equal(1, await Expire(data.ConnectionString, t0.AddMinutes(80)));
+            var after = await verificar.Envios.AsNoTracking().SingleAsync(e => e.Id == actual.Id);
+            Assert.Equal(before.Version + 1, after.Version);
+            Assert.Equal(historyBefore + 1, await verificar.EnvioEventos.CountAsync(e => e.EnvioId == actual.Id && e.OrigenTipo == "PlazoValidacionPrueba"));
+        }
         Assert.Equal(completarSegunda ? ResultadoBulto.Entregado : ResultadoBulto.EntregaSinValidacion, (await verificar.Bultos.AsNoTracking().SingleAsync(b => b.Id == segundo.Id)).Resultado);
         Assert.Equal(ResultadoBulto.EntregaSinValidacion, (await verificar.Bultos.AsNoTracking().SingleAsync(b => b.Id == primero.Id)).Resultado);
-        Assert.Equal(EstadoEnvio.EntregaSinValidacion, (await verificar.Envios.AsNoTracking().SingleAsync(e => e.Id == actual.Id)).Estado);
+        var settled = await verificar.Envios.AsNoTracking().SingleAsync(e => e.Id == actual.Id);
+        Assert.Equal(EstadoEnvio.EntregaSinValidacion, settled.Estado);
+        var settledHistory = await verificar.EnvioEventos.CountAsync(e => e.EnvioId == actual.Id && e.OrigenTipo == "PlazoValidacionPrueba");
         Assert.Equal(0, await Expire(data.ConnectionString, t0.AddMinutes(100)));
+        Assert.Equal(settled.Version, (await verificar.Envios.AsNoTracking().SingleAsync(e => e.Id == actual.Id)).Version);
+        Assert.Equal(settledHistory, await verificar.EnvioEventos.CountAsync(e => e.EnvioId == actual.Id && e.OrigenTipo == "PlazoValidacionPrueba"));
     }
 }

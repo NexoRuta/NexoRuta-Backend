@@ -45,7 +45,7 @@ public sealed class RecepcionDepositoBrowserTests(PostgresFixture postgres):ICla
         try
         {
             using var probe=new HttpClient();var ready=false;
-            for(var i=0;i<100;i++){try{if((await probe.GetAsync(url+"health/ready")).IsSuccessStatusCode){ready=true;break;}}catch(HttpRequestException){}if(backoffice.HasExited)break;await Task.Delay(100);}
+            for(var i=0;i<100;i++){try{if((await probe.GetAsync(url+"ready")).IsSuccessStatusCode){ready=true;break;}}catch(HttpRequestException){}if(backoffice.HasExited)break;await Task.Delay(100);}
             Assert.True(ready,"Isolated Backoffice did not start.");
             var nodeStart=new ProcessStartInfo("node"){RedirectStandardOutput=true,RedirectStandardError=true};nodeStart.ArgumentList.Add(Path.Combine(workspace,"frontend/tests/browser/cu10-recepcion.cjs"));
             nodeStart.Environment["RECEIPT_E2E_API"]=api.BaseAddress!.ToString();

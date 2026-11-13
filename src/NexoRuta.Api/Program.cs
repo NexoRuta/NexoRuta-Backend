@@ -71,9 +71,8 @@ if (!sharedDataProtection)
 {
     if (!string.IsNullOrWhiteSpace(dataProtectionKeys))
         dataProtection.PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeys));
-    else if (builder.Environment.IsProduction()
-        && !platformCommand && !localBootstrapCommand && !migrationCommand && !catalogImportCommand)
-        throw new InvalidOperationException("Production requires persistent DataProtection:KeysDirectory.");
+    if (builder.Environment.IsProduction() && !commandMode)
+        throw new InvalidOperationException("Production API requires shared Data Protection storage.");
 }
 builder.Services.AddOptions<PasswordRecoveryOptions>()
     .Bind(builder.Configuration.GetSection("PasswordRecovery"))
@@ -165,7 +164,13 @@ builder.Services
     });
 
 
-builder.Services.AddHealthChecks().AddCheck<PostgreSqlHealthCheck>("postgres");
+builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = TimeSpan.FromSeconds(20));
+var healthChecks = builder.Services.AddHealthChecks()
+    .AddCheck<ProcessLifecycleHealthCheck>("process", tags: ["readiness"])
+    .AddCheck<PostgreSqlHealthCheck>("postgres", tags: ["readiness"], timeout: TimeSpan.FromSeconds(2));
+if (sharedDataProtection)
+    healthChecks.AddCheck<SharedDataProtectionHealthCheck>("data-protection", tags: ["readiness"],
+        timeout: TimeSpan.FromSeconds(2));
 
 
 
@@ -213,8 +218,14 @@ builder.Services.AddTrustedProxyHeaders(builder.Configuration);
 builder.Services.AddHostingTelemetry(builder.Configuration, "NexoRuta.Api");
 builder.Services.AddHostedService<DistributedCacheTelemetryInitializer>();
 var rateConnection = builder.Configuration.GetConnectionString("RateLimits");
+if (builder.Environment.IsProduction() && !commandMode && string.IsNullOrWhiteSpace(rateConnection))
+    throw new InvalidOperationException("Production API requires shared rate-limit storage.");
 NpgsqlDataSource? rateDataSource = string.IsNullOrWhiteSpace(rateConnection) ? null : NpgsqlDataSource.Create(rateConnection);
-if (rateDataSource is not null) builder.Services.AddSingleton(rateDataSource);
+if (rateDataSource is not null)
+{
+    builder.Services.AddSingleton(rateDataSource);
+    healthChecks.AddCheck<RateLimitStoreHealthCheck>("rate-limits", tags: ["readiness"], timeout: TimeSpan.FromSeconds(2));
+}
 RateLimitPartition<string> RequestPartition(string policy, string key, int limit)
     => rateDataSource is null
         ? RateLimitPartition.GetFixedWindowLimiter(key, _ => new FixedWindowRateLimiterOptions
@@ -282,8 +293,18 @@ app.UseMiddleware<RlsTransactionMiddleware>();
 app.UseAuthorization();
 app.MapControllers();
 app.MapHub<NexoRuta.Api.Features.Operacion.OperationalHub>("/hubs/operacion", options => options.CloseOnAuthenticationExpiration = true);
-app.MapHealthChecks("/health/ready");
-app.MapGet("/health/live", () => Results.Ok(new { status = "live" }));
+var readiness = new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
+{
+    Predicate = check => check.Tags.Contains("readiness"),
+    ResponseWriter = HealthResponseWriter.WriteAsync
+};
+app.MapHealthChecks("/health", readiness).AllowAnonymous();
+app.MapHealthChecks("/ready", readiness).AllowAnonymous();
+app.MapGet("/live", (HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    return Results.Ok(new { status = "live" });
+}).AllowAnonymous();
 
 app.Run();
 

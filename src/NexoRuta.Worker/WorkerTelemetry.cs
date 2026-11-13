@@ -25,6 +25,18 @@ public static class WorkerTelemetry
         "nexoruta.worker.push.failures", "{error}", "Failed attempts to deliver push notifications to delivery workers.");
     private static readonly Counter<long> CommerceNotificationFailures = Meter.CreateCounter<long>(
         "nexoruta.commerce.notifications.failed", "{error}", "Failed commerce notifications. Includes HTTP webhook delivery attempts.");
+    private static readonly Counter<long> ProofDeadlineSweeps = Meter.CreateCounter<long>(
+        "nexoruta.worker.proof_deadline.sweeps", "{sweep}", "Proof deadline sweep outcomes.");
+    private static readonly Counter<long> ProofDeadlineShipments = Meter.CreateCounter<long>(
+        "nexoruta.worker.proof_deadline.shipments", "{shipment}", "Shipments changed by proof deadline sweeps.");
+    private static readonly Counter<long> ProofDeadlineContinuations = Meter.CreateCounter<long>(
+        "nexoruta.worker.proof_deadline.continuations", "{batch}", "Completed proof deadline batches with more due work.");
+    private static readonly Histogram<double> ProofDeadlineDuration = Meter.CreateHistogram<double>(
+        "nexoruta.worker.proof_deadline.duration", "ms", "Proof deadline sweep duration.");
+    private static long lastProofDeadlineSuccess;
+    private static readonly ObservableGauge<double> ProofDeadlineSuccessAge = Meter.CreateObservableGauge(
+        "nexoruta.worker.proof_deadline.last_success.age", ObserveProofDeadlineSuccessAge, "s",
+        "Seconds since a completed proof deadline sweep; -1 until the first completion.");
     private static readonly ObservableGauge<double> SqlContactAge = Meter.CreateObservableGauge(
         "nexoruta.worker.sql_contact.age", ObserveSqlContactAge, "s",
         "Seconds since a successful SQL reservation query; -1 until the first query completes.");
@@ -50,6 +62,29 @@ public static class WorkerTelemetry
     public static void PushDeliveryFailed() => PushFailures.Add(1);
 
     public static void CommerceNotificationFailed() => CommerceNotificationFailures.Add(1);
+
+    public static void ProofDeadlineSweep(string outcome, int affected, bool moreWork, double elapsedMilliseconds)
+    {
+        var transport = Volatile.Read(ref activeTransport).Name;
+        var tags = new TagList
+        {
+            { "job", "proof_validation_deadline" },
+            { "outcome", outcome },
+            { "transport", transport }
+        };
+        ProofDeadlineSweeps.Add(1, tags);
+        if (affected > 0)
+            ProofDeadlineShipments.Add(affected,
+                new KeyValuePair<string, object?>("job", "proof_validation_deadline"),
+                new KeyValuePair<string, object?>("transport", transport));
+        if (moreWork)
+            ProofDeadlineContinuations.Add(1,
+                new KeyValuePair<string, object?>("job", "proof_validation_deadline"),
+                new KeyValuePair<string, object?>("transport", transport));
+        ProofDeadlineDuration.Record(elapsedMilliseconds, tags);
+        if (outcome == "completed")
+            Interlocked.Exchange(ref lastProofDeadlineSuccess, Stopwatch.GetTimestamp());
+    }
 
     public static Activity? StartOutboxActivity(OutboxClaim message)
     {
@@ -111,6 +146,14 @@ public static class WorkerTelemetry
         var lastContact = Interlocked.Read(ref progress.LastSqlContact);
         var age = lastContact == 0 ? -1 : Stopwatch.GetElapsedTime(lastContact).TotalSeconds;
         yield return new Measurement<double>(age, new KeyValuePair<string, object?>("transport", progress.Name));
+    }
+
+    private static IEnumerable<Measurement<double>> ObserveProofDeadlineSuccessAge()
+    {
+        var lastSuccess = Interlocked.Read(ref lastProofDeadlineSuccess);
+        yield return new Measurement<double>(
+            lastSuccess == 0 ? -1 : Stopwatch.GetElapsedTime(lastSuccess).TotalSeconds,
+            new KeyValuePair<string, object?>("job", "proof_validation_deadline"));
     }
 
     private static TransportProgress GetTransport(string transport) => transport switch

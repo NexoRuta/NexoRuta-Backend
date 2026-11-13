@@ -93,7 +93,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
                 ["Email__Smtp__FromName"] = "NexoRuta integration"
             });
             apiProcess = api;
-            await WaitForHttpAsync(api.Process, $"{apiUrl}/health/live");
+            await WaitForHttpAsync(api.Process, $"{apiUrl}/live");
 
             var commerce = StartDotnet(commerceDll, Path.GetDirectoryName(commerceDll)!, commerceUrl,
                 new Dictionary<string, string?>
@@ -102,7 +102,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
                     ["Api__BaseAddress"] = apiUrl + "/"
                 });
             commerceProcess = commerce;
-            await WaitForHttpAsync(commerce.Process, $"{commerceUrl}/health/ready");
+            await WaitForHttpAsync(commerce.Process, $"{commerceUrl}/ready");
 
             using var http = new HttpClient { BaseAddress = new Uri(apiUrl), Timeout = TimeSpan.FromSeconds(90) };
             using var missingAuth = await PostCsvAsync(http, operatorId, Csv(Row("NO-AUTH")));
@@ -353,7 +353,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
                 ["Email__Smtp__FromAddress"] = "noreply@example.test",
                 ["Email__Smtp__FromName"] = "NexoRuta integration"
             });
-            await WaitForHttpAsync(apiProcess.Process, $"{apiUrl}/health/live");
+            await WaitForHttpAsync(apiProcess.Process, $"{apiUrl}/live");
 
             backofficeProcess = StartDotnet(backofficeDll, Path.GetDirectoryName(backofficeDll)!, backofficeUrl,
                 new Dictionary<string, string?>
@@ -362,7 +362,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
                     ["Api__BaseAddress"] = apiUrl + "/",
                     ["DataProtection__KeysDirectory"] = Path.Combine(tempRoot, "backoffice-keys")
                 });
-            await WaitForHttpAsync(backofficeProcess.Process, $"{backofficeUrl}/health/ready");
+            await WaitForHttpAsync(backofficeProcess.Process, $"{backofficeUrl}/ready");
 
             using var api = new HttpClient { BaseAddress = new Uri(apiUrl), Timeout = TimeSpan.FromSeconds(45) };
             var commerceToken = await LoginAsync(api, commerceEmail, AuthenticationTestData.Password);
@@ -575,7 +575,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
                 ["Email__Smtp__FromAddress"] = "noreply@example.test",
                 ["Email__Smtp__FromName"] = "NexoRuta integration"
             });
-            await WaitForHttpAsync(apiProcess.Process, $"{apiUrl}/health/live");
+            await WaitForHttpAsync(apiProcess.Process, $"{apiUrl}/live");
             backofficeProcess = StartDotnet(backofficeDll, Path.GetDirectoryName(backofficeDll)!, backofficeUrl,
                 new Dictionary<string, string?>
                 {
@@ -583,7 +583,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
                     ["Api__BaseAddress"] = apiUrl + "/",
                     ["DataProtection__KeysDirectory"] = Path.Combine(tempRoot, "backoffice-keys")
                 });
-            await WaitForHttpAsync(backofficeProcess.Process, $"{backofficeUrl}/health/ready");
+            await WaitForHttpAsync(backofficeProcess.Process, $"{backofficeUrl}/ready");
 
             using var api = new HttpClient { BaseAddress = new Uri(apiUrl), Timeout = TimeSpan.FromSeconds(45) };
             var commerceToken = await LoginAsync(api, commerceEmail, AuthenticationTestData.Password);
@@ -1124,7 +1124,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
                 ["Email__Smtp__FromAddress"] = "noreply@example.test",
                 ["Email__Smtp__FromName"] = "NexoRuta integration"
             });
-            await WaitForHttpAsync(apiProcess.Process, $"{apiUrl}/health/live");
+            await WaitForHttpAsync(apiProcess.Process, $"{apiUrl}/live");
             backofficeProcess = StartDotnet(backofficeDll, Path.GetDirectoryName(backofficeDll)!, backofficeUrl,
                 new Dictionary<string, string?>
                 {
@@ -1132,7 +1132,7 @@ public sealed class CommerceCsvImportKestrelTests(PostgresFixture postgres, Xuni
                     ["Api__BaseAddress"] = apiUrl + "/",
                     ["DataProtection__KeysDirectory"] = Path.Combine(tempRoot, "backoffice-keys")
                 });
-            await WaitForHttpAsync(backofficeProcess.Process, $"{backofficeUrl}/health/ready");
+            await WaitForHttpAsync(backofficeProcess.Process, $"{backofficeUrl}/ready");
 
             using var api = new HttpClient { BaseAddress = new Uri(apiUrl), Timeout = TimeSpan.FromSeconds(45) };
             var commerceToken = await LoginAsync(api, commerceEmail, AuthenticationTestData.Password);

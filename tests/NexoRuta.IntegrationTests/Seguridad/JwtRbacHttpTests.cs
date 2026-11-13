@@ -213,7 +213,13 @@ public sealed class JwtRbacHttpTests(PostgresFixture postgres) : IClassFixture<P
     public async Task LegacyAccessHeaderAloneNeverAuthenticates(string environment, string path)
     {
         var database = await postgres.CreateDatabaseAsync();
-        using var factory = new IntegrationApiFactory(database, environment);
+        await using var sharedKeys = environment == "Production"
+            ? await SharedDataProtectionTestStore.CreateAsync(database)
+            : null;
+        var settings = new Dictionary<string, string?>();
+        sharedKeys?.Configure(settings);
+        if (environment == "Production") settings["ConnectionStrings:RateLimits"] = database.ConnectionString;
+        using var factory = new IntegrationApiFactory(database, environment, settings);
         using var client = factory.CreateHttpClient();
         await using var db = database.CreateDbContext();
         var access = await db.AccesosUsuario.SingleAsync(x => x.ComercioId != null);

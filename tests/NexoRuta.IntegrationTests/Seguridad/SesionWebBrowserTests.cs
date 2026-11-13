@@ -68,7 +68,7 @@ public sealed class SesionWebBrowserTests(PostgresFixture postgres):IClassFixtur
             var process=Process.Start(start)!;processes[portal]=process;
             if(!streams.ContainsKey(portal))streams[portal]=[];
             streams[portal].Add(process.StandardOutput.ReadToEndAsync());streams[portal].Add(process.StandardError.ReadToEndAsync());
-            using var probe=new HttpClient();for(var i=0;i<150;i++){try{if((await probe.GetAsync($"http://127.0.0.1:{ports[portal]}/health/ready")).IsSuccessStatusCode)return;}catch(HttpRequestException){}if(process.HasExited)break;await Task.Delay(100);}
+            using var probe=new HttpClient();for(var i=0;i<150;i++){try{if((await probe.GetAsync($"http://127.0.0.1:{ports[portal]}/ready")).IsSuccessStatusCode)return;}catch(HttpRequestException){}if(process.HasExited)break;await Task.Delay(100);}
             throw new InvalidOperationException("Synthetic "+portal+" failed startup; inspect private local logs.");
         }
         async Task StopPortal(string portal){if(processes.TryGetValue(portal,out var p)){if(!p.HasExited)p.Kill(true);await p.WaitForExitAsync();p.Dispose();processes.Remove(portal);}}

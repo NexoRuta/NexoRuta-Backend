@@ -105,7 +105,7 @@ public sealed class WebhooksFullStackTests(PostgresFixture postgres):IClassFixtu
     private static int Port(){var listener=new TcpListener(IPAddress.Loopback,0);listener.Start();var port=((IPEndPoint)listener.LocalEndpoint).Port;listener.Stop();return port;}
     private static async Task Ready(string url)
     {
-        using var http=new HttpClient();for(var i=0;i<150;i++){try{if((await http.GetAsync(url+"health/ready")).IsSuccessStatusCode)return;}catch(HttpRequestException){}await Task.Delay(100);}Assert.Fail("Isolated service did not become ready.");
+        using var http=new HttpClient();for(var i=0;i<150;i++){try{if((await http.GetAsync(url+"ready")).IsSuccessStatusCode)return;}catch(HttpRequestException){}await Task.Delay(100);}Assert.Fail("Isolated service did not become ready.");
     }
     private sealed class WebhookBrowserFact:FactAttribute
     {public WebhookBrowserFact(){if(string.IsNullOrEmpty(Environment.GetEnvironmentVariable("NEXORUTA_WEBHOOK_E2E_DIR")))Skip="Opt in with NEXORUTA_WEBHOOK_E2E_DIR and build the pinned frontend.";}}

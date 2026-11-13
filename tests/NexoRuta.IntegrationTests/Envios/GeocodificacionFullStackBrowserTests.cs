@@ -84,7 +84,7 @@ public sealed class GeocodificacionFullStackBrowserTests(PostgresFixture postgre
             using var probe = new HttpClient(); var ready = false;
             for (var i = 0; i < 150; i++)
             {
-                try { if ((await probe.GetAsync(address + "health/ready")).IsSuccessStatusCode) { ready = true; break; } }
+                try { if ((await probe.GetAsync(address + "ready")).IsSuccessStatusCode) { ready = true; break; } }
                 catch (HttpRequestException) { }
                 if (commerceHost.HasExited) break;
                 await Task.Delay(100);

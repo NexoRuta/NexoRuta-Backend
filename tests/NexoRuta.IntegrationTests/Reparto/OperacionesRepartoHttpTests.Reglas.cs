@@ -228,7 +228,7 @@ public sealed partial class OperacionesRepartoHttpTests
             var ready = false;
             for (var attempt = 0; attempt < 30; attempt++)
             {
-                try { ready = (await health.GetAsync(commerceUrl + "/health/ready")).IsSuccessStatusCode; }
+                try { ready = (await health.GetAsync(commerceUrl + "/ready")).IsSuccessStatusCode; }
                 catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException) { }
                 if (ready) break;
                 if (portal.HasExited) break;

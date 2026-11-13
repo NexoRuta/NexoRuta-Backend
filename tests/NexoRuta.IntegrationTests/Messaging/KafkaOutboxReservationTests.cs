@@ -4,11 +4,120 @@ using NexoRuta.Infrastructure.Outbox;
 using NexoRuta.IntegrationTests.Fixtures;
 using NexoRuta.IntegrationTests.Seguimiento;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using NexoRuta.Infrastructure.Persistence;
+using NexoRuta.Worker;
+using NexoRuta.Worker.Messaging;
+using Npgsql;
 
 namespace NexoRuta.IntegrationTests.Messaging;
 
 public sealed class KafkaOutboxReservationTests(PostgresFixture postgres) : IClassFixture<PostgresFixture>
 {
+    [Fact]
+    public async Task StoppingWorkerDuringPublishLeavesReservationForAnotherWorker()
+    {
+        var database = await postgres.CreateDatabaseAsync();
+        Guid eventId;
+        await using (var owner = database.CreateDbContext())
+        {
+            var shipment = await SeguimientoTestData.CreateEnvioAsync(owner);
+            var message = OutboxMessage.ForShipment(shipment.OperadorId, shipment.Id,
+                OutboxMessageTypes.ShipmentCreated, OutboxDestino.Kafka, "{}");
+            eventId = message.Id;
+            owner.OutboxMessages.Add(message);
+            await owner.SaveChangesAsync();
+            await DeferGeneratedWorkAsync(owner);
+        }
+        var runtime = await RestrictedWorkerConnection(database);
+        var blocked = new ControlledHandler(block: true);
+        await using (var services = WorkerServices(runtime, blocked))
+        using (var worker = new KafkaOutboxWorker(services.GetRequiredService<IServiceScopeFactory>(),
+                   services.GetRequiredService<OutboxHandlerRegistry>(), NullLogger<KafkaOutboxWorker>.Instance))
+        {
+            await worker.StartAsync(CancellationToken.None);
+            try
+            {
+                Assert.Equal(eventId, await blocked.Started.Task.WaitAsync(TimeSpan.FromSeconds(15)));
+                await worker.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+            }
+            finally { await worker.StopAsync(CancellationToken.None); }
+        }
+        Guid oldOwner;
+        await using (var owner = database.CreateDbContext())
+        {
+            var pending = await owner.OutboxMessages.AsNoTracking().SingleAsync(x => x.Id == eventId);
+            Assert.Equal(OutboxEstado.Procesando, pending.Estado);
+            Assert.Null(pending.PublicadoEnUtc);
+            oldOwner = Assert.IsType<Guid>(pending.ProcesadorId);
+            Assert.True(pending.ReservaHastaUtc > DateTimeOffset.UtcNow);
+            await owner.OutboxMessages.Where(x => x.Id == eventId).ExecuteUpdateAsync(update =>
+                update.SetProperty(x => x.ReservaHastaUtc, DateTimeOffset.UtcNow.AddMinutes(-1)));
+        }
+        var completed = new ControlledHandler(block: false);
+        await using (var services = WorkerServices(runtime, completed))
+        using (var worker = new KafkaOutboxWorker(services.GetRequiredService<IServiceScopeFactory>(),
+                   services.GetRequiredService<OutboxHandlerRegistry>(), NullLogger<KafkaOutboxWorker>.Instance))
+        {
+            await worker.StartAsync(CancellationToken.None);
+            try
+            {
+                Assert.Equal(eventId, await completed.Started.Task.WaitAsync(TimeSpan.FromSeconds(15)));
+                await using var verify = database.CreateDbContext();
+                var deadline = DateTimeOffset.UtcNow.AddSeconds(15);
+                OutboxMessage row;
+                do
+                {
+                    row = await verify.OutboxMessages.AsNoTracking().SingleAsync(x => x.Id == eventId);
+                    if (row.Estado == OutboxEstado.Publicado) break;
+                    await Task.Delay(50);
+                } while (DateTimeOffset.UtcNow < deadline);
+                Assert.Equal(OutboxEstado.Publicado, row.Estado);
+                Assert.Equal(2, row.Intentos);
+                Assert.Null(row.ProcesadorId);
+                Assert.Null(row.ReservaHastaUtc);
+            }
+            finally { await worker.StopAsync(CancellationToken.None); }
+        }
+        await using var restricted = new NexoRutaDbContext(new DbContextOptionsBuilder<NexoRutaDbContext>()
+            .UseNexoRutaPostgres(runtime).Options);
+        Assert.False(await new EfOutboxRepository(restricted).MarcarPublicadoAsync(eventId, oldOwner));
+    }
+
+    private static ServiceProvider WorkerServices(string connection, ControlledHandler handler)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddDbContext<NexoRutaDbContext>(options => options.UseNexoRutaPostgres(connection));
+        services.AddScoped<EfOutboxRepository>();
+        services.AddSingleton<IOutboxMessageHandler>(handler);
+        services.AddSingleton<OutboxHandlerRegistry>();
+        return services.BuildServiceProvider();
+    }
+
+    private static async Task<string> RestrictedWorkerConnection(IntegrationDatabase database)
+    {
+        var role = $"nfr13_outbox_{Guid.NewGuid():N}";
+        var password = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+        await using var sql = new NpgsqlConnection(database.ConnectionString);
+        await sql.OpenAsync();
+        await using var create = new NpgsqlCommand($"CREATE ROLE {role} LOGIN INHERIT PASSWORD '{password}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS; GRANT nexoruta_worker TO {role};", sql);
+        await create.ExecuteNonQueryAsync();
+        return new NpgsqlConnectionStringBuilder(database.ConnectionString) { Username = role, Password = password, Pooling = false }.ConnectionString;
+    }
+
+    private sealed class ControlledHandler(bool block) : IOutboxMessageHandler
+    {
+        public TaskCompletionSource<Guid> Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public OutboxHandlerRoute Route => new(OutboxMessageTypes.ShipmentCreated, OutboxContractVersions.Current, OutboxDestino.Kafka);
+        public async Task HandleAsync(OutboxClaim message, CancellationToken cancellationToken)
+        {
+            Started.TrySetResult(message.Id);
+            if (block) await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        }
+    }
+
     [Fact]
     public async Task Kafka_PuedeReservarUnEventoPendiente()
     {

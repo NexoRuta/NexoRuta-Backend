@@ -226,7 +226,7 @@ async function runFaultStates(page) {
     const state = await assertLocalContainer(apiContainer, 'api').catch(() => null);
     if (!state?.State.Running) await docker('POST', `/containers/${encodeURIComponent(apiContainer)}/start`).catch(() => {});
   }
-  await waitReady(`${api}/health/ready`, 'API readiness after restart');
+  await waitReady(`${api}/ready`, 'API readiness after restart');
   await page.getByRole('button', { name: 'Reintentar', exact: true }).click();
   await page.getByRole('alert').filter({ hasText: 'No pudimos cargar las devoluciones' }).waitFor({ state: 'hidden' });
   await page.locator('.nr-returns-results[aria-busy="false"]').waitFor();
@@ -332,9 +332,9 @@ async function runFaultStates(page) {
       await context.close();
       context = null;
       await docker('POST', `/containers/${encodeURIComponent(apiContainer)}/restart?t=20`);
-      await waitReady(`${api}/health/ready`, 'API readiness after persistence restart');
+      await waitReady(`${api}/ready`, 'API readiness after persistence restart');
       await docker('POST', `/containers/${encodeURIComponent(commerceContainer)}/restart?t=20`);
-      await waitReady(`${commerce}/health/ready`, 'Commerce readiness after persistence restart');
+      await waitReady(`${commerce}/ready`, 'Commerce readiness after persistence restart');
       report.checks.push('Restarted only the AP-04 API and Commerce containers with project volumes preserved.');
       ({ context, page } = await createPage(browser));
     }
@@ -358,7 +358,7 @@ async function runFaultStates(page) {
       await docker('POST', `/containers/${encodeURIComponent(apiContainer)}/unpause`).catch(() => {});
       const state = await assertLocalContainer(apiContainer, 'api').catch(() => null);
       if (!state?.State.Running) await docker('POST', `/containers/${encodeURIComponent(apiContainer)}/start`).catch(() => {});
-      await waitReady(`${api}/health/ready`, 'API recovery after browser failure').catch(() => {});
+      await waitReady(`${api}/ready`, 'API recovery after browser failure').catch(() => {});
     }
     if (page) await page.screenshot({ path: path.join(output, 'ap04-browser-failure.png'), fullPage: true }).catch(() => {});
     await fs.writeFile(path.join(output, 'ap04-browser-failure.json'), JSON.stringify({ message: error.message, report }, null, 2));

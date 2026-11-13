@@ -201,6 +201,6 @@ public sealed class OperationalBrowserTests(PostgresFixture postgres, KafkaFixtu
         var process = Process.Start(start)!; _ = process.StandardOutput.ReadToEndAsync(); _ = process.StandardError.ReadToEndAsync(); return process;
     }
     private static async Task WaitReady(Process process, string address, CancellationToken ct)
-    { using var http = new HttpClient(); while (!ct.IsCancellationRequested && !process.HasExited) { try { if ((await http.GetAsync(address + "/health/ready", ct)).IsSuccessStatusCode) return; } catch (HttpRequestException) { } await Task.Delay(100, ct); } throw new InvalidOperationException("Isolated portal failed readiness."); }
+    { using var http = new HttpClient(); while (!ct.IsCancellationRequested && !process.HasExited) { try { if ((await http.GetAsync(address + "/ready", ct)).IsSuccessStatusCode) return; } catch (HttpRequestException) { } await Task.Delay(100, ct); } throw new InvalidOperationException("Isolated portal failed readiness."); }
     private static void Stop(Process process) { if (!process.HasExited) { process.Kill(true); process.WaitForExit(); } }
 }

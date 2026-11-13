@@ -22,7 +22,7 @@ public static class FleetStageMaintenance
     public static bool Allows(HttpRequest r)
     {
         var path=r.Path.Value??"";
-        if(HttpMethods.IsGet(r.Method))return path is "/health/ready" or "/health/live" or "/api/reparto/flota" or "/api/usuarios/actual" or "/api/usuarios/actual/permisos";
+        if(HttpMethods.IsGet(r.Method))return path is "/health" or "/ready" or "/live" or "/api/reparto/flota" or "/api/usuarios/actual" or "/api/usuarios/actual/permisos";
         if(!HttpMethods.IsPost(r.Method))return false;
         if(path=="/api/auth/login")return true;
         var pieces=path.Split('/',StringSplitOptions.RemoveEmptyEntries);

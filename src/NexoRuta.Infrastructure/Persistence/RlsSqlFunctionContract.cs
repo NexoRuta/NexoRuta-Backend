@@ -70,6 +70,7 @@ public static class RlsSqlFunctionContract
             (RevokeOrgSessions, "text, uuid", "integer", "nexoruta_api"),
             (SetOrganizationState, "text, uuid, text, bigint",
                 "TABLE(\"EstadoAnterior\" text, \"EstadoNuevo\" text)", "nexoruta_api"),
-            (ExpirePendingProofDeadlines, "timestamp with time zone, integer", "integer", "nexoruta_worker")
+            (ExpirePendingProofDeadlines, "timestamp with time zone, integer",
+                "TABLE(\"Status\" text, \"Affected\" integer, \"MoreWork\" boolean)", "nexoruta_worker")
         ]);
 }

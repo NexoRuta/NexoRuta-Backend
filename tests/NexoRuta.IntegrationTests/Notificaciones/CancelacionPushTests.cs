@@ -314,9 +314,11 @@ public sealed partial class PushOutboxTests
         { Username = role, Password = password, Pooling = false }.ConnectionString;
         await using var worker = new NpgsqlConnection(connectionString);
         await worker.OpenAsync();
-        await using var command = new NpgsqlCommand("SELECT nexoruta_app.expire_pending_proof_deadlines(@now, 100)", worker);
+        await using var command = new NpgsqlCommand("SELECT * FROM nexoruta_app.expire_pending_proof_deadlines(@now, 100)", worker);
         command.Parameters.AddWithValue("now", now);
-        return Convert.ToInt32(await command.ExecuteScalarAsync());
+        await using var reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        return reader.GetInt32(1);
     }
 
     private static async Task SetLocalHistoryFixtureSettingAsync(NexoRutaDbContext db, string name, string value) =>

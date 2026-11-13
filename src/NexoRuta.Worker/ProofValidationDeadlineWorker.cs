@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using System.Diagnostics;
 using NexoRuta.Infrastructure.Persistence;
 
 namespace NexoRuta.Worker;
@@ -16,29 +17,46 @@ public sealed class ProofValidationDeadlineWorker(
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            var fullBatch = false;
+            var moreWork = false;
+            var started = Stopwatch.GetTimestamp();
             try
             {
                 await using var scope = scopeFactory.CreateAsyncScope();
                 var db = scope.ServiceProvider.GetRequiredService<NexoRutaDbContext>();
                 var now = clock.GetUtcNow();
-                var expired = await db.Database.SqlQuery<int>(
-                    $"SELECT nexoruta_app.expire_pending_proof_deadlines({now}, {BatchSize}) AS \"Value\"")
+                var result = await db.Database.SqlQuery<ProofDeadlineSweepResult>(
+                    $"SELECT * FROM nexoruta_app.expire_pending_proof_deadlines({now}, {BatchSize})")
                     .SingleAsync(stoppingToken);
-                fullBatch = expired == BatchSize;
-                if (expired > 0)
-                    logger.LogInformation("Expired {Count} shipment proof-validation deadlines.", expired);
+                var outcome = result.Status switch
+                {
+                    "Completed" => "completed",
+                    "Contended" => "contended",
+                    "NotDue" => "not_due",
+                    _ => throw new InvalidOperationException("Unknown proof deadline sweep result.")
+                };
+                moreWork = outcome == "completed" && result.MoreWork;
+                WorkerTelemetry.ProofDeadlineSweep(outcome, result.Affected, result.MoreWork,
+                    Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+                if (result.Affected > 0)
+                    logger.LogInformation("Expired proof deadlines for {Count} shipments.", result.Affected);
+                else
+                    logger.LogDebug("Proof-deadline sweep returned {Status} (more work: {MoreWork}).",
+                        result.Status, result.MoreWork);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
+                WorkerTelemetry.ProofDeadlineSweep("shutdown", 0, false,
+                    Stopwatch.GetElapsedTime(started).TotalMilliseconds);
                 break;
             }
             catch (Exception exception)
             {
+                WorkerTelemetry.ProofDeadlineSweep("failed", 0, false,
+                    Stopwatch.GetElapsedTime(started).TotalMilliseconds);
                 logger.LogError(exception, "Proof-validation deadline sweep failed.");
             }
 
-            if (!fullBatch)
+            if (!moreWork)
                 await Task.Delay(PollInterval, clock, stoppingToken);
         }
     }

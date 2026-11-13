@@ -28,7 +28,7 @@ public sealed class GestionBrowserTests(PostgresFixture postgres):IClassFixture<
                 var start=new ProcessStartInfo("dotnet"){WorkingDirectory=directory,RedirectStandardOutput=true,RedirectStandardError=true,UseShellExecute=false};start.ArgumentList.Add(dll);
                 start.Environment["ASPNETCORE_URLS"]=address;start.Environment["ASPNETCORE_ENVIRONMENT"]="Development";start.Environment["Api__BaseAddress"]=api.BaseAddress!.ToString();start.Environment["OpenTelemetry__Enabled"]="false";start.Environment["DataProtection__KeysDirectory"]=Path.Combine(Path.GetTempPath(),"nexoruta-management-keys-"+Guid.NewGuid().ToString("N"));
                 var app=Process.Start(start)!;apps.Add(app);logs.Add(app.StandardOutput.ReadToEndAsync());logs.Add(app.StandardError.ReadToEndAsync());
-                using var http=new HttpClient();for(var i=0;i<150;i++){try{if((await http.GetAsync(address+"/health/ready")).IsSuccessStatusCode)return address;}catch(HttpRequestException){}if(app.HasExited)break;await Task.Delay(100);}
+                using var http=new HttpClient();for(var i=0;i<150;i++){try{if((await http.GetAsync(address+"/ready")).IsSuccessStatusCode)return address;}catch(HttpRequestException){}if(app.HasExited)break;await Task.Delay(100);}
                 throw new InvalidOperationException("Owned synthetic portal did not start: "+portal);
             }
             var backoffice=await Start("Backoffice");var commerce=await Start("Commerce");

@@ -3,7 +3,7 @@
 @NexoRuta.Email = operator@example.test
 @NexoRuta.Password = replace-with-a-local-test-password
 
-GET {{NexoRuta.Api_HostAddress}}/health/ready
+GET {{NexoRuta.Api_HostAddress}}/ready
 Accept: application/json
 
 ###

@@ -36,6 +36,66 @@ public sealed class RlsSqlFunctionContractTests(PostgresFixture postgres) : ICla
     }
 
     [Fact]
+    public async Task ProofDeadlineCoordinationIsPrivateAndTheSweepUsesItsRestrictedDefiner()
+    {
+        var database = await postgres.CreateDatabaseAsync();
+        await using var owner = new NpgsqlConnection(database.ConnectionString);
+        await owner.OpenAsync();
+        await using (var table = new NpgsqlCommand("""
+            SELECT c.relrowsecurity, c.relforcerowsecurity,
+                   has_table_privilege('nexoruta_api', c.oid, 'SELECT'),
+                   has_table_privilege('nexoruta_api', c.oid, 'INSERT'),
+                   has_table_privilege('nexoruta_api', c.oid, 'UPDATE'),
+                   has_table_privilege('nexoruta_api', c.oid, 'DELETE'),
+                   has_table_privilege('nexoruta_worker', c.oid, 'SELECT'),
+                   has_table_privilege('nexoruta_worker', c.oid, 'INSERT'),
+                   has_table_privilege('nexoruta_worker', c.oid, 'UPDATE'),
+                   has_table_privilege('nexoruta_worker', c.oid, 'DELETE'),
+                   has_table_privilege('nexoruta_proof_deadline_fn', c.oid, 'DELETE'),
+                   EXISTS (SELECT 1 FROM pg_policies p WHERE p.schemaname='public'
+                       AND p.tablename='ProofDeadlineJobState'
+                       AND p.roles @> ARRAY['nexoruta_proof_deadline_fn']::name[]
+                       AND p.qual='true' AND p.with_check='true'),
+                   d.rolsuper, d.rolbypassrls, table_owner.rolname
+            FROM pg_class c
+            JOIN pg_roles table_owner ON table_owner.oid=c.relowner
+            CROSS JOIN pg_roles d
+            WHERE c.oid='public."ProofDeadlineJobState"'::regclass AND d.rolname='nexoruta_proof_deadline_fn'
+            """, owner))
+        await using (var reader = await table.ExecuteReaderAsync())
+        {
+            Assert.True(await reader.ReadAsync());
+            Assert.True(reader.GetBoolean(0));
+            Assert.True(reader.GetBoolean(1));
+            for (var column = 2; column <= 9; column++)
+                Assert.False(reader.GetBoolean(column), "Only the definer may directly access job coordination state.");
+            Assert.False(reader.GetBoolean(10), "The definer cannot delete the coordination row.");
+            Assert.True(reader.GetBoolean(11));
+            Assert.False(reader.GetBoolean(12));
+            Assert.False(reader.GetBoolean(13));
+            Assert.Equal("nexoruta_schema_owner", reader.GetString(14));
+        }
+
+        await using var function = new NpgsqlCommand("""
+            SELECT p.prosecdef, owner.rolname, p.proconfig,
+                   has_function_privilege('nexoruta_worker', p.oid, 'EXECUTE'),
+                   has_function_privilege('nexoruta_api', p.oid, 'EXECUTE'),
+                   EXISTS (SELECT 1 FROM aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) acl
+                       WHERE acl.grantee=0 AND acl.privilege_type='EXECUTE')
+            FROM pg_proc p JOIN pg_roles owner ON owner.oid=p.proowner
+            WHERE p.oid='nexoruta_app.expire_pending_proof_deadlines(timestamptz,integer)'::regprocedure
+            """, owner);
+        await using var functionReader = await function.ExecuteReaderAsync();
+        Assert.True(await functionReader.ReadAsync());
+        Assert.True(functionReader.GetBoolean(0));
+        Assert.Equal("nexoruta_proof_deadline_fn", functionReader.GetString(1));
+        Assert.Contains("search_path=pg_catalog", functionReader.GetFieldValue<string[]>(2));
+        Assert.True(functionReader.GetBoolean(3));
+        Assert.False(functionReader.GetBoolean(4));
+        Assert.False(functionReader.GetBoolean(5));
+    }
+
+    [Fact]
     public async Task ImportIdentityTableAndDefinerFunctionsRemainScopedToCommerceContext()
     {
         var database = await postgres.CreateDatabaseAsync();

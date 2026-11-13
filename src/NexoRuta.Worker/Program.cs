@@ -19,6 +19,7 @@ using NexoRuta.Worker.Messaging;
 using NexoRuta.Worker;
 
 var builder = Host.CreateApplicationBuilder(args);
+builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = TimeSpan.FromSeconds(20));
 builder.Logging.UseNexoRutaLogging("NexoRuta.Worker." + (builder.Configuration["Messaging:Transport"] ?? "RabbitMq"));
 builder.Services.AddHostingTelemetry(builder.Configuration, "NexoRuta.Worker." + (builder.Configuration["Messaging:Transport"] ?? "RabbitMq"));
 builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.Warning);

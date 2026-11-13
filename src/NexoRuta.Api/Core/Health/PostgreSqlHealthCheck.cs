@@ -15,9 +15,13 @@ public sealed class PostgreSqlHealthCheck(NexoRutaDbContext db) : IHealthCheck
                 ? HealthCheckResult.Healthy("PostgreSQL está disponible.")
                 : HealthCheckResult.Unhealthy("PostgreSQL no está disponible.");
         }
-        catch (Exception exception)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return HealthCheckResult.Unhealthy("No se pudo conectar a PostgreSQL.", exception);
+            throw;
+        }
+        catch (Exception)
+        {
+            return HealthCheckResult.Unhealthy("PostgreSQL is unavailable.");
         }
     }
 }

@@ -134,7 +134,11 @@ public sealed class RecuperarEnlaceSeguimientoTests(PostgresFixture postgres) : 
         Assert.Equal(HttpStatusCode.Unauthorized, (await anonymousClient.SendAsync(invalid)).StatusCode);
         using var allowed = await RequestAsync(client, database, envio.Id, operatorAccess);
         Assert.Equal(HttpStatusCode.Accepted, (await client.SendAsync(allowed)).StatusCode);
-        using var production = new IntegrationApiFactory(database, "Production", Settings());
+        await using var sharedKeys = await SharedDataProtectionTestStore.CreateAsync(database);
+        var productionSettings = Settings();
+        sharedKeys.Configure(productionSettings);
+        productionSettings["ConnectionStrings:RateLimits"] = database.ConnectionString;
+        using var production = new IntegrationApiFactory(database, "Production", productionSettings);
         using var productionClient = production.CreateHttpClient();
         using var forbidden = await RequestAsync(productionClient, database, envio.Id, owner);
         Assert.Equal(HttpStatusCode.Forbidden, (await productionClient.SendAsync(forbidden)).StatusCode);

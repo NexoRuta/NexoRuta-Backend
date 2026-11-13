@@ -31,7 +31,7 @@ internal sealed class WebhookAssay : IAsyncDisposable
     {
         var workspace=CompanionPortals.WorkspaceRoot;var worker=await WebhooksHttpTests.WorkerDatabase(data);
         Start("frontend","NexoRuta.Tracking",new(){{"ASPNETCORE_URLS",new Uri(Url).GetLeftPart(UriPartial.Authority)},{"CommerceDemo__Enabled","true"},{"CommerceDemo__AdminPassword",Convert.ToHexString(RandomNumberGenerator.GetBytes(32))},{"CommerceDemo__SigningSecrets__0",secret},{"CommerceDemo__DatabasePath",Path.Combine(scratch,"inbox.db")},{"DataProtection__KeysDirectory",Path.Combine(scratch,"tracking-keys")}});
-        using(var http=new HttpClient())for(var i=0;i<100;i++){try{if((await http.GetAsync(new Uri(new Uri(Url),"/health/ready"))).IsSuccessStatusCode)break;}catch(HttpRequestException){}await Task.Delay(100);}
+        using(var http=new HttpClient())for(var i=0;i<100;i++){try{if((await http.GetAsync(new Uri(new Uri(Url),"/ready"))).IsSuccessStatusCode)break;}catch(HttpRequestException){}await Task.Delay(100);}
         Start("backend","NexoRuta.Worker",new(){{"Messaging__Transport","HttpWebhooks"},{"ConnectionStrings__Postgres",worker.ConnectionString},{"DataProtection__KeysDirectory",Path.Combine(scratch,"shared-keys")},{"Webhooks__DevelopmentReceiverUrl",Url},{"Webhooks__RetryBaseSeconds","1"}});
         await using var db=data.CreateDbContext();WebhookDelivery[] rows=[];
         for(var i=0;i<300;i++){rows=await new WebhookStore(db).Deliveries.ToArrayAsync();if(rows.Length>0 && rows.All(d=>d.Estado=="Entregado"))break;await Task.Delay(100);}
