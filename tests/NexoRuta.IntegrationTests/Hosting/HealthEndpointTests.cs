@@ -97,13 +97,7 @@ public sealed class HealthEndpointTests(PostgresFixture postgres) : IClassFixtur
     {
         var database = await postgres.CreateDatabaseAsync();
         await using var sharedKeys = await SharedDataProtectionTestStore.CreateAsync(database);
-        await using (var db = database.CreateDbContext())
-            await db.Database.ExecuteSqlRawAsync("""
-                CREATE SCHEMA nexoruta_hosting;
-                CREATE TABLE nexoruta_hosting.rate_limits ("key" text PRIMARY KEY);
-                CREATE FUNCTION nexoruta_hosting.take_rate_limit(text, integer) RETURNS boolean
-                    LANGUAGE sql AS 'SELECT true';
-                """);
+        await SharedRateLimitTestStore.InstallAlwaysAllowingStoreAsync(database);
         var settings = new Dictionary<string, string?>();
         sharedKeys.Configure(settings);
         settings["ConnectionStrings:RateLimits"] = database.ConnectionString;

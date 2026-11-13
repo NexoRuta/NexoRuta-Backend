@@ -135,6 +135,7 @@ public sealed class RecuperarEnlaceSeguimientoTests(PostgresFixture postgres) : 
         using var allowed = await RequestAsync(client, database, envio.Id, operatorAccess);
         Assert.Equal(HttpStatusCode.Accepted, (await client.SendAsync(allowed)).StatusCode);
         await using var sharedKeys = await SharedDataProtectionTestStore.CreateAsync(database);
+        await SharedRateLimitTestStore.InstallAlwaysAllowingStoreAsync(database);
         var productionSettings = Settings();
         sharedKeys.Configure(productionSettings);
         productionSettings["ConnectionStrings:RateLimits"] = database.ConnectionString;
