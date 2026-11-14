@@ -1,8 +1,10 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using NexoRuta.Api.Features.Reparto.Contracts;
 using NexoRuta.Api.Features.Webhooks;
 using NexoRuta.Domain.Administracion;
 using NexoRuta.Infrastructure.Administracion;
@@ -17,6 +19,63 @@ public sealed class WebhooksHttpTests(PostgresFixture postgres):IClassFixture<Po
     internal const string Receiver="http://127.0.0.1:5103/comercio/webhook";
     internal static readonly string Secret="whsec_"+Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
     internal static Dictionary<string,string?> Settings(){var s=RlsRestrictedHttpFlowTests.ApiSettings();s["Webhooks:DevelopmentReceiverUrl"]=Receiver;return s;}
+    [Fact] public async Task MobileSyncTraceAndWorkerSnapshotRemainCorrelatedAcrossHttpDelivery()
+    {
+        var data=await postgres.CreateDatabaseAsync();using(var seed=data.CreateShippingApiFactory())using(seed.CreateHttpClient()){}
+        var runtime=await RlsRestrictedHttpFlowTests.RestrictApiAsync(data);using var factory=new IntegrationApiFactory(runtime,settings:Settings());using var client=factory.CreateHttpClient();
+        await using var owner=data.CreateDbContext();
+        var operatorAccess=await owner.AccesosUsuario.SingleAsync(a=>a.OperadorId!=null);
+        var operatorId=operatorAccess.OperadorId!.Value;
+        var installationId=Guid.NewGuid();
+        await client.SetBearerForAccessAsync(data,operatorAccess.Id);
+        using(var first=await client.PostAsJsonAsync("/api/mobile/sync-status",new EstadoSincronizacionMovilRequest(installationId,1,3))) Assert.Equal(HttpStatusCode.NoContent,first.StatusCode);
+        using(var current=await client.PostAsJsonAsync("/api/mobile/sync-status",new EstadoSincronizacionMovilRequest(installationId,2,0))) Assert.Equal(HttpStatusCode.NoContent,current.StatusCode);
+        using(var stale=await client.PostAsJsonAsync("/api/mobile/sync-status",new EstadoSincronizacionMovilRequest(installationId,1,99))) Assert.Equal(HttpStatusCode.Conflict,stale.StatusCode);
+
+        var commerce=await owner.AccesosUsuario.SingleAsync(a=>a.ComercioId!=null);
+        await client.SetBearerForAccessAsync(data,commerce.Id);
+        await Subscribe(client,operatorId,2,["EnvioCreado"]);
+        const string incomingTraceParent="00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+        var shipment=await Create(client,operatorId,incomingTraceParent);
+        string? deliveredTraceParent; Guid? businessCorrelation;
+        await using(var sql=new NpgsqlConnection(data.ConnectionString))
+        {
+            await sql.OpenAsync();
+            await using var command=new NpgsqlCommand("SELECT \"TraceParent\",\"CorrelationId\" FROM public.\"WebhookDeliveries\" WHERE \"EnvioId\"=@shipment",sql);
+            command.Parameters.AddWithValue("shipment",shipment);
+            await using var reader=await command.ExecuteReaderAsync();
+            Assert.True(await reader.ReadAsync());
+            deliveredTraceParent=reader.IsDBNull(0)?null:reader.GetString(0);
+            businessCorrelation=reader.IsDBNull(1)?null:reader.GetGuid(1);
+        }
+        Assert.NotNull(deliveredTraceParent);
+        Assert.True(ActivityContext.TryParse(deliveredTraceParent,null,out var deliveryContext));
+        Assert.True(ActivityContext.TryParse(incomingTraceParent,null,out var incomingContext));
+        Assert.Equal(incomingContext.TraceId,deliveryContext.TraceId);
+
+        var worker=await WorkerDatabase(data);
+        await using(var workerConnection=new NpgsqlConnection(worker.ConnectionString))
+        {
+            await workerConnection.OpenAsync();
+            await using var command=new NpgsqlCommand("SELECT * FROM nexoruta_app.observability_snapshot()",workerConnection);
+            await using var reader=await command.ExecuteReaderAsync();
+            Assert.True(await reader.ReadAsync());
+            Assert.Equal(0L,reader.GetInt64(0));
+            Assert.Equal(1L,reader.GetInt64(1));
+            Assert.Equal(0L,reader.GetInt64(2));
+            Assert.Equal(1L,reader.GetInt64(5));
+            Assert.True(reader.GetDouble(3)>=0);
+            Assert.True(reader.GetDouble(4)>=0);
+        }
+
+        await using(var workerDb=worker.CreateDbContext())
+        {
+            var claim=await new WebhookStore(workerDb).Claim(Guid.NewGuid(),3,default);
+            Assert.NotNull(claim);
+            Assert.Equal(deliveredTraceParent,claim.TraceParent);
+            Assert.Equal(businessCorrelation,claim.CorrelationId);
+        }
+    }
     [Fact] public async Task AtomicFanoutVersionsConfigurationSnapshotsAndOptimisticConcurrency()
     {
         var data=await postgres.CreateDatabaseAsync();using(var seed=data.CreateShippingApiFactory())using(seed.CreateHttpClient()){}
@@ -115,9 +174,11 @@ public sealed class WebhooksHttpTests(PostgresFixture postgres):IClassFixture<Po
     {
         using var response=await client.PutAsJsonAsync($"/api/webhooks/suscripciones/{Guid.NewGuid()}",new SaveWebhook(op,Receiver,events,version,true,0,Secret));Assert.True(response.IsSuccessStatusCode,await response.Content.ReadAsStringAsync());return (await response.Content.ReadFromJsonAsync<WebhookSubscription>())!;
     }
-    internal static async Task<Guid> Create(HttpClient client,Guid op)
+    internal static async Task<Guid> Create(HttpClient client,Guid op,string? traceParent=null)
     {
-        using var response=await client.PostAsJsonAsync("/api/envios",new{OperadorId=op,Servicio=ServiciosEnvioTestData.Declarar(op),DestinatarioNombre="Synthetic webhook recipient",DestinatarioEmail="webhook@example.test",Direccion="Synthetic 123",Bultos=new[]{new{Codigo="WH-"+Guid.NewGuid().ToString("N"),PesoGramos=100m,LargoCentimetros=10m,AnchoCentimetros=10m,AltoCentimetros=10m}}});Assert.True(response.IsSuccessStatusCode,await response.Content.ReadAsStringAsync());return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        using var request=new HttpRequestMessage(HttpMethod.Post,"/api/envios"){Content=JsonContent.Create(new{OperadorId=op,Servicio=ServiciosEnvioTestData.Declarar(op),DestinatarioNombre="Synthetic webhook recipient",DestinatarioEmail="webhook@example.test",Direccion="Synthetic 123",Bultos=new[]{new{Codigo="WH-"+Guid.NewGuid().ToString("N"),PesoGramos=100m,LargoCentimetros=10m,AnchoCentimetros=10m,AltoCentimetros=10m}}})};
+        if(traceParent is not null) request.Headers.TryAddWithoutValidation("traceparent",traceParent);
+        using var response=await client.SendAsync(request);Assert.True(response.IsSuccessStatusCode,await response.Content.ReadAsStringAsync());return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
     }
     internal static async Task<IntegrationDatabase> WorkerDatabase(IntegrationDatabase data)
     {

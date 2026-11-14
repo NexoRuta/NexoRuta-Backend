@@ -34,6 +34,18 @@ public sealed class WebhookSecurityTests
         Assert.Throws<ArgumentException>(()=>policy.Validate("https://merchant.example.test/webhook?token=secret"));
         Assert.Throws<ArgumentException>(()=>new WebhookDestinationPolicy(config,new TestEnvironment{EnvironmentName="Production"}).Validate("http://127.0.0.1:5103/comercio/webhook"));
     }
+    [Fact] public void DelimitedDeploymentAllowlistRequiresAnExactHttpsOrigin()
+    {
+        var config=new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string,string?>
+        {
+            ["Webhooks:AllowedOrigins"]="https://merchant.example.test;https://events.example.test:8443"
+        }).Build();
+        var policy=new WebhookDestinationPolicy(config,new TestEnvironment{EnvironmentName="Production"});
+        policy.Validate("https://merchant.example.test/hooks");
+        policy.Validate("https://events.example.test:8443/hooks");
+        Assert.Throws<ArgumentException>(()=>policy.Validate("https://merchant.example.test.evil.test/hooks"));
+        Assert.Throws<ArgumentException>(()=>policy.Validate("https://events.example.test/hooks"));
+    }
     private sealed class TestEnvironment:IHostEnvironment
     {public string EnvironmentName{get;set;}="Development";public string ApplicationName{get;set;}="Tests";public string ContentRootPath{get;set;}="/tmp";public IFileProvider ContentRootFileProvider{get;set;}=new NullFileProvider();}
 }

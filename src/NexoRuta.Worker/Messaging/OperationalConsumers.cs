@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Diagnostics;
 using Confluent.Kafka;
 using Microsoft.EntityFrameworkCore;
 using NexoRuta.Application.Operacion;
@@ -45,19 +46,36 @@ public abstract class OperationalConsumer(IConfiguration configuration, ILogger 
             while (!ct.IsCancellationRequested)
             {
                 ConsumeResult<string, string>? message = null;
+                Activity? activity = null;
+                IDisposable? logScope = null;
                 try
                 {
                     message = consumer.Consume(TimeSpan.FromMilliseconds(500));
                     if (message is not null)
                     {
+                        var traceParent = WorkerTelemetry.ReadTraceParent(message.Message.Headers);
+                        var eventId = WorkerTelemetry.ReadHeaderText(message.Message.Headers, "eventId") ?? "unknown";
+                        var correlationId = WorkerTelemetry.ReadHeaderText(message.Message.Headers, "correlationId") ?? eventId;
+                        activity = WorkerTelemetry.StartConsumerActivity(traceParent, "kafka.operational.consume");
+                        activity?.SetTag("messaging.system", "kafka");
+                        activity?.SetTag("messaging.operation", "process");
+                        activity?.SetTag("messaging.message.id", eventId);
+                        logScope = logger.BeginScope(new Dictionary<string, object?>
+                        {
+                            ["correlation_id"] = correlationId,
+                            ["event_id"] = eventId
+                        });
                         var value = JsonSerializer.Deserialize<EventoOperativo>(message.Message.Value, Json)
                             ?? throw new InvalidDataException("Missing operational payload.");
                         value.Validar();
-                        using var correlation = logger.BeginScope(new Dictionary<string, object?> { ["business_correlation_id"] = value.CorrelacionId, ["event_id"] = value.EventId });
+                        if (correlationId != value.CorrelacionId.ToString("D"))
+                            throw new InvalidDataException("Operational business correlation header disagrees with its event.");
+                        activity?.SetTag("nexoruta.correlation.id", value.CorrelacionId);
                         if (message.Message.Key != value.OperadorId.ToString("D") + ":" + value.EntidadId.ToString("D"))
                             throw new InvalidDataException("Partition key disagrees with envelope.");
                         await ProjectAsync(value, message.Message.Value, ct);
                         consumer.Commit(message);
+                        activity?.SetStatus(ActivityStatusCode.Ok);
                     }
                     if (DateTimeOffset.UtcNow - lastHealth > TimeSpan.FromSeconds(2))
                     {
@@ -84,12 +102,18 @@ public abstract class OperationalConsumer(IConfiguration configuration, ILogger 
                 catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
                 catch (Exception error)
                 {
+                    activity?.SetStatus(ActivityStatusCode.Error, "Operational projection failed");
                     // Fail closed: a malformed/poison event blocks its partition and remains replayable.
                     // Log identity/offset only, never private payload or connection information.
                     logger.LogWarning("Operational projection {Group} blocked at {Offset}: {ErrorType}", Group,
                         message?.TopicPartitionOffset.ToString(), error.GetType().Name);
                     if (message is not null) consumer.Seek(message.TopicPartitionOffset);
                     await Task.Delay(TimeSpan.FromSeconds(2), ct);
+                }
+                finally
+                {
+                    logScope?.Dispose();
+                    activity?.Dispose();
                 }
             }
         }

@@ -41,6 +41,7 @@ if (transport == "HttpWebhooks")
     builder.Services.AddScoped<NexoRuta.Infrastructure.Webhooks.WebhookStore>();
     builder.Services.AddSingleton<NexoRuta.Infrastructure.Webhooks.WebhookDestinationPolicy>();
     builder.Services.AddSingleton<NexoRuta.Infrastructure.Webhooks.WebhookSecrets>();
+    builder.Services.AddHostedService<ObservabilitySnapshotWorker>();
     if (!builder.Services.AddSharedDataProtection(builder.Configuration, PasswordRecoveryDataProtection.ApplicationName, "api"))
     {
         var keys = builder.Configuration["DataProtection:KeysDirectory"];

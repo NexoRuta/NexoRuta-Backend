@@ -23,8 +23,30 @@ public static class WorkerTelemetry
         "nexoruta.worker.failures", "{error}", "Worker processing failures, excluding shutdown cancellation.");
     private static readonly Counter<long> PushFailures = Meter.CreateCounter<long>(
         "nexoruta.worker.push.failures", "{error}", "Failed attempts to deliver push notifications to delivery workers.");
-    private static readonly Counter<long> CommerceNotificationFailures = Meter.CreateCounter<long>(
-        "nexoruta.commerce.notifications.failed", "{error}", "Failed commerce notifications. Includes HTTP webhook delivery attempts.");
+    private static readonly Counter<long> CommerceNotificationAttemptFailures = Meter.CreateCounter<long>(
+        "nexoruta.commerce.notification.attempts.failed", "{attempt}", "Failed HTTP commerce webhook attempts; does not represent terminal deliveries.");
+    private static readonly ObservableGauge<long> MobilePendingOperations = Meter.CreateObservableGauge(
+        "nexoruta.mobile.sync.pending", ObserveMobilePending, "{operation}",
+        "Pending operations from mobile installations reporting within five minutes.");
+    private static readonly ObservableGauge<long> MobileSnapshotAvailable = Meter.CreateObservableGauge(
+        "nexoruta.mobile.sync.snapshot_available", ObserveSnapshotAvailable, "{state}",
+        "One after a successful snapshot query; distinguishes zero from missing telemetry.");
+    private static readonly ObservableGauge<long> MobileFreshInstallations = Meter.CreateObservableGauge(
+        "nexoruta.mobile.sync.installations.fresh", ObserveFreshInstallations, "{installation}",
+        "Mobile installations reporting within five minutes.");
+    private static readonly ObservableGauge<long> MobileStaleInstallations = Meter.CreateObservableGauge(
+        "nexoruta.mobile.sync.installations.stale", ObserveStaleInstallations, "{installation}",
+        "Known mobile installations with a report older than five minutes.");
+    private static readonly ObservableGauge<double> MobileOldestReportAge = Meter.CreateObservableGauge(
+        "nexoruta.mobile.sync.oldest_report_age", ObserveOldestMobileReport, "s",
+        "Age of the oldest retained mobile sync report; zero with no retained reports.");
+    private static readonly ObservableGauge<long> WebhookDeliveries = Meter.CreateObservableGauge(
+        "nexoruta.commerce.webhooks.deliveries", ObserveWebhookStates, "{delivery}",
+        "Persisted HTTP commerce webhook deliveries by current state.");
+    private static readonly ObservableGauge<double> OldestPendingWebhookAge = Meter.CreateObservableGauge(
+        "nexoruta.commerce.webhooks.oldest_pending_age", ObserveOldestPendingWebhook, "s",
+        "Age of the oldest pending, retrying, or processing commerce webhook.");
+    private static ObservabilitySnapshot snapshot = ObservabilitySnapshot.Empty;
     private static readonly Counter<long> ProofDeadlineSweeps = Meter.CreateCounter<long>(
         "nexoruta.worker.proof_deadline.sweeps", "{sweep}", "Proof deadline sweep outcomes.");
     private static readonly Counter<long> ProofDeadlineShipments = Meter.CreateCounter<long>(
@@ -61,7 +83,10 @@ public static class WorkerTelemetry
 
     public static void PushDeliveryFailed() => PushFailures.Add(1);
 
-    public static void CommerceNotificationFailed() => CommerceNotificationFailures.Add(1);
+    public static void CommerceNotificationAttemptFailed() => CommerceNotificationAttemptFailures.Add(1);
+
+    public static void SetObservabilitySnapshot(ObservabilitySnapshot value)
+        => Volatile.Write(ref snapshot, value);
 
     public static void ProofDeadlineSweep(string outcome, int affected, bool moreWork, double elapsedMilliseconds)
     {
@@ -106,6 +131,33 @@ public static class WorkerTelemetry
         return ActivitySource.StartActivity(operation, ActivityKind.Consumer, parent);
     }
 
+    private static IEnumerable<Measurement<long>> ObserveMobilePending()
+        => [new Measurement<long>(Volatile.Read(ref snapshot).PendingSyncOperations)];
+
+    private static IEnumerable<Measurement<long>> ObserveFreshInstallations()
+        => [new Measurement<long>(Volatile.Read(ref snapshot).FreshMobileInstallations)];
+
+    private static IEnumerable<Measurement<long>> ObserveStaleInstallations()
+        => [new Measurement<long>(Volatile.Read(ref snapshot).StaleMobileInstallations)];
+
+    private static IEnumerable<Measurement<double>> ObserveOldestMobileReport()
+        => [new Measurement<double>(Volatile.Read(ref snapshot).OldestMobileSyncReportSeconds)];
+
+    private static IEnumerable<Measurement<double>> ObserveOldestPendingWebhook()
+        => [new Measurement<double>(Volatile.Read(ref snapshot).OldestPendingWebhookSeconds)];
+
+    private static IEnumerable<Measurement<long>> ObserveSnapshotAvailable()
+        => [new Measurement<long>(Volatile.Read(ref snapshot).SnapshotAvailable ? 1 : 0)];
+
+    private static IEnumerable<Measurement<long>> ObserveWebhookStates()
+    {
+        var current = Volatile.Read(ref snapshot);
+        yield return new Measurement<long>(current.PendingWebhooks, new KeyValuePair<string, object?>("state", "pending"));
+        yield return new Measurement<long>(current.RetryWebhooks, new KeyValuePair<string, object?>("state", "retry_or_processing"));
+        yield return new Measurement<long>(current.DeliveredWebhooks, new KeyValuePair<string, object?>("state", "delivered"));
+        yield return new Measurement<long>(current.FailedWebhooks, new KeyValuePair<string, object?>("state", "failed"));
+    }
+
     public static string CorrelationId(OutboxClaim message)
     {
         if (Activity.Current is { } activity)
@@ -140,6 +192,32 @@ public static class WorkerTelemetry
         return ActivityContext.TryParse(value, traceState: null, out _) ? value : null;
     }
 
+    public static string? ReadTraceParent(Confluent.Kafka.Headers? headers)
+    {
+        if (headers is null || !headers.TryGetLastBytes("traceparent", out var bytes)) return null;
+        var value = System.Text.Encoding.UTF8.GetString(bytes);
+        return ActivityContext.TryParse(value, traceState: null, out _) ? value : null;
+    }
+
+    public static string? ReadHeaderText(Confluent.Kafka.Headers? headers, string name)
+        => headers is not null && headers.TryGetLastBytes(name, out var bytes)
+            ? System.Text.Encoding.UTF8.GetString(bytes)
+            : null;
+
+    public static string? ReadBusinessCorrelationId(string payload)
+    {
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(payload);
+            return document.RootElement.TryGetProperty("correlacionId", out var value)
+                   && value.ValueKind == System.Text.Json.JsonValueKind.String
+                   && Guid.TryParse(value.GetString(), out var id)
+                ? id.ToString("D")
+                : null;
+        }
+        catch (System.Text.Json.JsonException) { return null; }
+    }
+
     private static IEnumerable<Measurement<double>> ObserveSqlContactAge()
     {
         var progress = Volatile.Read(ref activeTransport);
@@ -170,4 +248,19 @@ public static class WorkerTelemetry
         public string Name { get; } = name;
         public long LastSqlContact;
     }
+}
+
+public sealed class ObservabilitySnapshot
+{
+    public long PendingSyncOperations { get; set; }
+    public long FreshMobileInstallations { get; set; }
+    public long StaleMobileInstallations { get; set; }
+    public double OldestMobileSyncReportSeconds { get; set; }
+    public double OldestPendingWebhookSeconds { get; set; }
+    public long PendingWebhooks { get; set; }
+    public long RetryWebhooks { get; set; }
+    public long DeliveredWebhooks { get; set; }
+    public long FailedWebhooks { get; set; }
+    public bool SnapshotAvailable { get; set; }
+    public static ObservabilitySnapshot Empty { get; } = new();
 }

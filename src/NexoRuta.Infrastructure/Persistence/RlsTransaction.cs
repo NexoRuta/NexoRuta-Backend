@@ -1,5 +1,6 @@
 using System.Data;
 using System.Data.Common;
+using System.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using NexoRuta.Application.Administracion.Context;
@@ -222,7 +223,8 @@ public static class RlsTransaction
                 (RlsContextContract.HistoryCorrelationId, correlationId.ToString("D")),
                 (RlsContextContract.HistoryOccurredAt, ""),
                 (RlsContextContract.HistoryFactCode, ""),
-                (RlsContextContract.HistoryProcess, worker is null ? "" : $"worker:{OutboxMessageTypes.TrackingRequested}")
+                (RlsContextContract.HistoryProcess, worker is null ? "" : $"worker:{OutboxMessageTypes.TrackingRequested}"),
+                (RlsContextContract.TraceParent, ValidTraceParent(Activity.Current?.Id))
             ]);
         }
         settings.AddRange(extra);
@@ -259,6 +261,9 @@ public static class RlsTransaction
         }
 
         static string Value(Guid? value) => value?.ToString("D") ?? "";
+
+        static string ValidTraceParent(string? value)
+            => ActivityContext.TryParse(value, traceState: null, out _) ? value! : "";
     }
 }
 

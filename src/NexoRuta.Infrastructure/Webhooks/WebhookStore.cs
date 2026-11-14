@@ -51,6 +51,8 @@ public sealed class WebhookClaim
     public int Contrato { get; set; }
     public string Tipo { get; set; } = "";
     public int IntentosCiclo { get; set; }
+    public Guid? CorrelationId { get; set; }
+    public string? TraceParent { get; set; }
 }
 public sealed record WebhookAttempt(Guid EntregaId, int Numero, DateTimeOffset InicioUtc, DateTimeOffset? FinUtc, int? CodigoHttp, string? Diagnostico);
 public sealed record WebhookReplay(Guid EntregaId, int Numero, Guid ActorId, DateTimeOffset FechaUtc, string EstadoAnterior);
@@ -61,7 +63,7 @@ public sealed class WebhookStore(NexoRutaDbContext db)
     public IQueryable<WebhookSubscription> Subscriptions => db.Database.SqlQueryRaw<WebhookSubscription>("SELECT " + SubscriptionColumns + " FROM public.\"WebhookSubscriptions\"");
     public IQueryable<WebhookDelivery> Deliveries => db.Database.SqlQueryRaw<WebhookDelivery>("SELECT " + DeliveryColumns + " FROM public.\"WebhookDeliveries\"");
     public Task<WebhookClaim?> Claim(Guid token, int maxAttempts, CancellationToken ct) => db.Database.SqlQuery<WebhookClaim>($"""
-        SELECT "Id","EventoId","Url","Payload","SecretoProtegido","ClaveId","Contrato","Tipo","IntentosCiclo" FROM nexoruta_app.webhook_claim({token},{maxAttempts})
+        SELECT "Id","EventoId","Url","Payload","SecretoProtegido","ClaveId","Contrato","Tipo","IntentosCiclo","CorrelationId","TraceParent" FROM nexoruta_app.webhook_claim({token},{maxAttempts})
         """).SingleOrDefaultAsync(ct);
     public Task<bool> Finish(Guid id, Guid token, int? code, string? diagnostic, bool retry, int delay, CancellationToken ct) => db.Database.SqlQuery<bool>($"""
         SELECT nexoruta_app.webhook_finish({id},{token},{code},{diagnostic},{retry},{delay}) AS "Value"

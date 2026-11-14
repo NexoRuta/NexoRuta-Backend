@@ -46,6 +46,7 @@ public static class RlsContextContract
     public const string HistoryOccurredAt = "nexoruta.history_occurred_at";
     public const string HistoryFactCode = "nexoruta.history_fact_code";
     public const string HistoryProcess = "nexoruta.history_process";
+    public const string TraceParent = "nexoruta.traceparent";
 
     public static string ActorSqlValue(RlsActorKind actorKind) => actorKind switch
     {

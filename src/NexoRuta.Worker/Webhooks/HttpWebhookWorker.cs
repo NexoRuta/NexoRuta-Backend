@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Diagnostics;
 using System.Net;
 using System.Text;
 using NexoRuta.Infrastructure.Webhooks;
@@ -23,6 +24,18 @@ public sealed class HttpWebhookWorker(IServiceScopeFactory scopes, IConfiguratio
                 var d=await store.Claim(token,max,stoppingToken);
                 WorkerTelemetry.SqlContact("HttpWebhooks");
                 if(d is null) { await Task.Delay(500,stoppingToken); continue; }
+                using var activity = WorkerTelemetry.StartConsumerActivity(d.TraceParent, "commerce.webhook.delivery");
+                activity?.SetTag("messaging.system", "http");
+                activity?.SetTag("messaging.operation", "process");
+                activity?.SetTag("nexoruta.delivery.id", d.Id);
+                activity?.SetTag("nexoruta.event.id", d.EventoId);
+                if (d.CorrelationId is { } traceCorrelation) activity?.SetTag("nexoruta.correlation.id", traceCorrelation);
+                using var logScope = logger.BeginScope(new Dictionary<string, object?>
+                {
+                    ["correlation_id"] = d.CorrelationId?.ToString("D"),
+                    ["delivery_id"] = d.Id.ToString("D"),
+                    ["event_id"] = d.EventoId.ToString("D")
+                });
                 int? status=null; string? diagnostic=null; bool retry=true;
                 var delay=(int)Math.Min(cap,basis*Math.Pow(2,Math.Min(20,d.IntentosCiclo-1)));
                 try
@@ -56,9 +69,19 @@ public sealed class HttpWebhookWorker(IServiceScopeFactory scopes, IConfiguratio
                 catch(HttpRequestException) { diagnostic="Error de red: resultado remoto desconocido"; }
                 catch(ArgumentException) { diagnostic="Destino no autorizado"; retry=false; }
                 catch(System.Security.Cryptography.CryptographicException) { diagnostic="Clave de firma no disponible"; retry=false; }
-                if(status is >=200 and <=299) WorkerTelemetry.Published("HttpWebhooks");
-                else { WorkerTelemetry.Failed("HttpWebhooks"); WorkerTelemetry.CommerceNotificationFailed(); }
+                if(status is >=200 and <=299)
+                {
+                    WorkerTelemetry.Published("HttpWebhooks");
+                    activity?.SetStatus(ActivityStatusCode.Ok);
+                }
+                else
+                {
+                    WorkerTelemetry.Failed("HttpWebhooks");
+                    WorkerTelemetry.CommerceNotificationAttemptFailed();
+                    activity?.SetStatus(ActivityStatusCode.Error, "Commerce webhook attempt failed");
+                }
                 var saved=await store.Finish(d.Id,token,status,diagnostic,retry,delay,stoppingToken);
+                activity?.SetTag("nexoruta.delivery.lease_confirmed", saved);
                 logger.LogInformation("Webhook attempt finished. DeliveryId: {DeliveryId}, HttpStatus: {HttpStatus}, LeaseConfirmed: {LeaseConfirmed}",d.Id,status,saved);
             }
             catch(OperationCanceledException) when(stoppingToken.IsCancellationRequested) { break; }

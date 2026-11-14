@@ -151,11 +151,21 @@ public sealed class KafkaEnvioCreadoPublisher : IDisposable
     {
         if (message.VersionContrato != 2 || message.Tipo is not ("BultoActualizado" or "OperacionActualizada") || message.Destino != "Kafka")
             throw new InvalidDataException("Unregistered commerce notification.");
+        var headers = new Headers
+        {
+            { "eventId", Encoding.UTF8.GetBytes(message.Id.ToString("D")) },
+            { "eventVersion", Encoding.UTF8.GetBytes("2") },
+            { "eventType", Encoding.UTF8.GetBytes(message.Tipo) }
+        };
+        var traceParent = Activity.Current?.Id ?? message.TraceParent;
+        if (!string.IsNullOrWhiteSpace(traceParent)) headers.Add("traceparent", Encoding.UTF8.GetBytes(traceParent));
+        var correlationId = WorkerTelemetry.ReadBusinessCorrelationId(message.Payload);
+        if (correlationId is not null) headers.Add("correlationId", Encoding.UTF8.GetBytes(correlationId));
         var delivery = await producer.Value.ProduceAsync(CommerceNoticeConsumer.Topic, new Message<string, string>
         {
             Key = message.EnvioId!.Value.ToString("D"),
-            Value = message.Payload,
-            Headers = new Headers { { "eventId", Encoding.UTF8.GetBytes(message.Id.ToString("D")) }, { "eventVersion", Encoding.UTF8.GetBytes("2") }, { "eventType", Encoding.UTF8.GetBytes(message.Tipo) } }
+            Value = message.BusinessPayload,
+            Headers = headers
         }, ct);
         if (delivery.Status != PersistenceStatus.Persisted) throw new InvalidOperationException("Commerce notice not confirmed persisted.");
     }
@@ -169,18 +179,21 @@ public sealed class KafkaEnvioCreadoPublisher : IDisposable
         value.Validar();
         if (value.EventId != message.Id || value.OperadorId != message.OperadorId || value.EntidadId != message.ClaveAmbito)
             throw new InvalidDataException("Operational outbox identity mismatch.");
+        var headers = new Headers
+        {
+            { "eventId", Encoding.UTF8.GetBytes(value.EventId.ToString("D")) },
+            { "eventType", Encoding.UTF8.GetBytes(value.Tipo) },
+            { "eventVersion", Encoding.UTF8.GetBytes("1") },
+            { "correlationId", Encoding.UTF8.GetBytes(value.CorrelacionId.ToString("D")) }
+        };
+        var traceParent = Activity.Current?.Id ?? message.TraceParent;
+        if (!string.IsNullOrWhiteSpace(traceParent)) headers.Add("traceparent", Encoding.UTF8.GetBytes(traceParent));
         var delivery = await producer.Value.ProduceAsync(operationalTopic,
             new Message<string, string>
             {
                 Key = value.OperadorId.ToString("D") + ":" + value.EntidadId.ToString("D"),
                 Value = message.BusinessPayload,
-                Headers = new Headers
-                {
-                    { "eventId", Encoding.UTF8.GetBytes(value.EventId.ToString("D")) },
-                    { "eventType", Encoding.UTF8.GetBytes(value.Tipo) },
-                    { "eventVersion", Encoding.UTF8.GetBytes("1") },
-                    { "correlationId", Encoding.UTF8.GetBytes(value.CorrelacionId.ToString("D")) }
-                }
+                Headers = headers
             }, ct);
         if (delivery.Status != PersistenceStatus.Persisted)
             throw new InvalidOperationException("Operational event not confirmed persisted.");
