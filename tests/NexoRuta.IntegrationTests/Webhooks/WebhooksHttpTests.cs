@@ -12,6 +12,7 @@ using NexoRuta.Infrastructure.Persistence;
 using NexoRuta.Infrastructure.Webhooks;
 using NexoRuta.IntegrationTests.Fixtures;
 using NexoRuta.IntegrationTests.Seguridad;
+using NexoRuta.Worker;
 using Npgsql;
 namespace NexoRuta.IntegrationTests.Webhooks;
 public sealed class WebhooksHttpTests(PostgresFixture postgres):IClassFixture<PostgresFixture>
@@ -66,10 +67,16 @@ public sealed class WebhooksHttpTests(PostgresFixture postgres):IClassFixture<Po
             Assert.Equal(1L,reader.GetInt64(5));
             Assert.True(reader.GetDouble(3)>=0);
             Assert.True(reader.GetDouble(4)>=0);
+            Assert.Equal("SnapshotAvailable",reader.GetName(9));
+            Assert.True(reader.GetBoolean(9));
         }
 
         await using(var workerDb=worker.CreateDbContext())
         {
+            var mappedSnapshot=await workerDb.Database.SqlQueryRaw<ObservabilitySnapshot>(
+                "SELECT * FROM nexoruta_app.observability_snapshot()").SingleAsync();
+            Assert.True(mappedSnapshot.SnapshotAvailable);
+
             var claim=await new WebhookStore(workerDb).Claim(Guid.NewGuid(),3,default);
             Assert.NotNull(claim);
             Assert.Equal(deliveredTraceParent,claim.TraceParent);
