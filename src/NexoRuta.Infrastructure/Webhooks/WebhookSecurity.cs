@@ -56,7 +56,10 @@ public sealed class WebhookDestinationPolicy(IConfiguration config, IHostEnviron
         var configured = config.GetSection("Webhooks:AllowedOrigins");
         var allowed = configured.GetChildren().Select(value => value.Value)
             .Concat((config["Webhooks:AllowedOrigins"] ?? "").Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries));
-        if (uri.Scheme != "https" || !allowed.Contains(uri.GetLeftPart(UriPartial.Authority), StringComparer.OrdinalIgnoreCase))
+        var allowAnyPublicHttpsOrigin = config.GetValue<bool>("Webhooks:AllowAnyPublicHttpsOrigin");
+        if (uri.Scheme != "https" ||
+            !(allowAnyPublicHttpsOrigin ||
+              allowed.Contains(uri.GetLeftPart(UriPartial.Authority), StringComparer.OrdinalIgnoreCase)))
             throw new ArgumentException("El destino no está autorizado. Solicitá habilitar su origen HTTPS; el receptor de prueba tiene una excepción de desarrollo específica.");
         return uri;
     }

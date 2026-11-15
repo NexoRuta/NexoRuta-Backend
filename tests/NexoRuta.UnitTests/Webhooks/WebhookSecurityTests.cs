@@ -46,6 +46,23 @@ public sealed class WebhookSecurityTests
         Assert.Throws<ArgumentException>(()=>policy.Validate("https://merchant.example.test.evil.test/hooks"));
         Assert.Throws<ArgumentException>(()=>policy.Validate("https://events.example.test/hooks"));
     }
+    [Fact]
+    public async Task OpenPublicHttpsOriginsStillRejectPrivateAddressesAtConnectionTime()
+    {
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Webhooks:AllowAnyPublicHttpsOrigin"] = "true"
+        }).Build();
+        var policy = new WebhookDestinationPolicy(config, new TestEnvironment { EnvironmentName = "Production" });
+        policy.Validate("https://merchant.example.test/webhook");
+        policy.Validate("https://events.example.test:8443/receive");
+        Assert.Throws<ArgumentException>(() => policy.Validate("http://merchant.example.test/webhook"));
+
+        var metadata = policy.Validate("https://169.254.169.254/computeMetadata/v1/");
+        using var client = new HttpClient(policy.CreateHandler(metadata));
+        await Assert.ThrowsAsync<HttpRequestException>(() => client.GetAsync(metadata));
+    }
+
     private sealed class TestEnvironment:IHostEnvironment
     {public string EnvironmentName{get;set;}="Development";public string ApplicationName{get;set;}="Tests";public string ContentRootPath{get;set;}="/tmp";public IFileProvider ContentRootFileProvider{get;set;}=new NullFileProvider();}
 }
