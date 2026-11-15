@@ -10,8 +10,12 @@ operador, con un propietario de funciones sin login ni bypass RLS. API no recibe
 SELECT/UPDATE directo sobre el outbox.
 
 La selección comprende publicaciones RabbitMQ/Kafka en `Error`, sin reserva,
-sin recepción procesada. Los mensajes de identidad no pertenecen al operador.
-Push conserva su mecanismo específico de despacho/backoff/recibos. Se muestra
+sin recepción procesada. Consulta los recibos técnicos, la bandeja de comercio
+y las proyecciones/documentos operativos existentes. La solicitud de seguimiento
+comprueba además el mutex real del consumidor y rechaza el reintento si está
+trabajando. Los mensajes de identidad no pertenecen al operador.
+Los correos a destinatarios/códigos de cancelación y Push conservan sus
+circuitos de notificación y recibos; quedan excluidos de esta operación interna. Se muestra
 ID, tipo, destino, estado, intentos y un diagnóstico fijo seguro; nunca payload,
 credenciales ni el texto original de excepciones.
 

@@ -97,6 +97,43 @@ public sealed class AdministrativeOutboxRetryTests(PostgresFixture postgres) : I
     }
 
     [Fact]
+    public async Task ExcludesActiveTrackingConsumerKafkaReceiptsAndExternalNotifications()
+    {
+        var data = await postgres.CreateDatabaseAsync();
+        using (var seed = data.CreateShippingApiFactory()) using (seed.CreateHttpClient()) { }
+        await using var db = data.CreateDbContext();
+        var commerce = await db.AccesosUsuario.SingleAsync(a => a.ComercioId != null);
+        var op = await db.AccesosUsuario.SingleAsync(a => a.OperadorId != null);
+        var shipment = await CreateShipment(data, commerce.Id);
+        var tracking = await db.OutboxMessages.SingleAsync(m => m.EnvioId == shipment && m.Tipo == "GenerarSeguimiento");
+        await Fail(data, tracking.Id);
+        var runtime = await RlsRestrictedHttpFlowTests.RestrictApiAsync(data);
+        using var api = new IntegrationApiFactory(runtime, settings: RlsRestrictedHttpFlowTests.ApiSettings());
+        using var client = api.CreateHttpClient();
+        await client.SetBearerForAccessAsync(data, op.Id);
+        // Hold the exact PostgreSQL mutex used by the real tracking consumer.
+        await using (var processing = data.CreateDbContext())
+        await using (var transaction = await processing.Database.BeginTransactionAsync())
+        {
+            var key = $"{op.OperadorId!.Value:N}:{shipment:N}";
+            await processing.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key},0))");
+            Assert.DoesNotContain((await client.GetFromJsonAsync<JsonElement[]>(Url))!, m => m.GetProperty("id").GetGuid() == tracking.Id);
+            Assert.Equal("NoElegible", await Retry(client, tracking.Id, Request(1)));
+            Assert.Equal(OutboxEstado.Error, (await db.OutboxMessages.AsNoTracking().SingleAsync(m => m.Id == tracking.Id)).Estado);
+        }
+        Assert.Equal("Solicitado", await Retry(client, tracking.Id, Request(1)));
+        var operational = await db.OutboxMessages.FirstAsync(m => m.OperadorId == op.OperadorId && m.Tipo == "EventoOperativo");
+        Assert.True(await db.Database.SqlQuery<bool>($"""SELECT nexoruta_app.project_operational_event({operational.Payload}::jsonb) AS "Value" """).SingleAsync());
+        await Fail(data, operational.Id);
+        Assert.Equal("NoElegible", await Retry(client, operational.Id, Request(1)));
+        var mail = await db.OutboxMessages.FirstAsync(m => m.EnvioId == shipment && m.Tipo == "AvisoDestinatarioEstado");
+        await Fail(data, mail.Id);
+        Assert.Equal("NoElegible", await Retry(client, mail.Id, Request(1)));
+        var listing = (await client.GetFromJsonAsync<JsonElement[]>(Url))!;
+        Assert.DoesNotContain(listing, m => m.GetProperty("id").GetGuid() == operational.Id || m.GetProperty("id").GetGuid() == mail.Id);
+    }
+
+    [Fact]
     public async Task RequestedRetryIsRecoveredByNormalPublisherAndRealRabbitConsumerOnlyOnce()
     {
         var data = await postgres.CreateDatabaseAsync();

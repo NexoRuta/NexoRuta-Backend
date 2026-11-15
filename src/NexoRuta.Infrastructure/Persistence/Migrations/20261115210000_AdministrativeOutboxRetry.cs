@@ -28,6 +28,14 @@ CREATE POLICY retry_grants ON public."RolesPermisos" FOR SELECT TO nexoruta_retr
 CREATE POLICY retry_permissions ON public."Permisos" FOR SELECT TO nexoruta_retry_fn USING(true);
 CREATE POLICY retry_operator ON public."Operadores" FOR SELECT TO nexoruta_retry_fn USING("Id"=nexoruta_app.ctx_uuid('org_id'));
 
+GRANT SELECT("EventoId","OperadorId") ON public."AvisosComercio",public."OperacionEventosProcesados",public."OperacionDocumentosProcesados" TO nexoruta_retry_fn;
+CREATE POLICY retry_commerce_receipt ON public."AvisosComercio" FOR SELECT TO nexoruta_retry_fn
+ USING(nexoruta_app.setting('actor_kind')='operador' AND "OperadorId"=nexoruta_app.ctx_uuid('org_id'));
+CREATE POLICY retry_operation_receipt ON public."OperacionEventosProcesados" FOR SELECT TO nexoruta_retry_fn
+ USING(nexoruta_app.setting('actor_kind')='operador' AND "OperadorId"=nexoruta_app.ctx_uuid('org_id'));
+CREATE POLICY retry_document_receipt ON public."OperacionDocumentosProcesados" FOR SELECT TO nexoruta_retry_fn
+ USING(nexoruta_app.setting('actor_kind')='operador' AND "OperadorId"=nexoruta_app.ctx_uuid('org_id'));
+
 CREATE TABLE public."OutboxRetryRequests"(
  "Id" uuid NOT NULL,"OperadorId" uuid NOT NULL,"ActorId" uuid NOT NULL,"AccesoId" uuid NOT NULL,
  "MensajeId" uuid NOT NULL,"IntentosEsperados" integer NOT NULL,"Motivo" varchar(500) NOT NULL,
@@ -46,6 +54,25 @@ CREATE TRIGGER retry_history_immutable BEFORE UPDATE OR DELETE ON public."Outbox
 CREATE TRIGGER retry_history_no_truncate BEFORE TRUNCATE ON public."OutboxRetryRequests" FOR EACH STATEMENT EXECUTE FUNCTION public.guard_outbox_retry_history();
 
 GRANT CREATE ON SCHEMA nexoruta_app TO nexoruta_retry_fn;
+CREATE FUNCTION nexoruta_app.outbox_tracking_busy(p_operator uuid,p_shipment uuid) RETURNS boolean
+ LANGUAGE sql SECURITY DEFINER SET search_path=pg_catalog AS $$
+ WITH mutex AS(SELECT hashtextextended(replace(p_operator::text,'-','')||':'||replace(p_shipment::text,'-',''),0) AS key)
+ SELECT EXISTS(SELECT 1 FROM pg_catalog.pg_locks l CROSS JOIN mutex m
+ WHERE l.locktype='advisory' AND l.granted AND l.pid<>pg_backend_pid() AND l.objsubid=1
+ AND l.database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+ AND l.classid=((m.key>>32)&4294967295)::oid AND l.objid=(m.key&4294967295)::oid)
+$$;
+ALTER FUNCTION nexoruta_app.outbox_tracking_busy(uuid,uuid) OWNER TO nexoruta_retry_fn;
+REVOKE ALL ON FUNCTION nexoruta_app.outbox_tracking_busy(uuid,uuid) FROM PUBLIC;
+CREATE FUNCTION nexoruta_app.outbox_retry_consumed(p_message uuid) RETURNS boolean
+ LANGUAGE sql SECURITY DEFINER SET search_path=pg_catalog AS $$
+ SELECT EXISTS(SELECT 1 FROM public."ProcessedMessages" WHERE "MessageId"=p_message)
+ OR EXISTS(SELECT 1 FROM public."AvisosComercio" WHERE "EventoId"=p_message)
+ OR EXISTS(SELECT 1 FROM public."OperacionEventosProcesados" WHERE "EventoId"=p_message)
+ OR EXISTS(SELECT 1 FROM public."OperacionDocumentosProcesados" WHERE "EventoId"=p_message)
+$$;
+ALTER FUNCTION nexoruta_app.outbox_retry_consumed(uuid) OWNER TO nexoruta_retry_fn;
+REVOKE ALL ON FUNCTION nexoruta_app.outbox_retry_consumed(uuid) FROM PUBLIC;
 CREATE FUNCTION nexoruta_app.require_outbox_manager() RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE role_id uuid;
 BEGIN
@@ -70,8 +97,10 @@ BEGIN
  RETURN QUERY SELECT m."Id",m."Tipo"::text,m."Destino"::text,m."Estado"::text,m."Intentos",
  'Falló la publicación. El Worker conserva el reintento automático.'::text,m."ProximoIntentoEnUtc"
  FROM public."OutboxMessages" m WHERE m."Estado"='Error' AND m."Destino" IN('RabbitMq','Kafka')
+ AND m."Tipo" NOT IN('AvisoDestinatarioEstado','CodigoCancelacionEmail')
  AND m."EstadoEntrega" IS NULL AND m."ProcesadorId" IS NULL AND m."ReservaHastaUtc" IS NULL
- AND NOT EXISTS(SELECT 1 FROM public."ProcessedMessages" p WHERE p."MessageId"=m."Id")
+ AND NOT nexoruta_app.outbox_retry_consumed(m."Id")
+ AND (m."Tipo"<>'GenerarSeguimiento' OR NOT nexoruta_app.outbox_tracking_busy(m."OperadorId",m."EnvioId"))
  ORDER BY m."CreadoEnUtc",m."Id" OFFSET (p_page-1)*p_size LIMIT p_size;
 END $$;
 ALTER FUNCTION nexoruta_app.failed_outbox_messages(int,int) OWNER TO nexoruta_retry_fn;
@@ -80,7 +109,7 @@ GRANT EXECUTE ON FUNCTION nexoruta_app.failed_outbox_messages(int,int) TO nexoru
 
 CREATE FUNCTION nexoruta_app.request_outbox_retry(p_request uuid,p_message uuid,p_attempts int,p_reason text) RETURNS text
  LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
-DECLARE m public."OutboxMessages"; previous public."OutboxRetryRequests"; result text;
+DECLARE m public."OutboxMessages"; previous public."OutboxRetryRequests"; result text; available boolean:=true;
 BEGIN
  PERFORM nexoruta_app.require_outbox_manager();
  IF p_request IS NULL OR p_request='00000000-0000-0000-0000-000000000000'::uuid OR p_message IS NULL OR p_attempts<0
@@ -96,9 +125,14 @@ BEGIN
  IF NOT FOUND THEN result:='NoDisponible';
  ELSE
  PERFORM set_config('nexoruta.retry_message_id',p_message::text,true);
- IF m."Estado"='Error' AND m."Intentos"=p_attempts AND m."Destino" IN('RabbitMq','Kafka')
+ IF m."Tipo"='GenerarSeguimiento' THEN
+ -- Same mutex as ProcesarGeneracionSeguimiento: do not replay an active consumer.
+ available:=pg_try_advisory_xact_lock(hashtextextended(replace(m."OperadorId"::text,'-','')||':'||replace(m."EnvioId"::text,'-',''),0));
+ END IF;
+ IF available AND m."Estado"='Error' AND m."Intentos"=p_attempts AND m."Destino" IN('RabbitMq','Kafka')
+ AND m."Tipo" NOT IN('AvisoDestinatarioEstado','CodigoCancelacionEmail')
  AND m."ProcesadorId" IS NULL AND m."ReservaHastaUtc" IS NULL AND m."EstadoEntrega" IS NULL
- AND NOT EXISTS(SELECT 1 FROM public."ProcessedMessages" WHERE "MessageId"=p_message) THEN
+ AND NOT nexoruta_app.outbox_retry_consumed(p_message) THEN
  UPDATE public."OutboxMessages" SET "Estado"='Pendiente',"ProximoIntentoEnUtc"=clock_timestamp() WHERE "Id"=p_message;
  result:='Solicitado';
  ELSE result:='NoElegible'; END IF;
