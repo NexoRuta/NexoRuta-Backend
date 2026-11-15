@@ -47,10 +47,17 @@ public sealed class PushOutboxWorker(IServiceScopeFactory scopes, ITransporteFcm
                 logger.LogWarning("El resultado push {MensajeId} quedó registrado pero su reserva venció.", mensaje.Id);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (FalloEntregaPushException ex)
+        {
+            logger.LogWarning("Falló push {MensajeId}. ErrorCategory: {ErrorCategory}; FcmCode: {FcmCode}", mensaje.Id, ex.Categoria, ex.Codigos);
+            WorkerTelemetry.PushDeliveryFailed(ex.Categoria);
+            WorkerTelemetry.Failed("Push");
+            await outbox.MarcarErrorAsync(mensaje.Id, procesador, ex.Detalle, ct);
+        }
         catch (Exception ex)
         {
-            logger.LogWarning("Falló push {MensajeId}. ErrorType: {ErrorType}", mensaje.Id, ex.GetType().Name);
-            WorkerTelemetry.PushDeliveryFailed();
+            logger.LogWarning("Falló push {MensajeId}. ErrorCategory: interno; ErrorType: {ErrorType}", mensaje.Id, ex.GetType().Name);
+            WorkerTelemetry.PushDeliveryFailed("interno");
             WorkerTelemetry.Failed("Push");
             await outbox.MarcarErrorAsync(mensaje.Id, procesador, ex.GetType().Name, ct);
         }
@@ -77,7 +84,7 @@ public sealed class PushOutboxWorker(IServiceScopeFactory scopes, ITransporteFcm
             var fids = lote.Instalaciones.Select(cifrador.Descifrar).ToArray();
             var respuesta = await transporte.EnviarAsync(MensajePushReparto.Crear(lote.Aviso, fids, DateTimeOffset.UtcNow), ct);
             if (respuesta.Count != lote.Instalaciones.Count) throw new InvalidDataException("Firebase no devolvió un resultado por destino.");
-            var fallas = false;
+            var fallas = new List<ResultadoEnvioPush>();
             for (var i = 0; i < lote.Instalaciones.Count; i++)
             {
                 var envio = respuesta[i]; var destino = lote.Instalaciones[i];
@@ -85,9 +92,25 @@ public sealed class PushOutboxWorker(IServiceScopeFactory scopes, ITransporteFcm
                     await repo.RegistrarAsync(mensaje.Id, procesador, destino.Id, destino.FidHash, "FcmAceptada", envio.IdProveedor, ct);
                 else if (envio.Estado == EstadoEnvioPush.RegistroInvalido)
                     await repo.RegistrarAsync(mensaje.Id, procesador, destino.Id, destino.FidHash, "FidInvalido", null, ct);
-                else fallas = true;
+                else fallas.Add(envio);
             }
-            if (fallas) throw new HttpRequestException("Firebase no aceptó todos los destinos; las aceptaciones ya quedaron registradas.");
+            if (fallas.Count > 0)
+            {
+                var categorias = fallas.Select(f => f.Categoria.ToString()).Distinct().Order().ToArray();
+                var codigos = fallas.Select(f => f.CodigoError ?? "Unknown").Distinct().Order().ToArray();
+                var categoria = categorias.Contains(nameof(CategoriaFalloPush.Cuota))
+                    ? nameof(CategoriaFalloPush.Cuota)
+                    : categorias.Length == 1 ? categorias[0] : "Mixto";
+                throw new FalloEntregaPushException(categoria, string.Join(",", codigos));
+            }
         }
     }
+}
+
+internal sealed class FalloEntregaPushException(string categoria, string codigos)
+    : Exception("Firebase no aceptó todos los destinos; las aceptaciones quedaron registradas.")
+{
+    public string Categoria { get; } = categoria;
+    public string Codigos { get; } = codigos;
+    public string Detalle => $"FCM:{Categoria}:{Codigos}";
 }

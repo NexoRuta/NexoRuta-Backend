@@ -15,11 +15,23 @@ public sealed class TransporteFcm : ITransporteFcm, IDisposable
     }
     public async Task<IReadOnlyList<ResultadoEnvioPush>> EnviarAsync(MulticastMessage mensaje, CancellationToken ct)
     {
-        var respuesta = await mensajeria.SendEachForMulticastAsync(mensaje, ct);
+        BatchResponse respuesta;
+        try
+        {
+            respuesta = await mensajeria.SendEachForMulticastAsync(mensaje, ct);
+        }
+        catch (FirebaseMessagingException ex)
+        {
+            // Un error de lote no identifica qué FID falló; no desactivar todas las instalaciones.
+            var fallo = ResultadoEnvioPush.DesdeErrorDeLote(ex);
+            return Enumerable.Repeat(fallo, (mensaje.Fids ?? []).Count).ToArray();
+        }
+
         return respuesta.Responses.Select(r => r.IsSuccess
             ? new ResultadoEnvioPush(EstadoEnvioPush.Aceptado, r.MessageId)
-            : new ResultadoEnvioPush(r.Exception?.MessagingErrorCode == MessagingErrorCode.Unregistered
-                ? EstadoEnvioPush.RegistroInvalido : EstadoEnvioPush.Reintentar)).ToArray();
+            : r.Exception?.MessagingErrorCode == MessagingErrorCode.Unregistered
+                ? new ResultadoEnvioPush(EstadoEnvioPush.RegistroInvalido)
+                : ResultadoEnvioPush.DesdeError(r.Exception)).ToArray();
     }
     public void Dispose() => app.Delete();
 }

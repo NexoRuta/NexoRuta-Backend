@@ -65,7 +65,8 @@ public sealed partial class PushOutboxTests(PostgresFixture postgres) : IClassFi
         using var p = await PrepararPush(2);
         await using var services = await ServiciosWorker(p);
         var transporte = new Transporte { Responder = (m, intento) => intento == 1
-            ? [new(EstadoEnvioPush.Aceptado, "aceptado-primero"), new(EstadoEnvioPush.Reintentar)]
+            ? [new(EstadoEnvioPush.Aceptado, "aceptado-primero"),
+                new(EstadoEnvioPush.Reintentar, Categoria: CategoriaFalloPush.Cuota, CodigoError: "QuotaExceeded")]
             : m.Fids.Select(_ => new ResultadoEnvioPush(EstadoEnvioPush.Aceptado, "aceptado-reintento")).ToArray() };
         using var worker = new PushOutboxWorker(services.GetRequiredService<IServiceScopeFactory>(), transporte, NullLogger<PushOutboxWorker>.Instance);
         await using var clock = p.Data.CreateDbContext();
@@ -76,7 +77,7 @@ public sealed partial class PushOutboxTests(PostgresFixture postgres) : IClassFi
             var mensaje = await db.OutboxMessages.SingleAsync(x => x.Id == p.Mensaje);
             var ahora = await db.Database.SqlQuery<DateTimeOffset>($"SELECT clock_timestamp() AS \"Value\"").SingleAsync();
             Assert.Equal(OutboxEstado.Error, mensaje.Estado);
-            Assert.InRange(mensaje.ProximoIntentoEnUtc, antes.AddSeconds(10), ahora.AddSeconds(25));
+            Assert.InRange(mensaje.ProximoIntentoEnUtc, antes.AddSeconds(60), ahora.AddSeconds(72));
             Assert.Single(await db.EntregasPush.ToArrayAsync());
             await db.OutboxMessages.Where(x => x.Id == p.Mensaje).ExecuteUpdateAsync(s => s.SetProperty(x => x.ProximoIntentoEnUtc, DateTimeOffset.UtcNow.AddSeconds(-1)));
         }

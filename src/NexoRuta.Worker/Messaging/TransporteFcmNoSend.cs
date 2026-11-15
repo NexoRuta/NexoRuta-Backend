@@ -8,7 +8,8 @@ public sealed class TransporteFcmNoSend : ITransporteFcm
     {
         ct.ThrowIfCancellationRequested();
         IReadOnlyList<ResultadoEnvioPush> resultados = (mensaje.Fids ?? [])
-            .Select(_ => new ResultadoEnvioPush(EstadoEnvioPush.Reintentar))
+            .Select(_ => new ResultadoEnvioPush(EstadoEnvioPush.Reintentar,
+                Categoria: CategoriaFalloPush.Simulacion, CodigoError: "NoSend"))
             .ToArray();
         return Task.FromResult(resultados);
     }

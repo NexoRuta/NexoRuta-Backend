@@ -94,11 +94,14 @@ else if (transport == WorkerTransportNames.RabbitMq)
 }
 else if (transport == WorkerTransportNames.Push)
 {
-    builder.Services.AddScoped<NexoRuta.Infrastructure.Notificaciones.CifradorRegistroPush>();
-    builder.Services.AddScoped<NexoRuta.Infrastructure.Notificaciones.EfDespachoPushRepository>();
     var pushNoSend = builder.Configuration.GetValue<bool>("Push:NoSend");
     if (pushNoSend && !builder.Environment.IsDevelopment())
         throw new InvalidOperationException("Push:NoSend is available only in Development.");
+    NexoRuta.Infrastructure.Notificaciones.CifradorRegistroPush.ValidarConfiguracion(builder.Configuration);
+    if (!pushNoSend && string.IsNullOrWhiteSpace(builder.Configuration["Push:ProjectId"]))
+        throw new InvalidOperationException("Falta Push:ProjectId para enviar avisos con Firebase.");
+    builder.Services.AddScoped<NexoRuta.Infrastructure.Notificaciones.CifradorRegistroPush>();
+    builder.Services.AddScoped<NexoRuta.Infrastructure.Notificaciones.EfDespachoPushRepository>();
     builder.Services.AddSingleton<ITransporteFcm>(services => pushNoSend
         ? new TransporteFcmNoSend()
         : new TransporteFcm(services.GetRequiredService<IConfiguration>()));

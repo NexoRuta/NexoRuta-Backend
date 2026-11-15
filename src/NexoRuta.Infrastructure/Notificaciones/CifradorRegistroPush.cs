@@ -4,7 +4,15 @@ using Microsoft.Extensions.Configuration;
 namespace NexoRuta.Infrastructure.Notificaciones;
 public sealed class CifradorRegistroPush(IConfiguration configuracion)
 {
-    private byte[] Clave()
+    public static void ValidarConfiguracion(IConfiguration configuracion)
+    {
+        var clave = LeerClave(configuracion);
+        CryptographicOperations.ZeroMemory(clave);
+    }
+
+    private byte[] Clave() => LeerClave(configuracion);
+
+    private static byte[] LeerClave(IConfiguration configuracion)
     {
         byte[] clave;
         try { clave = Convert.FromBase64String(configuracion["Push:RegistrationEncryptionKey"] ?? ""); }

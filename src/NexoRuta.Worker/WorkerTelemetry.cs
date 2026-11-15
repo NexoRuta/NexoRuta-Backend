@@ -22,7 +22,7 @@ public static class WorkerTelemetry
     private static readonly Counter<long> Failures = Meter.CreateCounter<long>(
         "nexoruta.worker.failures", "{error}", "Worker processing failures, excluding shutdown cancellation.");
     private static readonly Counter<long> PushFailures = Meter.CreateCounter<long>(
-        "nexoruta.worker.push.failures", "{error}", "Failed attempts to deliver push notifications to delivery workers.");
+        "nexoruta.worker.push.failures", "{error}", "Failed attempts to deliver push notifications to delivery workers, grouped by a bounded category.");
     private static readonly Counter<long> CommerceNotificationAttemptFailures = Meter.CreateCounter<long>(
         "nexoruta.commerce.notification.attempts.failed", "{attempt}", "Failed HTTP commerce webhook attempts; does not represent terminal deliveries.");
     private static readonly ObservableGauge<long> MobilePendingOperations = Meter.CreateObservableGauge(
@@ -81,7 +81,8 @@ public static class WorkerTelemetry
         Failures.Add(1, new KeyValuePair<string, object?>("transport", name));
     }
 
-    public static void PushDeliveryFailed() => PushFailures.Add(1);
+    public static void PushDeliveryFailed(string categoria)
+        => PushFailures.Add(1, new KeyValuePair<string, object?>("category", categoria));
 
     public static void CommerceNotificationAttemptFailed() => CommerceNotificationAttemptFailures.Add(1);
 
