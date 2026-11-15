@@ -5,6 +5,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using NexoRuta.Infrastructure.Persistence;
+using NexoRuta.Infrastructure.Outbox;
 using NexoRuta.IntegrationTests.Fixtures;
 using NexoRuta.Worker.Messaging;
 namespace NexoRuta.IntegrationTests.Gestion;
@@ -25,17 +26,16 @@ public sealed class GestionWorkerTests(PostgresFixture postgres,KafkaFixture kaf
         await consumer.StartAsync(timeout.Token);
         try{
             await using var db=s.Data.CreateDbContext();
-            var events=await db.OutboxMessages.Where(x=>x.Tipo=="EventoOperativo").OrderByDescending(x=>x.CreadoEnUtc).Select(x=>x.Payload).ToArrayAsync();
-            using var producer=new ProducerBuilder<string,string>(new ProducerConfig{BootstrapServers=kafka.BootstrapServers,Acks=Acks.All}).Build();
-            foreach(var payload in events.Concat(events.Take(5)))
-            {
-                using var json=System.Text.Json.JsonDocument.Parse(payload);var e=json.RootElement;
-                await producer.ProduceAsync(topic,new(){Key=e.GetProperty("operadorId").GetString()+":"+e.GetProperty("entidadId").GetString(),Value=payload},timeout.Token);
-            }
+            var events=await db.OutboxMessages.Where(x=>x.Tipo=="EventoOperativo").OrderByDescending(x=>x.CreadoEnUtc).ToArrayAsync();
+            using var publisher=new KafkaEnvioCreadoPublisher(config,NullLogger<KafkaEnvioCreadoPublisher>.Instance);
+            var publications=events.Concat(events.Take(5)).ToArray();
+            // Exercise the production envelope, including business correlation headers, on every replay.
+            foreach(var message in publications)
+                await publisher.PublicarOperativoAsync(OutboxClaim.From(message),timeout.Token);
             async Task CatchUp()
             {
                 using var probe=new ConsumerBuilder<string,string>(new ConsumerConfig{BootstrapServers=kafka.BootstrapServers,GroupId=group,EnableAutoCommit=false}).Build();
-                var target=events.Length+5;
+                var target=publications.Length;
                 while(!timeout.IsCancellationRequested){
                     var count=await db.Database.SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM public.\"GestionPendientes\" WHERE \"Generacion\"<>\"Aplicada\"").SingleAsync(timeout.Token);
                     var offset=probe.Committed([new TopicPartition(topic,0)],TimeSpan.FromSeconds(2)).Single().Offset.Value;
