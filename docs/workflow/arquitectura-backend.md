@@ -6,7 +6,7 @@ Fuentes de referencia: `Laboratorio__NET_2026.pdf` (§§ 3–6 y 8), `Entrega_An
 
 ## Estado del repositorio y dirección de dependencias
 
-La solución apunta a **.NET 10** y contiene `NexoRuta.Domain`, `NexoRuta.Application`, `NexoRuta.Infrastructure`, `NexoRuta.Api`, `NexoRuta.Worker` y proyectos de pruebas unitarias, de integración y de arquitectura. La API implementa CU-01, CU-07 y CU-08 con persistencia y acceso por organización, además de M05 Seguimiento. El Worker ejecuta Outbox y generación de seguimiento por RabbitMQ, o publicación de eventos por Kafka, en procesos independientes. La existencia de un proyecto o paquete no implica que todas las capacidades posteriores estén terminadas.
+La solución apunta a **.NET 10** y contiene `NexoRuta.Domain`, `NexoRuta.Application`, `NexoRuta.Infrastructure`, `NexoRuta.Api`, `NexoRuta.Worker` y proyectos de pruebas unitarias, de integración y de arquitectura. La API implementa autenticación y roles propios, alta individual por API e importación CSV idempotente con uno o más bultos, además de seguimiento. Los procesos del Worker se ejecutan en los modos RabbitMQ, Kafka, Push o webhooks HTTP. [CU-07 — Alta de envíos](../cu/CU-07-alta-envios.md) · [CU-08 — Bultos](../cu/CU-08-bultos.md)
 
 | Proyecto | Responsabilidad y dependencias permitidas |
 | --- | --- |
@@ -14,7 +14,7 @@ La solución apunta a **.NET 10** y contiene `NexoRuta.Domain`, `NexoRuta.Applic
 | `Application` | Casos de uso, coordinación y contratos que necesita la aplicación. Depende de `Domain`. |
 | `Infrastructure` | Persistencia e integraciones que implementan contratos de aplicación. Depende de `Application` y `Domain`. |
 | `Api` | Entrada HTTP, autenticación/autorización y composición de dependencias. Depende de `Application` e `Infrastructure`. |
-| `Worker` | Proceso independiente para trabajo asíncrono. Depende de `Application` e `Infrastructure`; su integración con el resto se diseña mediante la cola. |
+| `Worker` | Proceso independiente para trabajo asíncrono. Depende de `Application` e `Infrastructure` y procesa trabajo persistido en PostgreSQL según su modo. |
 
 ADR-001 adopta un **monolito modular** para API y aplicaciones web, organizado por capacidad de negocio, con un Worker desplegado por separado. Dentro de cada módulo se distinguen dominio, casos de uso y adaptadores. Las dependencias de código apuntan hacia dominio y aplicación. La prueba automática de arquitectura debe fallar si el dominio comienza a depender de infraestructura o presentación.
 
@@ -71,28 +71,28 @@ ADR-002 adopta **PostgreSQL con base y tablas compartidas y Row-Level Security (
 - Aplicar el mismo criterio al Worker y al seguimiento público, resolviendo el contexto desde mensajes confiables o enlaces opacos validados. No exponer IDs internos como mecanismo de acceso público.
 - Probar con dos operadores y comercios con envíos: lectura, inserción, actualización, borrado, SQL directo, importaciones, Worker, acceso público y reutilización de conexiones. Ejecutar esas pruebas con el rol restringido real de la aplicación.
 
-El mecanismo concreto de contexto RLS, sus migraciones y las pruebas todavía deben implementarse. No se debe dar por conseguido el aislamiento por tener `OperadorId` en una clase.
+La API vuelve a validar el acceso y establece el contexto RLS dentro de la misma transacción que usa para autorización y persistencia. Las pruebas verifican el aislamiento entre organizaciones con roles restringidos en PostgreSQL aislado. [Middleware RLS](../../src/NexoRuta.Api/Core/Security/RlsTransactionMiddleware.cs) · [Pruebas HTTP con rol restringido](../../tests/NexoRuta.IntegrationTests/Seguridad/RlsRestrictedHttpFlowTests.cs)
 
 ## Invariantes y requisitos que afectan a los CU
 
-- Un envío tiene **uno o más bultos**. Cada bulto tiene identificación, peso y dimensiones. El alta masiva futura debe ser idempotente incluso ante reimportación parcial.
+- Un envío tiene **uno o más bultos**. Cada bulto tiene identificación, peso y dimensiones. La importación CSV reconoce reenvíos de lotes completos o subconjuntos de envíos cuando se conserva la declaración original de cada envío. [Reglas de reimportación](../cu/CU-07-alta-envios.md#importación-csv-e-idempotencia)
 - El estado del envío sigue una máquina explícita: no se modifica arbitrariamente desde controladores, Worker o sincronización móvil. Cada transición genera un evento inmutable con fecha, origen, responsable y ubicación cuando corresponda. La propuesta incorpora estados de validación de prueba que aún requieren cerrar sus reglas.
 - Tarifas y reglas operativas son configurables y versionadas. Un envío conserva la tarifa y el tratamiento aplicados al registrarse; una edición posterior no debe alterarlo retroactivamente.
 - La asignación de un envío a rutas exige control de concurrencia para impedir doble asignación. EF Core y migraciones son obligatorios; se requiere demostrar concurrencia optimista sobre entidades susceptibles de edición simultánea.
 - La sincronización sin conexión necesita política documentada de conflictos e idempotencia de eventos. No definirla implícitamente en un controlador.
-- Publicar eventos de negocio mediante outbox; el Worker debe consumir de forma idempotente, con reintentos crecientes y cola de fallidos. La consistencia exacta y el contrato de mensajes aún requieren ADR y especificación por CU.
+- Persistir los eventos junto con los cambios de negocio mediante Outbox y publicar después del commit. Los consumidores deduplican sus efectos y la recuperación depende del transporte. El cierre diario automático y el reintento administrativo de mensajes internos siguen pendientes. [ADR de consistencia y Outbox](../adr/consistencia-y-outbox.md)
 
 ## Infraestructura y decisiones pendientes
 
 | Tema | Estado de la decisión |
 | --- | --- |
-| PostgreSQL + EF Core/migraciones + RLS | PostgreSQL RLS está implementado para las tablas de negocio, con contexto transaccional validado y pruebas con los roles restringidos de runtime; el límite de los GUC mutables se documenta en docs/rls/AUDITORIA.md. |
-| Cola de trabajo y Worker independiente | RabbitMQ publica y consume mensajes de seguimiento, con reintentos y Outbox; Kafka usa un proceso Worker independiente para `EnvioCreado.v1`. |
+| PostgreSQL + EF Core/migraciones + RLS | RLS aplica contexto transaccional validado y políticas en PostgreSQL. Su comportamiento se verifica con [pruebas de políticas y roles restringidos](../../tests/NexoRuta.IntegrationTests/Seguridad/RlsPolicyTests.cs). |
+| Cola de trabajo y Worker independiente | RabbitMQ procesa trabajos de seguimiento y Kafka publica eventos como `EnvioCreado` v1. Los webhooks a comercios tienen entregas HTTP durables y reenvío propio. [ADR de webhooks](../adr/002-http-commerce-webhooks.md) |
 | Caché distribuida | Obligatoria en dos perfiles de acceso, con invalidación y métricas; Redis está propuesto. |
-| SignalR, Serilog y OpenTelemetry | La API exporta OpenTelemetry al Dashboard local; tiempo real, Serilog y correlación con mensajes siguen pendientes. |
+| SignalR, Serilog y OpenTelemetry | La API expone el hub operativo de SignalR. API y Worker configuran Serilog y OpenTelemetry, y el Outbox conserva contexto de trazas para correlacionar el trabajo asíncrono. [Hub operativo](../../src/NexoRuta.Api/Features/Operacion/OperationalHub.cs) · [Contexto de trazas del Outbox](../../src/NexoRuta.Infrastructure/Outbox/OutboxTraceContext.cs) |
 | Kafka y NoSQL | Opcionales seleccionados en la entrega; no sustituyen la cola ni la base transaccional obligatorias. |
 | Dos instancias API, Docker Compose, CI/CD, nube e IaC | Compose y workflows de CI/CD presentes; compilación y servicios locales verificados. Dos instancias, CI remota, despliegue e IaC no se verificaron en esta revisión. |
-| Identidad, modo de Blazor, conflicto offline, invalidación de caché, estrategia concreta de outbox, herramienta IaC y tablero técnico | Identity con almacén EF Core y JWT actual fue elegido para las cuentas; OIDC no se afirma como implementado. Las demás decisiones de arquitectura conservan su estado específico. |
+| Identidad, modo de Blazor, conflicto offline, invalidación de caché, herramienta IaC y tablero técnico | Las cuentas usan Identity con almacén EF Core y JWT. OIDC figura como pendiente. Las demás decisiones de arquitectura conservan su estado específico. |
 
 Las pruebas unitarias de dominio, de integración de un flujo crítico, de arquitectura y de aislamiento deben ejecutarse en CI. El alcance y criterio verificable de cada CU se documentan siguiendo [Implementar un CU](implementar-cu.md) y su [plantilla](../cu/_plantilla.md).
 

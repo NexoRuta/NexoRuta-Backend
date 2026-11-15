@@ -4,7 +4,9 @@ Platform organization administration: [authority, API and first-account procedur
 
 Backend de la plataforma multioperador de distribución de última milla del Taller .NET 2026. Este repositorio usa .NET 10 y está organizado como base de un **monolito modular**, con un Worker independiente. La entrega de análisis y diseño del 04/10/2026 y el enunciado del laboratorio fundamentan las decisiones resumidas aquí.
 
-> **Estado actual:** están implementados recortes de primer monitoreo, no los casos completos: [CU-01 — autenticación y roles propios](docs/cu/CU-01-comercios-usuarios.md), [CU-07 — alta individual](docs/cu/CU-07-alta-envios.md) y [CU-08 — un bulto por alta](docs/cu/CU-08-bultos.md). CU-07 completo exige también archivo e idempotencia y sigue pendiente; CU-08 es obligatorio y separado y el flujo de un bulto no demuestra uno-o-más. M05 incorpora seguimiento, Outbox transaccional y publisher/worker RabbitMQ y Kafka. RLS está implementado; su aislamiento y el camino de creación/outbox se ejecutaron con PostgreSQL de integración aislado, no en el despliegue productivo. Ver `../docs/auditorias/cu07/05-verificacion-flujo-existente.md` en el repositorio raíz.
+El Backend implementa autenticación y roles propios, alta individual por API e importación CSV idempotente. Ambas modalidades admiten uno o más bultos por envío. La confirmación de la admisión guarda el envío y su trabajo asíncrono en PostgreSQL. RLS delimita el acceso por organización y cuenta con pruebas que usan roles restringidos en PostgreSQL aislado. [CU-01 — Autenticación y roles](docs/cu/CU-01-comercios-usuarios.md) · [CU-07 — Alta de envíos](docs/cu/CU-07-alta-envios.md) · [CU-08 — Bultos](docs/cu/CU-08-bultos.md) · [ADR de consistencia y Outbox](docs/adr/consistencia-y-outbox.md)
+
+Las propuestas de limpieza de código de la auditoría están en proceso en un trabajo separado.
 
 ## Estructura y estado verificado
 
@@ -12,7 +14,7 @@ Backend de la plataforma multioperador de distribución de última milla del Tal
 NexoRuta.sln
 src/
   NexoRuta.Api/             # API ASP.NET Core y OpenAPI de desarrollo
-  NexoRuta.Worker/          # Outbox RabbitMQ/Kafka y generación de seguimiento
+  NexoRuta.Worker/          # Procesamiento asíncrono RabbitMQ, Kafka, Push y webhooks HTTP
   NexoRuta.Domain/          # Modelos iniciales de administración y envíos
   NexoRuta.Application/     # Casos de uso de envíos y contrato de usuario actual
   NexoRuta.Infrastructure/  # EF Core, migraciones, inicialización y acceso directo
@@ -23,7 +25,13 @@ tests/
 Dockerfile
 ```
 
-La solución compila con .NET 10 e incluye pruebas unitarias, integración PostgreSQL y pruebas de arquitectura. ArchitectureTests comprueba la independencia de las capas internas respecto de HTTP y persistencia y que las respuestas de envíos pertenezcan a la API. El workflow de backend compila y ejecuta las pruebas en PRs de `develop` hacia `main`; su presencia no acredita una ejecución remota. Worker tiene dispatcher outbox para RabbitMQ/Kafka y consumidor Rabbit para generación de seguimiento; no se encontró consumidor local del evento Kafka `EnvioCreado`. La entrega puede repetirse y los reintentos actuales usan intervalos fijos.
+La solución apunta a .NET 10 e incluye pruebas unitarias, de integración con PostgreSQL y de arquitectura. Las pruebas de arquitectura verifican los límites entre las capas internas y los adaptadores. El workflow de Backend compila y ejecuta las suites en PRs de `develop` hacia `main`. [Workflow de CI](.github/workflows/ci.yml)
+
+## Alta de envíos
+
+- `POST /api/envios` admite un envío individual con una colección `bultos` de uno o más elementos. [Contrato de alta](src/NexoRuta.Api/Features/Envios/Contracts/Requests/CrearEnvioRequest.cs)
+- `POST /api/envios/importaciones` admite CSV versión 2. El comercio puede reenviar declaraciones equivalentes y recuperar los IDs existentes mediante la referencia externa. [Contrato de importación](src/NexoRuta.Api/Features/Envios/Contracts/Requests/ImportarEnviosRequest.cs) · [Pruebas HTTP de alta e importación](tests/NexoRuta.IntegrationTests/Envios/ShipmentCsvImportHttpTests.cs)
+- `GET /api/envios` incluye todos los bultos de cada envío visible. `GET /api/envios/{id}/etiquetas` genera una etiqueta por bulto persistido. [Contrato del listado](src/NexoRuta.Api/Features/Envios/Contracts/Responses/EnvioDetalle.cs) · [Pruebas HTTP de etiquetas](tests/NexoRuta.IntegrationTests/Envios/EtiquetasEnvioHttpTests.cs)
 
 ## Requisitos y comandos locales
 
@@ -92,7 +100,7 @@ se incorporan automáticamente al PR backend. Ese refactor histórico no incorpo
 | Persistencia | PostgreSQL y EF Core con migraciones. El operador es el tenant; una base y tablas compartidas con RLS como segunda barrera. Cada envío guarda el operador elegido y el comercio de origen, sin vínculo previo entre ambos; las cuentas de comercio consultan sus propios envíos. |
 | Modelo inicial | IDs `Guid`/UUIDv7; `Destinatario` y `Direccion` separados; peso del `Bulto` en gramos y dimensiones en centímetros. Estas decisiones fueron acordadas para el primer corte. |
 | Reglas centrales | Estados de envío explícitos, eventos inmutables, configuración tarifaria y operativa versionada, concurrencia optimista e idempotencia donde correspondan. |
-| Integraciones | Cola de trabajo, patrón outbox y Worker idempotente son obligatorios. RabbitMQ es la propuesta; Redis, SignalR, Serilog y OpenTelemetry figuran en el diseño para caché, tiempo real y observabilidad. |
+| Integraciones | Outbox transaccional para RabbitMQ y Kafka. Los webhooks a comercios tienen su propia entrega HTTP durable. [Decisión y recuperación de fallidos](docs/adr/consistencia-y-outbox.md) |
 | Calidad | Pruebas unitarias de dominio, integración de un flujo crítico, arquitectura y aislamiento entre operadores en el pipeline. |
 
 La [guía de arquitectura del backend](docs/workflow/arquitectura-backend.md) detalla límites, seguridad multioperador, contratos entre módulos, decisiones adoptadas, propuestas y decisiones todavía pendientes. Léela antes de implementar un módulo o CU; evita tomar una elección pendiente como si ya hubiera sido acordada.
