@@ -37,7 +37,6 @@ builder.Services.AddSingleton<TimeProvider>(TimeProvider.System);
 if (transport != "HttpWebhooks")
 {
     builder.Services.AddHostedService<ProofValidationDeadlineWorker>();
-    builder.Services.Configure<DailyClosingOptions>(builder.Configuration.GetSection("DailyClosing"));
     builder.Services.AddScoped<NexoRuta.Infrastructure.Reparto.DailyClosingExecutor>();
     builder.Services.AddHostedService<DailyClosingWorker>();
 }

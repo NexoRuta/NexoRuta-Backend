@@ -8,11 +8,11 @@ namespace NexoRuta.Infrastructure.Reparto;
 
 public sealed class DailyClosingExecutor(NexoRutaDbContext db)
 {
-    public async Task<DailyClosingClaim?> ExecuteNextAsync(Guid worker, DateTimeOffset now, TimeOnly cutoff, CancellationToken ct)
+    public async Task<DailyClosingClaim?> ExecuteNextAsync(Guid worker, DateTimeOffset now, CancellationToken ct)
     {
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         var claim = await db.Database.SqlQuery<DailyClosingClaim>(
-            $"SELECT * FROM nexoruta_app.claim_daily_closing({worker},{now},{cutoff})").SingleOrDefaultAsync(ct);
+            $"SELECT * FROM nexoruta_app.claim_daily_closing({worker},{now})").SingleOrDefaultAsync(ct);
         if (claim is null) return null;
         var route = await db.HojasRuta.Include(h => h.Paradas).SingleAsync(h => h.Id == claim.RutaId, ct);
         var ids = route.Paradas.Select(p => p.EnvioId).ToArray();

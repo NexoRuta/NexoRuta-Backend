@@ -47,15 +47,15 @@ CREATE POLICY closing_fn_routes ON public."HojasRuta" FOR SELECT TO nexoruta_clo
 CREATE POLICY closing_fn_config ON public."ConfiguracionesReparto" FOR SELECT TO nexoruta_closing_fn USING(true);
 CREATE POLICY closing_fn_operators ON public."Operadores" TO nexoruta_closing_fn USING(true) WITH CHECK(false);
 GRANT CREATE ON SCHEMA nexoruta_app TO nexoruta_closing_fn;
-CREATE FUNCTION nexoruta_app.claim_daily_closing(p_worker uuid,p_now timestamptz,p_cutoff time)
+CREATE FUNCTION nexoruta_app.claim_daily_closing(p_worker uuid,p_now timestamptz)
  RETURNS TABLE("Id" uuid,"RutaId" uuid,"OperadorId" uuid,"CorteEnUtc" timestamptz)
  LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE candidate record; operation uuid;
 BEGIN
- IF p_worker IS NULL OR p_worker='00000000-0000-0000-0000-000000000000'::uuid OR p_now IS NULL OR p_cutoff IS NULL THEN RAISE EXCEPTION 'Invalid daily closing claim'; END IF;
- FOR candidate IN SELECT h."Id",h."OperadorId",h."RepartidorAccesoId",h."Fecha",((h."Fecha"+1)+p_cutoff) AT TIME ZONE c."ZonaHoraria" AS cutoff
+ IF p_worker IS NULL OR p_worker='00000000-0000-0000-0000-000000000000'::uuid OR p_now IS NULL THEN RAISE EXCEPTION 'Invalid daily closing claim'; END IF;
+ FOR candidate IN SELECT h."Id",h."OperadorId",h."RepartidorAccesoId",h."Fecha",((h."Fecha"+1)::timestamp AT TIME ZONE c."ZonaHoraria") AS cutoff
  FROM public."HojasRuta" h JOIN public."ConfiguracionesReparto" c ON c."OperadorId"=h."OperadorId" AND c."Version"=h."ConfiguracionVersion"
- WHERE h."Estado"='EnCurso' AND ((h."Fecha"+1)+p_cutoff) AT TIME ZONE c."ZonaHoraria"<=p_now
+ WHERE h."Estado"='EnCurso' AND ((h."Fecha"+1)::timestamp AT TIME ZONE c."ZonaHoraria")<=p_now
  AND NOT EXISTS(SELECT 1 FROM public."CierresDiarios" d WHERE d."RutaId"=h."Id") ORDER BY h."Fecha",h."Id"
  LOOP
  -- Same lock order as mobile execution and Backoffice: operator first, then route.
@@ -70,9 +70,9 @@ BEGIN
  RETURN;
  END LOOP;
 END $$;
-ALTER FUNCTION nexoruta_app.claim_daily_closing(uuid,timestamptz,time) OWNER TO nexoruta_closing_fn;
-REVOKE ALL ON FUNCTION nexoruta_app.claim_daily_closing(uuid,timestamptz,time) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION nexoruta_app.claim_daily_closing(uuid,timestamptz,time) TO nexoruta_worker;
+ALTER FUNCTION nexoruta_app.claim_daily_closing(uuid,timestamptz) OWNER TO nexoruta_closing_fn;
+REVOKE ALL ON FUNCTION nexoruta_app.claim_daily_closing(uuid,timestamptz) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION nexoruta_app.claim_daily_closing(uuid,timestamptz) TO nexoruta_worker;
 CREATE FUNCTION nexoruta_app.finish_daily_closing(p_id uuid,p_now timestamptz,p_incidents jsonb,p_detail text) RETURNS boolean
  LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
 BEGIN

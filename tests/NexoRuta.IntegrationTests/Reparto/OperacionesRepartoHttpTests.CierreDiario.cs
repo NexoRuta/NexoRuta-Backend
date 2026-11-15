@@ -3,7 +3,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 using NexoRuta.Api.Features.Reparto.Contracts;
 using NexoRuta.Domain.Envios;
 using NexoRuta.Domain.Reparto;
@@ -20,8 +19,12 @@ public sealed partial class OperacionesRepartoHttpTests
     public async Task HostedDailyWorkersCloseAtLocalCutoffOncePreservingCustodyAndMobileSequence()
     {
         var data = await postgres.CreateDatabaseAsync();
-        using var api = data.CreateApiFactory(); using var client = api.CreateHttpClient();
+        var apiClock = new ManualClock(DateTimeOffset.UtcNow);
+        using var api = new IntegrationApiFactory(data, timeProvider: apiClock); using var client = api.CreateHttpClient();
         var route = await Cargada(data, client);
+        // A later policy uses UTC; the existing route must retain its Montevideo cutoff.
+        using var policy = await client.PutAsJsonAsync("/api/reparto/configuracion", new { Version=1, ZonaHoraria="UTC", MaximoParadas=30, RequiereFotoIntento=false, BloquearDiscrepanciasCarga=true });
+        Assert.Equal(System.Net.HttpStatusCode.OK, policy.StatusCode);
         var cutoff = new DateTimeOffset(route.Fecha.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeSpan.FromHours(-3)).ToUniversalTime();
         var clock = new ClosingClock(cutoff.AddSeconds(-30));
         var connection = await CrearConexionWorker(data);
@@ -35,6 +38,7 @@ public sealed partial class OperacionesRepartoHttpTests
             Assert.Equal(EstadoHojaRuta.EnCurso, (await db.HojasRuta.AsNoTracking().SingleAsync()).Estado);
             Assert.Equal(0, await ClosingCount(db));
             clock.Advance(TimeSpan.FromSeconds(30));
+            apiClock.Set(clock.GetUtcNow());
             await WaitClosing(async () => await ClosingCount(db) == 1);
             var closed = await db.HojasRuta.AsNoTracking().SingleAsync();
             Assert.Equal(EstadoHojaRuta.Finalizada, closed.Estado);
@@ -71,10 +75,11 @@ public sealed partial class OperacionesRepartoHttpTests
         using var client = api.CreateHttpClient();
         var route = await Cargada(data, client);
         var parcel = route.Paradas[0];
+        var cutoff = new DateTimeOffset(route.Fecha.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeSpan.FromHours(-3)).ToUniversalTime();
+        apiClock.Set(cutoff.AddMinutes(-10));
         Assert.Equal("Aplicada", (await Aplicar(client, route, Operacion(Guid.NewGuid(), 4, "EntregaFisica", parcel.EnvioId, parcel.EnvioVersion))).Resultado);
         await using var db = data.CreateDbContext();
         var shipment = await db.Envios.AsNoTracking().SingleAsync(e => e.Id == parcel.EnvioId);
-        var cutoff = new DateTimeOffset(route.Fecha.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeSpan.FromHours(-3)).ToUniversalTime();
         var clock = new ClosingClock(cutoff.AddSeconds(-30));
         var connection = await CrearConexionWorker(data);
         var failure = new FailClosingSave();
@@ -89,7 +94,8 @@ public sealed partial class OperacionesRepartoHttpTests
         }
         Assert.Equal(0, await ClosingCount(db));
         Assert.Equal(EstadoHojaRuta.EnCurso, (await db.HojasRuta.AsNoTracking().SingleAsync()).Estado);
-        clock.Advance(TimeSpan.FromHours(1));
+        clock.Advance(TimeSpan.FromMinutes(5));
+        apiClock.Set(clock.GetUtcNow());
         await using (var services = ClosingServices(connection))
         using (var successor = ClosingWorker(services, clock))
         {
@@ -138,7 +144,6 @@ public sealed partial class OperacionesRepartoHttpTests
             o.UseNexoRutaPostgres(connection).AddInterceptors(interceptors)).BuildServiceProvider();
     private static DailyClosingWorker ClosingWorker(IServiceProvider services, TimeProvider clock) => new(
         services.GetRequiredService<IServiceScopeFactory>(), clock,
-        Options.Create(new DailyClosingOptions { Enabled=true, CutoffLocalTime=TimeOnly.MinValue, OfflinePolicy="RejectNewPhysicalOperations" }),
         NullLogger<DailyClosingWorker>.Instance);
     private static Task<int> ClosingCount(NexoRutaDbContext db) => db.Database.SqlQuery<int>($"""SELECT count(*)::int AS "Value" FROM public."CierresDiarios" WHERE "Resultado"='Aplicada' """).SingleAsync();
     private static async Task WaitClosing(Func<Task<bool>> condition)

@@ -35,23 +35,21 @@ El despacho futuro deja de estar permitido en B2: solo se adquiere ocupación en
 
 Transición, contratos y pruebas: `docs/auditorias/cu06/06-implementacion-b2.md` del superproyecto. Las rutas cerradas anteriores a B2 no reciben retornos ficticios ni ocupaciones eternas; disponibilidad inicial requiere inspección administrativa auditable y, si corresponde, recepción física explícita de carga histórica.
 
-## AP-09: disparador del Worker (preparado, pendiente de decisión)
+## AP-09: cierre diario automático del Worker
 
-La letra exige cierre diario mediante Worker, pero no determina la hora de corte
-ni si debe invalidar operaciones físicas offline aún no recibidas. D18/DEC-01/B2
-solo definen efectos del cierre y conservación de evidencias/custodia. Por ello
-la implementación queda **desactivada por defecto**; no se infiere aprobación de
-cerrar a medianoche. Falta confirmar explícitamente el corte y la política offline.
+Decisión funcional confirmada el 15/11/2026: cerrar las jornadas `EnCurso` al
+terminar su fecha operativa, en la zona de la política de cada hoja; conservar
+custodia, incidencias y evidencias según las reglas vigentes y rechazar después
+nuevas operaciones físicas. No se esperan comandos ni sesión móvil para cerrar.
 
 `DailyClosingWorker` se registra junto al barrido de pruebas en los Workers no
-HTTP. Poll de 30 segundos con `TimeProvider`, escaneo al iniciar y al reiniciar,
-sin sesión móvil. La política técnica preparada admite `DailyClosing:Enabled`,
-`CutoffLocalTime` y `OfflinePolicy=RejectNewPhysicalOperations`; exige valores
-explícitos al habilitar. El corte se calcula el día posterior a `HojaRuta.Fecha`
-a esa hora local, usando la zona de **su versión de configuración**, no UTC ni
-la política actual. Solo las hojas `EnCurso` pueden cerrarse; no cancela ni
-inicia hojas planificadas/despachadas. Esta elección también queda sujeta a la
-decisión funcional antes de habilitar/integrar AP-09.
+HTTP. Hace un escaneo al iniciar/reiniciar y cada 30 segundos con `TimeProvider`.
+El corte es el inicio del día siguiente a `HojaRuta.Fecha`, interpretado con la
+zona de **su versión de configuración**, aunque después se publique otra zona.
+Se ejecuta al alcanzar ese corte o al recuperar trabajo vencido tras reiniciar.
+Solo cierra hojas `EnCurso`: no cancela ni inicia las planificadas/despachadas.
+`FinJornada` y el barrido de vencimientos de evidencias conservan sus disparadores
+propios. El cierre queda activo en esos procesos sin configuración adicional.
 
 Reutiliza `CierreJornada.Finalizar`, extraído sin cambiar los efectos de
 `FinJornada`: suspende visitas pendientes, conserva estados comerciales, pruebas,
@@ -74,8 +72,8 @@ claim en la transacción actual. Fallos se registran por Worker y tipo seguro en
 logs; cierres confirmados quedan inmutables en PostgreSQL.
 
 Las pruebas `HostedDaily*` arrancan servicios reales con conexión restringida y
-PostgreSQL aislado. Un reloj con timers controlados cruza un corte **sintético**,
+PostgreSQL aislado. Un reloj con timers controlados cruza el corte acordado con datos sintéticos,
 con dos Workers; también se simula fallo antes del commit y se reinicia una
 instancia nueva. Se comprueban no elegibles, conservación de pruebas/custodia,
-ocupación, secuencia e incidencias. Esto valida el mecanismo bajo la política de
-prueba; no decide ni habilita la política del negocio.
+ocupación, secuencia e incidencias. La prueba conserva la zona histórica de la hoja tras publicar una política
+nueva y admite evidencia recibida después del cierre, antes de su vencimiento.
