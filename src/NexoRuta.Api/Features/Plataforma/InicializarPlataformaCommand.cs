@@ -1,4 +1,5 @@
 using System.Text;
+using Microsoft.Extensions.Configuration;
 using NexoRuta.Application.Administracion.Exceptions;
 using NexoRuta.Application.Administracion.Repositories;
 
@@ -6,7 +7,14 @@ namespace NexoRuta.Api.Features.Plataforma;
 
 public static class InicializarPlataformaCommand
 {
-    public static async Task<int> EjecutarAsync(IServiceProvider services)
+    private const string CorreoAdminDemo = "admin@nexoruta.test";
+
+    public static Task<int> EjecutarAsync(IServiceProvider services, string operation)
+        => operation == "sync-demo-password"
+            ? SincronizarPasswordAdminDemoAsync(services)
+            : CrearAsync(services);
+
+    private static async Task<int> CrearAsync(IServiceProvider services)
     {
         if (Console.IsInputRedirected)
         {
@@ -47,6 +55,46 @@ public static class InicializarPlataformaCommand
         {
             // Never print credential-bearing configuration or provider exception details.
             Console.Error.WriteLine("Initialization failed; no partial initialization was committed. Check database availability and applied migrations.");
+        }
+        return 1;
+    }
+
+    private static async Task<int> SincronizarPasswordAdminDemoAsync(IServiceProvider services)
+    {
+        var configuration = services.GetRequiredService<IConfiguration>();
+        var email = configuration["PlatformInitialization:Email"];
+        var password = configuration["PlatformInitialization:Password"];
+        if (email is null || !string.Equals(email, CorreoAdminDemo, StringComparison.OrdinalIgnoreCase)
+            || password is null || password.Length < 16
+            || password.IndexOfAny(['\r', '\n', '\0']) >= 0)
+        {
+            Console.Error.WriteLine("Configured demo administrator credentials are missing or invalid; no account was changed.");
+            return 2;
+        }
+
+        try
+        {
+            await using var scope = services.CreateAsyncScope();
+            await scope.ServiceProvider.GetRequiredService<IPlataformaRepository>()
+                .SincronizarPasswordExistenteAsync(email, password);
+            Console.WriteLine("Existing demo platform administrator synchronized. Other identities and permissions were not changed.");
+            return 0;
+        }
+        catch (CorreoYaRegistradoException)
+        {
+            Console.Error.WriteLine("Synchronization refused because the configured email belongs to another identity; nothing was changed.");
+        }
+        catch (InvalidOperationException)
+        {
+            Console.Error.WriteLine("Synchronization refused because the existing platform identity is absent or incompatible; nothing was changed.");
+        }
+        catch (ArgumentException)
+        {
+            Console.Error.WriteLine("Configured demo administrator credentials are invalid; no account was changed.");
+        }
+        catch (Exception)
+        {
+            Console.Error.WriteLine("Synchronization failed; no partial change was committed. Check database availability and applied migrations.");
         }
         return 1;
     }

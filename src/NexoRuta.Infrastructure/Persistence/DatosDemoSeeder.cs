@@ -61,7 +61,6 @@ public sealed class DatosDemoSeeder(
     private const string CuentaPropietariaCarga = "opt06-fixture-owner@nexoruta.test";
     private const string CuentaComercioCarga = "opt06-fixture-commerce@nexoruta.test";
     private const string CodigoRolCarga = "opt06-load-driver";
-    private const string PasswordActoresDemo = "Demo12345!2026";
     private static readonly string[] CorreosDespachadores = ["a1@demo.nexoruta.test", "a2@demo.nexoruta.test"];
     private static readonly string[] CorreosRepartidores = ["r1@demo.nexoruta.test", "r2@demo.nexoruta.test"];
     private const string CorreoSoloConsulta = "consulta@demo.nexoruta.test";
@@ -77,6 +76,7 @@ public sealed class DatosDemoSeeder(
     public async Task<(bool YaEstabaSembrado, EstadoDatosDemo Estado)> SembrarAsync(
         ContextoPlataforma actor, CancellationToken ct)
     {
+        var actorPassword = DemoActorPassword.Requerir(configuration);
         if (db.Database.CurrentTransaction is null)
             throw new InvalidOperationException("El seed demo requiere la transacción autenticada de la plataforma.");
 
@@ -99,7 +99,7 @@ public sealed class DatosDemoSeeder(
                     $"admin.comercio{i + 1}@demo.nexoruta.test", NombresComercios[i], ct,
                     requierePropietario: false)
                     ?? throw new InvalidOperationException("Falta una cuenta de comercio del seed demo."));
-            await SincronizarActoresAsync(actor, operadoresExistentes, comerciosExistentes, ct);
+            await SincronizarActoresAsync(actor, operadoresExistentes, comerciosExistentes, actorPassword, ct);
             await SembrarFixtureDevolucionAp04Async(comerciosExistentes[1], operadoresExistentes[0], 1, ct);
             await SembrarFixtureDevolucionAp04Async(comerciosExistentes[1], operadoresExistentes[0], 2, ct);
             await SembrarFixtureDevolucionAp04Async(comerciosExistentes[1], operadoresExistentes[0], 3, ct);
@@ -113,15 +113,15 @@ public sealed class DatosDemoSeeder(
         {
             await db.ApplyAsync(RlsActorContext.From(actor), ct);
             operadores.Add(await CrearOrganizacionAsync(TipoAccesoUsuario.Operador, NombresOperadores[i],
-                $"admin.operador{i + 1}@demo.nexoruta.test", ct));
+                $"admin.operador{i + 1}@demo.nexoruta.test", actorPassword, ct));
         }
         for (var i = 0; i < NombresComercios.Length; i++)
         {
             await db.ApplyAsync(RlsActorContext.From(actor), ct);
             comercios.Add(await CrearOrganizacionAsync(TipoAccesoUsuario.Comercio, NombresComercios[i],
-                $"admin.comercio{i + 1}@demo.nexoruta.test", ct));
+                $"admin.comercio{i + 1}@demo.nexoruta.test", actorPassword, ct));
         }
-        await SincronizarActoresAsync(actor, operadores, comercios, ct);
+        await SincronizarActoresAsync(actor, operadores, comercios, actorPassword, ct);
 
         var instanteActual = DateTimeOffset.UtcNow;
         var fechaLocalHoy = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(instanteActual, ZonaHoraria).DateTime);
@@ -497,9 +497,9 @@ public sealed class DatosDemoSeeder(
     }
 
     private async Task<OrganizacionDemo> CrearOrganizacionAsync(TipoAccesoUsuario tipo, string nombre,
-        string email, CancellationToken ct)
+        string email, string actorPassword, CancellationToken ct)
     {
-        var alta = await plataforma.CrearAsync(tipo, nombre, email, PasswordActoresDemo, ct);
+        var alta = await plataforma.CrearAsync(tipo, nombre, email, actorPassword, ct);
         var operadorId = tipo == TipoAccesoUsuario.Operador ? alta.Organizacion.Id : (Guid?)null;
         var comercioId = tipo == TipoAccesoUsuario.Comercio ? alta.Organizacion.Id : (Guid?)null;
         var contexto = new ContextoUsuario(alta.AccesoId, alta.UsuarioId, operadorId, comercioId, email,
@@ -508,12 +508,13 @@ public sealed class DatosDemoSeeder(
     }
 
     private async Task SincronizarActoresAsync(ContextoPlataforma actor,
-        IReadOnlyList<OrganizacionDemo> operadores, IReadOnlyList<OrganizacionDemo> comercios, CancellationToken ct)
+        IReadOnlyList<OrganizacionDemo> operadores, IReadOnlyList<OrganizacionDemo> comercios,
+        string actorPassword, CancellationToken ct)
     {
         await db.ApplyAsync(RlsActorContext.From(actor), ct);
         // Platform credentials remain owned by PlatformInitialization/deployment secrets.
         foreach (var organizacion in operadores.Concat(comercios))
-            await FijarPasswordAsync(organizacion.Email, ct);
+            await FijarPasswordAsync(organizacion.Email, actorPassword, ct);
 
         var operadorA = operadores[0];
         await db.ApplyAsync(RlsActorContext.From(operadorA.Contexto), ct);
@@ -527,18 +528,19 @@ public sealed class DatosDemoSeeder(
 
         for (var i = 0; i < CorreosDespachadores.Length; i++)
             await AsegurarActorAsync(operadorA, CorreosDespachadores[i], $"Despachador A{i + 1}",
-                rolDespachador.Id, ct);
+                rolDespachador.Id, actorPassword, ct);
         for (var i = 0; i < CorreosRepartidores.Length; i++)
         {
             var email = CorreosRepartidores[i];
-            var accesoId = await AsegurarActorAsync(operadorA, email, $"Repartidor R{i + 1}", rolRepartidor.Id, ct);
+            var accesoId = await AsegurarActorAsync(operadorA, email, $"Repartidor R{i + 1}",
+                rolRepartidor.Id, actorPassword, ct);
             var existente = (await repartidores.ListarAsync(operadorA.Id, ct))
                 .SingleOrDefault(x => x.AccesoId == accesoId);
             if (await repartidores.GuardarAsync(operadorA.Id, accesoId, $"Repartidor R{i + 1}", activo: true,
                 existente?.Version, ct) is null)
                 throw new InvalidOperationException($"No se pudo habilitar el perfil de {email}.");
         }
-        await AsegurarActorAsync(operadorA, CorreoSoloConsulta, "Solo consulta", rolConsulta.Id, ct);
+        await AsegurarActorAsync(operadorA, CorreoSoloConsulta, "Solo consulta", rolConsulta.Id, actorPassword, ct);
     }
 
     private async Task<Rol> ObtenerOCrearRolDemoAsync(OrganizacionDemo operador, string codigo, string nombre,
@@ -556,7 +558,7 @@ public sealed class DatosDemoSeeder(
     }
 
     private async Task<Guid> AsegurarActorAsync(OrganizacionDemo operador, string email, string nombre,
-        Guid rolId, CancellationToken ct)
+        Guid rolId, string actorPassword, CancellationToken ct)
     {
         await db.ApplyAsync(RlsActorContext.From(operador.Contexto), ct);
         var usuario = await db.Usuarios.SingleOrDefaultAsync(x => x.Email == email, ct);
@@ -564,7 +566,7 @@ public sealed class DatosDemoSeeder(
         if (usuario is null)
         {
             var creado = await new CrearUsuarioUseCase(new UsuarioActualDemo(operador.Contexto), permisosUsuario,
-                usuariosOrganizacion, roles).EjecutarAsync(email, PasswordActoresDemo, rolId, ct);
+                usuariosOrganizacion, roles).EjecutarAsync(email, actorPassword, rolId, ct);
             accesoId = creado.AccesoId;
         }
         else
@@ -583,19 +585,19 @@ public sealed class DatosDemoSeeder(
             }
             accesoId = acceso.Id;
         }
-        await FijarPasswordAsync(email, ct);
+        await FijarPasswordAsync(email, actorPassword, ct);
         return accesoId;
     }
 
-    private async Task FijarPasswordAsync(string email, CancellationToken ct)
+    private async Task FijarPasswordAsync(string email, string actorPassword, CancellationToken ct)
     {
         var usuario = await db.Usuarios.SingleOrDefaultAsync(x => x.Email == email, ct)
             ?? throw new InvalidOperationException($"No se encontró la cuenta demo {email}.");
         if (!string.IsNullOrWhiteSpace(usuario.PasswordHash)
-            && identityUsers.PasswordHasher.VerifyHashedPassword(usuario, usuario.PasswordHash, PasswordActoresDemo)
+            && identityUsers.PasswordHasher.VerifyHashedPassword(usuario, usuario.PasswordHash, actorPassword)
                 == PasswordVerificationResult.Success)
             return;
-        usuario.ActualizarPasswordHash(identityUsers.PasswordHasher.HashPassword(usuario, PasswordActoresDemo));
+        usuario.ActualizarPasswordHash(identityUsers.PasswordHasher.HashPassword(usuario, actorPassword));
         usuario.RevocarSesionesPorCambioDePassword();
         usuario.SecurityStamp = Guid.NewGuid().ToString("N");
         usuario.ConcurrencyStamp = Guid.NewGuid().ToString("N");

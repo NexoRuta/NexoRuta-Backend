@@ -48,14 +48,19 @@ public sealed class PlatformSeederTests(PostgresFixture postgres) : IClassFixtur
         }).Build(), AuthenticationTestData.UserManager(db), AuthenticationTestData.PlatformRepository(db));
 
     [Fact]
-    public async Task RepeatedInitializationSynchronizesIdentityPasswordAndPreservesProtectedCatalogGrants()
+    public async Task RepeatedInitializationRequiresExplicitPasswordSyncAndPreservesProtectedCatalogGrants()
     {
         var database = await postgres.CreateDatabaseAsync();
         await using var db = database.CreateDbContext();
         await Seeder(db).SeedPlataformaAsync();
         var user = await db.Usuarios.AsNoTracking().SingleAsync();
         var access = await db.AccesosPlataforma.AsNoTracking().SingleAsync();
-        await Seeder(db, password: "Different-valid-password-2026!").SeedPlataformaAsync();
+        await Seeder(db).SeedPlataformaAsync();
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            Seeder(db, password: "Different-valid-password-2026!").SeedPlataformaAsync());
+        Assert.DoesNotContain("Different-valid-password-2026!", error.ToString());
+        await AuthenticationTestData.PlatformRepository(db)
+            .SincronizarPasswordExistenteAsync(user.Email, "Different-valid-password-2026!");
         db.ChangeTracker.Clear();
         var actual = await db.Usuarios.SingleAsync();
         Assert.Equal(user.Id, actual.Id);
@@ -72,33 +77,56 @@ public sealed class PlatformSeederTests(PostgresFixture postgres) : IClassFixtur
         await Assert.ThrowsAsync<InvalidOperationException>(() => AuthenticationTestData.PlatformRepository(db).InicializarAsync(user.Email, AuthenticationTestData.Password));
     }
 
-    [Theory]
-    [InlineData(null, AuthenticationTestData.Password)]
-    [InlineData("platform@example.test", null)]
-    [InlineData("invalid", AuthenticationTestData.Password)]
-    [InlineData("platform@example.test", "tiny")]
-    public async Task IncompleteOrInvalidConfigurationFailsWithoutSecretsOrPartialRows(string? email, string? password)
+    [Fact]
+    public async Task ExplicitPasswordSyncRefusesToCreateAnAbsentPlatformIdentity()
     {
-
         var database = await postgres.CreateDatabaseAsync();
         await using var db = database.CreateDbContext();
-        var permisosAntes = await db.Permisos
-        .AsNoTracking()
-        .OrderBy(x => x.Codigo)
-        .Select(x => new { x.Id, x.Codigo, x.Nombre })
-        .ToArrayAsync();
 
-        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => Seeder(db, email, password).SeedPlataformaAsync());
-        if (password is not null) Assert.DoesNotContain(password, error.ToString());
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            AuthenticationTestData.PlatformRepository(db)
+                .SincronizarPasswordExistenteAsync("admin@nexoruta.test", AuthenticationTestData.Password));
+
         Assert.Empty(await db.Usuarios.ToListAsync());
+        Assert.Empty(await db.AccesosPlataforma.ToListAsync());
         Assert.Empty(await db.RolesPlataforma.ToListAsync());
-        var permisosDespues = await db.Permisos
-            .AsNoTracking()
-            .OrderBy(x => x.Codigo)
-            .Select(x => new { x.Id, x.Codigo, x.Nombre })
-            .ToArrayAsync();
+    }
 
-        Assert.Equal(permisosAntes, permisosDespues);
+    [Fact]
+    public async Task IncompleteOrInvalidConfigurationFailsWithoutSecretsOrPartialRows()
+    {
+        (string? Email, string? Password)[] invalidConfigurations =
+        [
+            (null, AuthenticationTestData.Password),
+            ("platform@example.test", null),
+            ("invalid", AuthenticationTestData.Password),
+            ("platform@example.test", "tiny")
+        ];
+
+        foreach (var (email, password) in invalidConfigurations)
+        {
+            var database = await postgres.CreateDatabaseAsync();
+            await using var db = database.CreateDbContext();
+            var permissionsBefore = await db.Permisos
+                .AsNoTracking()
+                .OrderBy(x => x.Codigo)
+                .Select(x => new { x.Id, x.Codigo, x.Nombre })
+                .ToArrayAsync();
+
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => Seeder(db, email, password).SeedPlataformaAsync());
+            if (password is not null)
+                Assert.DoesNotContain(password, error.ToString());
+            Assert.Empty(await db.Usuarios.ToListAsync());
+            Assert.Empty(await db.RolesPlataforma.ToListAsync());
+            var permissionsAfter = await db.Permisos
+                .AsNoTracking()
+                .OrderBy(x => x.Codigo)
+                .Select(x => new { x.Id, x.Codigo, x.Nombre })
+                .ToArrayAsync();
+
+            Assert.Equal(permissionsBefore, permissionsAfter);
+        }
     }
 
     [Fact]

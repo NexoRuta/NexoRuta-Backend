@@ -23,9 +23,10 @@ using NexoRuta.Infrastructure.Administracion.Autenticacion;
 using NexoRuta.Infrastructure.ZonasCobertura;
 using NexoRuta.Infrastructure.Operacion;
 var platformCommand = args.FirstOrDefault() == "platform-admin";
-if (platformCommand && !args.SequenceEqual(["platform-admin", "create"]))
+if (platformCommand && !(args.SequenceEqual(["platform-admin", "create"])
+    || args.SequenceEqual(["platform-admin", "sync-demo-password"])))
 {
-    Console.Error.WriteLine("Usage: platform-admin create (interactive credentials; no additional arguments).");
+    Console.Error.WriteLine("Usage: platform-admin create | platform-admin sync-demo-password (no credential arguments).");
     Environment.ExitCode = 2;
     return;
 }
@@ -94,7 +95,8 @@ builder.Services.AddScoped<IUsuarioActual, UsuarioActualHttp>();
 if (platformCommand)
 {
     await using var commandApp = builder.Build();
-    Environment.ExitCode = await NexoRuta.Api.Features.Plataforma.InicializarPlataformaCommand.EjecutarAsync(commandApp.Services);
+    Environment.ExitCode = await NexoRuta.Api.Features.Plataforma.InicializarPlataformaCommand.EjecutarAsync(
+        commandApp.Services, args[1]);
     return;
 }
 if (localBootstrapCommand)

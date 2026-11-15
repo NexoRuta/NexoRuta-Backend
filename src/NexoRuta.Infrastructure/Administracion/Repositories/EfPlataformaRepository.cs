@@ -22,7 +22,20 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, UserManager<Usu
             row.PuedeGestionarOrganizaciones, row.UsuarioEmail);
     }
 
-    public async Task InicializarAsync(string email, string password, CancellationToken ct = default, bool sincronizarPasswordExistente = false)
+    public Task InicializarAsync(string email, string password, CancellationToken ct = default)
+        => InicializarInternoAsync(email, password, ct, crearSiFalta: true,
+            sincronizarPasswordExistente: false, aceptarPasswordCoincidente: false);
+
+    public Task AsegurarConfiguradaAsync(string email, string password, CancellationToken ct = default)
+        => InicializarInternoAsync(email, password, ct, crearSiFalta: true,
+            sincronizarPasswordExistente: false, aceptarPasswordCoincidente: true);
+
+    public Task SincronizarPasswordExistenteAsync(string email, string password, CancellationToken ct = default)
+        => InicializarInternoAsync(email, password, ct, crearSiFalta: false,
+            sincronizarPasswordExistente: true, aceptarPasswordCoincidente: true);
+
+    private async Task InicializarInternoAsync(string email, string password, CancellationToken ct,
+        bool crearSiFalta, bool sincronizarPasswordExistente, bool aceptarPasswordCoincidente)
     {
         var normalized = ValidacionCredenciales.Validar(email, password);
         await using var transaction = await db.BeginOrJoinAsync(ct);
@@ -44,8 +57,6 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, UserManager<Usu
         var codes = CatalogoPermisos.Plataforma.Select(x => x.Codigo).ToArray();
         if (existing is not null)
         {
-            if (!sincronizarPasswordExistente)
-                throw new InvalidOperationException("Platform initialization has already completed; no account was changed.");
             var grants = await (from grant in db.RolesPlataformaPermisos
                                 join permission in db.Permisos on grant.PermisoId equals permission.Id
                                 where grant.RolId == existing.platformRole.Id select permission.Codigo).ToArrayAsync(ct);
@@ -57,10 +68,17 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, UserManager<Usu
             var account = await db.Usuarios.SingleAsync(x => x.Id == existing.accountId, ct);
             if (account.Email!.Trim().ToLowerInvariant() != normalized || string.IsNullOrWhiteSpace(account.PasswordHash))
                 throw new InvalidOperationException("Existing platform account is incompatible with configured initialization (identity or password); no account was changed.");
-            await SincronizarPasswordConfiguradaAsync(account, password, ct);
+            if (sincronizarPasswordExistente)
+                await SincronizarPasswordConfiguradaAsync(account, password, ct);
+            else if (aceptarPasswordCoincidente)
+                await AsegurarPasswordCoincidenteAsync(account, password, ct);
+            else
+                throw new InvalidOperationException("Platform initialization has already completed; no account was changed.");
             await transaction.CommitAsync(ct);
             return;
         }
+        if (!crearSiFalta)
+            throw new InvalidOperationException("No existing platform account was found to synchronize; nothing was changed.");
         if (await EmailExists(normalized, ct)) throw new CorreoYaRegistradoException();
         try
         {
@@ -85,6 +103,18 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, UserManager<Usu
         catch (DbUpdateException error) when (IsUniqueViolation(error))
         {
             throw new InvalidOperationException("Platform initialization conflicts with an existing account or initialization; no account was changed.");
+        }
+    }
+
+    private async Task AsegurarPasswordCoincidenteAsync(Usuario account, string password, CancellationToken ct)
+    {
+        var verification = identityUsers.PasswordHasher.VerifyHashedPassword(account, account.PasswordHash!, password);
+        if (verification == PasswordVerificationResult.Failed)
+            throw new InvalidOperationException("Configured platform password differs from the existing password; use the explicit synchronization command.");
+        if (verification == PasswordVerificationResult.SuccessRehashNeeded)
+        {
+            account.ActualizarPasswordHash(identityUsers.PasswordHasher.HashPassword(account, password));
+            await db.SaveChangesAsync(ct);
         }
     }
 
