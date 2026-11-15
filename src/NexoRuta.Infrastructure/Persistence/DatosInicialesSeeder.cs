@@ -20,10 +20,7 @@ public sealed class DatosInicialesSeeder(NexoRutaDbContext db, AccesoInicial ini
             throw new InvalidOperationException("Platform initialization requires PlatformInitialization:Email and PlatformInitialization:Password; no account was changed.");
         try
         {
-            if (configuration.GetValue<bool>("PlatformInitialization:SynchronizePassword"))
-                await plataforma.AsegurarConfiguradaConSincronizacionPasswordAsync(email, password, ct);
-            else
-                await plataforma.AsegurarConfiguradaAsync(email, password, ct);
+            await plataforma.AsegurarConfiguradaAsync(email, password, ct);
         }
         catch (ArgumentException)
         {

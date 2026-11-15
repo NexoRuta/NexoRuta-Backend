@@ -39,13 +39,12 @@ public sealed class PlatformSeederTests(PostgresFixture postgres) : IClassFixtur
     }
 
     private static DatosInicialesSeeder Seeder(NexoRutaDbContext db, string? email = "platform-seed@example.test",
-        string? password = AuthenticationTestData.Password, bool enabled = true, bool synchronizePassword = false) => new(db, new AccesoInicial("unused@example.test", "Unused", "Unused", "Unused"),
+        string? password = AuthenticationTestData.Password, bool enabled = true) => new(db, new AccesoInicial("unused@example.test", "Unused", "Unused", "Unused"),
         new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["PlatformInitialization:Enabled"] = enabled.ToString(),
             ["PlatformInitialization:Email"] = email,
-            ["PlatformInitialization:Password"] = password,
-            ["PlatformInitialization:SynchronizePassword"] = synchronizePassword.ToString()
+            ["PlatformInitialization:Password"] = password
         }).Build(), AuthenticationTestData.UserManager(db), AuthenticationTestData.PlatformRepository(db));
 
     [Fact]
@@ -76,43 +75,6 @@ public sealed class PlatformSeederTests(PostgresFixture postgres) : IClassFixtur
         Assert.Equal(PasswordVerificationResult.Failed, hasher.VerifyHashedPassword(actual.Email, actual.PasswordHash!, AuthenticationTestData.Password));
         Assert.Equal(PasswordVerificationResult.Success, hasher.VerifyHashedPassword(actual.Email, actual.PasswordHash!, "Different-valid-password-2026!"));
         await Assert.ThrowsAsync<InvalidOperationException>(() => AuthenticationTestData.PlatformRepository(db).InicializarAsync(user.Email, AuthenticationTestData.Password));
-    }
-
-    [Fact]
-    public async Task ConfiguredPasswordSyncOnlyChangesTheExistingPlatformPasswordWhenExplicitlyEnabled()
-    {
-        var database = await postgres.CreateDatabaseAsync();
-        await using var db = database.CreateDbContext();
-        await Seeder(db).SeedPlataformaAsync();
-        var original = await db.Usuarios.AsNoTracking().SingleAsync();
-        const string rotatedPassword = "Rotated-platform-password-2026!";
-
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            Seeder(db, password: rotatedPassword).SeedPlataformaAsync());
-        Assert.Equal(original.PasswordHash, (await db.Usuarios.AsNoTracking().SingleAsync()).PasswordHash);
-
-        await Seeder(db, password: rotatedPassword, synchronizePassword: true).SeedPlataformaAsync();
-        db.ChangeTracker.Clear();
-        var rotated = await db.Usuarios.AsNoTracking().SingleAsync();
-        Assert.Equal(original.Id, rotated.Id);
-        Assert.NotEqual(original.PasswordHash, rotated.PasswordHash);
-        Assert.Equal(original.VersionCredencial + 1, rotated.VersionCredencial);
-
-        await Seeder(db, password: rotatedPassword, synchronizePassword: true).SeedPlataformaAsync();
-        Assert.Equal(rotated.PasswordHash, (await db.Usuarios.AsNoTracking().SingleAsync()).PasswordHash);
-        Assert.Equal(rotated.VersionCredencial, (await db.Usuarios.AsNoTracking().SingleAsync()).VersionCredencial);
-    }
-
-    [Fact]
-    public async Task ConfiguredPasswordSyncCanCreateTheInitialPlatformIdentity()
-    {
-        var database = await postgres.CreateDatabaseAsync();
-        await using var db = database.CreateDbContext();
-        await Seeder(db, synchronizePassword: true).SeedPlataformaAsync();
-
-        Assert.Equal("platform-seed@example.test", (await db.Usuarios.SingleAsync()).Email);
-        Assert.True((await db.AccesosPlataforma.SingleAsync()).Activo);
-        Assert.True((await db.RolesPlataforma.SingleAsync()).PuedeGestionarOrganizaciones);
     }
 
     [Fact]

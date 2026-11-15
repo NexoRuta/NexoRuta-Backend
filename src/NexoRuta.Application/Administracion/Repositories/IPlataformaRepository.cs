@@ -18,7 +18,6 @@ public interface IPlataformaRepository
     Task<ContextoPlataforma?> ObtenerAccesoAsync(Guid accesoId, CancellationToken ct);
     Task InicializarAsync(string email, string password, CancellationToken ct = default);
     Task AsegurarConfiguradaAsync(string email, string password, CancellationToken ct = default);
-    Task AsegurarConfiguradaConSincronizacionPasswordAsync(string email, string password, CancellationToken ct = default);
     Task SincronizarPasswordExistenteAsync(string email, string password, CancellationToken ct = default);
     Task<AltaOrganizacion> CrearAsync(TipoAccesoUsuario tipo, string nombre, string email, string password, CancellationToken ct);
     Task<PaginaOrganizaciones> ListarAsync(TipoAccesoUsuario tipo, EstadoOrganizacion? estado, int pagina, int tamanoPagina, CancellationToken ct);
