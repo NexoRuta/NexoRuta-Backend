@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Identity;
@@ -381,7 +380,7 @@ public sealed class DatosDemoSeeder(
         string email, ContextoPlataforma actor, CancellationToken ct)
     {
         await db.ApplyAsync(RlsActorContext.From(actor), ct);
-        await plataforma.CrearAsync(tipo, nombre, email, CrearPasswordAleatoria(), ct);
+        await plataforma.CrearAsync(tipo, nombre, email, DemoActorPassword.Requerir(configuration), ct);
         return await ObtenerOrganizacionFixtureAsync(tipo, email, nombre, ct)
             ?? throw new InvalidOperationException("No se pudo recuperar la organizaciÃ³n sintÃ©tica OPT-06 luego de crearla.");
     }
@@ -410,6 +409,7 @@ public sealed class DatosDemoSeeder(
             acceso.CambiarEstado(true);
             await db.SaveChangesAsync(ct);
         }
+        await FijarPasswordAsync(credencial.Email, credencial.Password, ct);
         return new ContextoUsuario(acceso.Id, usuario.Id, operador.Id, null, usuario.Email!, operador.Nombre,
             null, rol.Id, rol.Codigo, acceso.VersionSesion);
     }
@@ -1040,9 +1040,6 @@ public sealed class DatosDemoSeeder(
         var local = fecha.ToDateTime(hora, DateTimeKind.Unspecified);
         return new(TimeZoneInfo.ConvertTimeToUtc(local, ZonaHoraria), TimeSpan.Zero);
     }
-
-    private static string CrearPasswordAleatoria()
-        => Convert.ToBase64String(RandomNumberGenerator.GetBytes(24));
 
     private sealed record OrganizacionDemo(Guid Id, string Nombre, string Email, Guid UsuarioId,
         Guid AccesoId, Guid RolId, ContextoUsuario Contexto);

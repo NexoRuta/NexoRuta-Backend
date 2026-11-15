@@ -65,10 +65,10 @@ public static class InicializarPlataformaCommand
         var email = configuration["PlatformInitialization:Email"];
         var password = configuration["PlatformInitialization:Password"];
         if (email is null || !string.Equals(email, CorreoAdminDemo, StringComparison.OrdinalIgnoreCase)
-            || password is null || password.Length < 16
+            || password is null || password.Length < 12
             || password.IndexOfAny(['\r', '\n', '\0']) >= 0)
         {
-            Console.Error.WriteLine("Configured demo administrator credentials are missing or invalid; no account was changed.");
+            Console.Error.WriteLine("Configured demo administrator credentials are missing or invalid (minimum 12 characters); no account was changed.");
             return 2;
         }
 

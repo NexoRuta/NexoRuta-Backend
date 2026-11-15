@@ -49,7 +49,7 @@ public sealed class PlataformaCommandTests
         info.Environment["ASPNETCORE_ENVIRONMENT"] = "Development";
         info.Environment["ConnectionStrings__Postgres"] = "Host=127.0.0.1;Port=1;Database=unreachable;Username=unused;Timeout=1";
         info.Environment["PlatformInitialization__Email"] = "admin@nexoruta.test";
-        info.Environment["PlatformInitialization__Password"] = "synthetic-canary-password-not-for-logs";
+        info.Environment["PlatformInitialization__Password"] = "ChangeMe123!";
         using var process = Process.Start(info)!;
         process.StandardInput.Close();
         var output = process.StandardOutput.ReadToEndAsync();

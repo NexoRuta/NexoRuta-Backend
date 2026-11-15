@@ -26,13 +26,17 @@ public sealed class DatosDemoFixtureCargaHttpTests(PostgresFixture postgres) : I
                 .InicializarAsync(PlatformEmail, Password);
 
         using var factory = new IntegrationApiFactory(database,
-            settings: new Dictionary<string, string?> { ["DatabaseInitialization:SeedData"] = "false" });
+            settings: new Dictionary<string, string?>
+            {
+                ["DatabaseInitialization:SeedData"] = "false",
+                ["DemoData:ActorPassword"] = "ChangeMe123!"
+            });
         using var client = factory.CreateHttpClient();
         await Login(client, PlatformEmail, Password);
 
         var request = new
         {
-            Cuentas = new[] { new { Email = LoadEmail, Password = "opt06-integration-password-2026" } }
+            Cuentas = new[] { new { Email = LoadEmail, Password = "old-opt06-integration-password-2026" } }
         };
         using var firstResponse = await client.PostAsJsonAsync("/api/admin/demo-data/load-fixture", request);
         Assert.True(firstResponse.StatusCode == HttpStatusCode.OK,
@@ -51,10 +55,11 @@ public sealed class DatosDemoFixtureCargaHttpTests(PostgresFixture postgres) : I
         });
 
         using var loadClient = factory.CreateHttpClient();
-        await Login(loadClient, LoadEmail, "opt06-integration-password-2026");
+        await Login(loadClient, LoadEmail, "old-opt06-integration-password-2026");
         var permissions = await loadClient.GetFromJsonAsync<string[]>("/api/usuarios/actual/permisos");
         Assert.Equal(new[] { "reparto.ejecutar" }, permissions);
 
+        request = new { Cuentas = new[] { new { Email = LoadEmail, Password = "ChangeMe123!" } } };
         using var secondResponse = await client.PostAsJsonAsync("/api/admin/demo-data/load-fixture", request);
         Assert.Equal(HttpStatusCode.OK, secondResponse.StatusCode);
         var second = await secondResponse.Content.ReadFromJsonAsync<JsonElement>();
@@ -62,6 +67,12 @@ public sealed class DatosDemoFixtureCargaHttpTests(PostgresFixture postgres) : I
         Assert.Equal(journeyId, secondAccount.GetProperty("jornadaId").GetGuid());
         Assert.Equal(firstOperations.Select(x => x.GetProperty("id").GetGuid()),
             secondAccount.GetProperty("operaciones").EnumerateArray().Select(x => x.GetProperty("id").GetGuid()));
+
+        using var oldPasswordResponse = await loadClient.PostAsJsonAsync("/api/auth/login",
+            new { Email = LoadEmail, Password = "old-opt06-integration-password-2026" });
+        Assert.Equal(HttpStatusCode.Unauthorized, oldPasswordResponse.StatusCode);
+        using var newPasswordClient = factory.CreateHttpClient();
+        await Login(newPasswordClient, LoadEmail, "ChangeMe123!");
 
         await using var verification = database.CreateDbContext();
         var loadUser = await verification.Usuarios.AsNoTracking().SingleAsync(x => x.Email == LoadEmail);

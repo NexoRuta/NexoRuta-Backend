@@ -12,7 +12,7 @@ public sealed class DemoActorPasswordTests
         {
             null,
             "",
-            "short-password",
+            "short",
             "long-password-has\nline-break",
             "long-password-has\rreturn",
             "long-password-has\0null"
@@ -34,7 +34,7 @@ public sealed class DemoActorPasswordTests
     [Fact]
     public void ExternalPasswordIsReturnedWithoutTransformation()
     {
-        const string password = "Synthetic-actor-password-2026";
+        const string password = "ChangeMe123!";
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             [DemoActorPassword.ConfigurationKey] = password
