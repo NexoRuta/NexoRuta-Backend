@@ -7,7 +7,7 @@ namespace NexoRuta.Api.Features.Plataforma;
 
 public static class InicializarPlataformaCommand
 {
-    private const string CorreoAdminDemo = "admin@nexoruta.test";
+    private const string CorreoAdminDemo = "admin-demo@nexoruta.test";
 
     public static Task<int> EjecutarAsync(IServiceProvider services, string operation)
         => operation == "sync-demo-password"

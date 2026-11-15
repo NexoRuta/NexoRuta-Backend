@@ -85,7 +85,7 @@ public sealed class PlatformSeederTests(PostgresFixture postgres) : IClassFixtur
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             AuthenticationTestData.PlatformRepository(db)
-                .SincronizarPasswordExistenteAsync("admin@nexoruta.test", AuthenticationTestData.Password));
+                .SincronizarPasswordExistenteAsync("admin-demo@nexoruta.test", AuthenticationTestData.Password));
 
         Assert.Empty(await db.Usuarios.ToListAsync());
         Assert.Empty(await db.AccesosPlataforma.ToListAsync());
