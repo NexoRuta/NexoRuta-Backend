@@ -30,6 +30,10 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, UserManager<Usu
         => InicializarInternoAsync(email, password, ct, crearSiFalta: true,
             sincronizarPasswordExistente: false, aceptarPasswordCoincidente: true);
 
+    public Task AsegurarConfiguradaConSincronizacionPasswordAsync(string email, string password, CancellationToken ct = default)
+        => InicializarInternoAsync(email, password, ct, crearSiFalta: true,
+            sincronizarPasswordExistente: true, aceptarPasswordCoincidente: true);
+
     public Task SincronizarPasswordExistenteAsync(string email, string password, CancellationToken ct = default)
         => InicializarInternoAsync(email, password, ct, crearSiFalta: false,
             sincronizarPasswordExistente: true, aceptarPasswordCoincidente: true);
