@@ -59,6 +59,7 @@ public sealed class PlatformSeederTests(PostgresFixture postgres) : IClassFixtur
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             Seeder(db, password: "Different-valid-password-2026!").SeedPlataformaAsync());
         Assert.DoesNotContain("Different-valid-password-2026!", error.ToString());
+        Assert.Contains("password differs", error.Message, StringComparison.OrdinalIgnoreCase);
         await AuthenticationTestData.PlatformRepository(db)
             .SincronizarPasswordExistenteAsync(user.Email, "Different-valid-password-2026!");
         db.ChangeTracker.Clear();
@@ -75,6 +76,24 @@ public sealed class PlatformSeederTests(PostgresFixture postgres) : IClassFixtur
         Assert.Equal(PasswordVerificationResult.Failed, hasher.VerifyHashedPassword(actual.Email, actual.PasswordHash!, AuthenticationTestData.Password));
         Assert.Equal(PasswordVerificationResult.Success, hasher.VerifyHashedPassword(actual.Email, actual.PasswordHash!, "Different-valid-password-2026!"));
         await Assert.ThrowsAsync<InvalidOperationException>(() => AuthenticationTestData.PlatformRepository(db).InicializarAsync(user.Email, AuthenticationTestData.Password));
+    }
+
+    [Fact]
+    public async Task ExistingPlatformIdentityReportsEmailMismatchWithoutExposingEitherAddress()
+    {
+        var database = await postgres.CreateDatabaseAsync();
+        await using var db = database.CreateDbContext();
+        await AuthenticationTestData.PlatformRepository(db).InicializarAsync(
+            "previous-platform@example.test", AuthenticationTestData.Password);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            Seeder(db, email: "platform-seed@example.test").SeedPlataformaAsync());
+
+        Assert.Contains("email differs", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("previous-platform@example.test", error.Message);
+        Assert.DoesNotContain("platform-seed@example.test", error.Message);
+        Assert.Equal("previous-platform@example.test", (await db.Usuarios.AsNoTracking().SingleAsync()).Email);
+        Assert.Single(await db.AccesosPlataforma.AsNoTracking().ToListAsync());
     }
 
     [Fact]

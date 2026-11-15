@@ -60,14 +60,23 @@ public sealed class EfPlataformaRepository(NexoRutaDbContext db, UserManager<Usu
             var grants = await (from grant in db.RolesPlataformaPermisos
                                 join permission in db.Permisos on grant.PermisoId equals permission.Id
                                 where grant.RolId == existing.platformRole.Id select permission.Codigo).ToArrayAsync(ct);
-            if (existing.accountEmail!.Trim().ToLowerInvariant() != normalized || string.IsNullOrWhiteSpace(existing.passwordHash) ||
-                !existing.access.Activo || !existing.platformRole.EsProtegidoSistema || !existing.platformRole.PuedeGestionarOrganizaciones ||
-                !grants.ToHashSet(StringComparer.Ordinal).SetEquals(codes) ||
-                await db.AccesosUsuario.AnyAsync(x => x.UsuarioId == existing.accountId, ct))
-                throw new InvalidOperationException("Existing platform account is incompatible with configured initialization (identity, state or permissions); no account was changed.");
+            if (!string.Equals(existing.accountEmail?.Trim(), normalized, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Existing platform account email differs from configured initialization; no account was changed.");
+            if (string.IsNullOrWhiteSpace(existing.passwordHash))
+                throw new InvalidOperationException("Existing platform account has no password hash; no account was changed.");
+            if (!existing.access.Activo)
+                throw new InvalidOperationException("Existing platform account is inactive; no account was changed.");
+            if (!existing.platformRole.EsProtegidoSistema || !existing.platformRole.PuedeGestionarOrganizaciones)
+                throw new InvalidOperationException("Existing platform role is incompatible with configured initialization; no account was changed.");
+            if (!grants.ToHashSet(StringComparer.Ordinal).SetEquals(codes))
+                throw new InvalidOperationException("Existing platform role permissions differ from the protected catalog; no account was changed.");
+            if (await db.AccesosUsuario.AnyAsync(x => x.UsuarioId == existing.accountId, ct))
+                throw new InvalidOperationException("Existing platform account also has organization access; no account was changed.");
             var account = await db.Usuarios.SingleAsync(x => x.Id == existing.accountId, ct);
-            if (account.Email!.Trim().ToLowerInvariant() != normalized || string.IsNullOrWhiteSpace(account.PasswordHash))
-                throw new InvalidOperationException("Existing platform account is incompatible with configured initialization (identity or password); no account was changed.");
+            if (!string.Equals(account.Email?.Trim(), normalized, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Existing platform account email differs from configured initialization; no account was changed.");
+            if (string.IsNullOrWhiteSpace(account.PasswordHash))
+                throw new InvalidOperationException("Existing platform account has no password hash; no account was changed.");
             if (sincronizarPasswordExistente)
                 await SincronizarPasswordConfiguradaAsync(account, password, ct);
             else if (aceptarPasswordCoincidente)
