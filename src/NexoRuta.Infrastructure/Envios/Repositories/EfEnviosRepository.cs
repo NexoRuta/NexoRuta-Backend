@@ -220,20 +220,37 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
             throw new InvalidOperationException("Import lock and lookup require the request READ COMMITTED transaction.");
     }
 
-    public async Task<IReadOnlyList<EnvioDetalle>> ListarAsync(
+    public Task<IReadOnlyList<EnvioDetalle>> ListarAsync(
         Guid? operadorId,
         Guid? comercioId,
         CancellationToken cancellationToken = default)
+        => ConsultarEnviosAsync(operadorId, comercioId, envioId: null, cancellationToken);
+
+    public async Task<EnvioDetalle?> ObtenerPorIdAsync(
+        Guid envioId,
+        Guid? operadorId,
+        Guid? comercioId,
+        CancellationToken cancellationToken = default)
+        => (await ConsultarEnviosAsync(operadorId, comercioId, envioId, cancellationToken)).SingleOrDefault();
+
+    private async Task<IReadOnlyList<EnvioDetalle>> ConsultarEnviosAsync(
+        Guid? operadorId,
+        Guid? comercioId,
+        Guid? envioId,
+        CancellationToken cancellationToken)
     {
+        var enviosVisibles = db.Envios.Where(envio => (operadorId != null && envio.OperadorId == operadorId)
+            || (comercioId != null && envio.ComercioId == comercioId));
+        if (envioId is { } id)
+            enviosVisibles = enviosVisibles.Where(envio => envio.Id == id);
+
         var shipments = await (
-            from envio in db.Envios
+            from envio in enviosVisibles
             join comercio in db.Comercios on envio.ComercioId equals comercio.Id
             join selectedOperator in db.Operadores on envio.OperadorId equals selectedOperator.Id
             join usuario in db.Usuarios on envio.CreadoPorUsuarioId equals usuario.Id
             join destinatario in db.Destinatarios on envio.DestinatarioId equals destinatario.Id
             join direccion in db.Direcciones on envio.DireccionId equals direccion.Id
-            where (operadorId != null && envio.OperadorId == operadorId)
-                || (comercioId != null && envio.ComercioId == comercioId)
             orderby envio.CreadoEnUtc descending, envio.Id descending
             select new
             {
@@ -274,7 +291,7 @@ public sealed class EfEnviosRepository(NexoRutaDbContext db) : IEnviosRepository
             .ToListAsync(cancellationToken);
         var packagesByShipment = packages.ToLookup(x => x.EnvioId, x => x.Detail);
 
-              return shipments.Select(x => new EnvioDetalle(
+        return shipments.Select(x => new EnvioDetalle(
             Id: x.Id,
             Origen: new OrigenEnvio(
                 OperadorId: x.OperadorId,

@@ -229,8 +229,7 @@ public sealed class EnviosController(
         Response.Headers.CacheControl = "no-store";
         try
         {
-            // ponytail: reuse the scoped read/RLS; a dedicated filtered read can replace this O(n) owner listing at larger volumes.
-            var envio = (await listarEnvios.EjecutarAsync(ct)).SingleOrDefault(e => e.Id == id);
+            var envio = await listarEnvios.ObtenerPorIdAsync(id, ct);
             if (envio is null) return NotFound();
             return File(NexoRuta.Api.Features.Envios.Etiquetas.EtiquetasEnvioPdf.Generar(envio),
                 "application/pdf", $"etiquetas-{id:D}.pdf");

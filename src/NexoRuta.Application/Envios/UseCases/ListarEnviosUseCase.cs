@@ -12,4 +12,11 @@ public sealed class ListarEnviosUseCase(IEnviosRepository repository, IUsuarioAc
 
         return await repository.ListarAsync(contexto.OperadorId, contexto.ComercioId, cancellationToken);
     }
+
+    public async Task<EnvioDetalle?> ObtenerPorIdAsync(Guid envioId, CancellationToken cancellationToken = default)
+    {
+        var contexto = await usuarioActual.ObtenerAsync(cancellationToken);
+
+        return await repository.ObtenerPorIdAsync(envioId, contexto.OperadorId, contexto.ComercioId, cancellationToken);
+    }
 }
