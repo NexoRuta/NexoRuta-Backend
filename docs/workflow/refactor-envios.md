@@ -1,4 +1,8 @@
-# Backend refactor: actual branch scope
+# Backend refactor: historical branch scope
+
+This document records the original refactor and its verification. The current
+shipment contract is in [CU-07](../cu/CU-07-alta-envios.md). Current integration
+checks use the [owned PostgreSQL fixture](../../tests/NexoRuta.IntegrationTests/Fixtures/README.md).
 
 `feature/refactor-envios` targets `develop` according to the local branch history.
 It includes structural changes **and** changes to internal contracts, validation,
@@ -11,7 +15,7 @@ bootstrap and runtime dependencies. It is not a file-move-only refactor.
 - Namespaces aligned with folders and consumers updated.
 - Existing types retained without duplicate declarations.
 
-## Pending local Feature-First work: ARQ-01 and ARQ-02
+## Feature-First work in the original refactor: ARQ-01 and ARQ-02
 
 API controllers now belong to `Features/<feature>/Controllers`. Shipment HTTP
 contracts are separated under `Features/Envios/Contracts/Requests` and
@@ -107,24 +111,21 @@ to the domain.
 
 ## Reproducible checks and retained baseline
 
-The versioned [backend README](../../README.md#pruebas-postgresql-destino-aislado-obligatorio)
-contains the commands, PostgreSQL isolation requirements and the retained EST-04
-baseline: restore succeeded; build had zero errors and warnings; unit tests 19/19,
-architecture tests 3/3 and integration tests 42/42. Configuration/DI tests 17/17
-are included in integration and were also run separately; do not add them twice.
-
-PostgreSQL scenarios use temporary `nexoruta_test_<UUIDv7>` databases and call
-`EnsureDeletedAsync()` during disposal. Set `NEXORUTA_TEST_POSTGRES` only for the
-test process, verify the isolated PostgreSQL 18 identity before running, and
-never use a shared persistent instance. The current fallback targets loopback
-port 5432 without an isolation check; on Windows it may reach another server.
-EST-02 to EST-04 used exclusive temporary PostgreSQL 18 containers.
+The historical EST-04 baseline recorded a successful restore and a build with
+zero errors and warnings, plus 19 unit, 3 architecture and 42 integration tests
+passing. The 17 configuration/DI tests were part of integration and also ran
+separately. EST-02 to EST-04 used exclusive temporary PostgreSQL 18 containers.
+For current commands, use the [Backend README](../../README.md#pruebas-postgresql-destino-aislado-obligatorio).
 
 EST-05 changes documentation only and did not rerun technical suites. These
 results are local historical evidence, not remote CI proof. No ignored local
 task file is required to understand the scope or reproduce the checks.
 
-## Separate functional task: D01 eligibility and contextual authorization
+## Historical follow-up proposed at the time: D01 eligibility and contextual authorization
+
+The following records the open questions at the end of the refactor. The
+[current architecture](arquitectura-backend.md#multitenancy-y-seguridad-de-datos)
+documents the organization model and authorization now in use.
 
 The current implementation lists registered operators and validates existence only.
 This observable behavior is preserved **temporarily**, not adopted as definitive

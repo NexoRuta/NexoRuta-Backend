@@ -50,7 +50,9 @@ En Development, la API genera OpenAPI en `GET /openapi/v1.json`; no se mantiene 
 
 ## 5. Consumidores de comunicaciones
 
-La inspección de los canales existentes encontró el correo de código de cancelación dirigido al destinatario; los correos de recuperación de cuenta son de identidad y quedan fuera. Las notificaciones push halladas son de operación/reparto, no al destinatario; no se encontró un canal ya implementado de avisos de estado por correo/SMS. CU-05 integra la identidad pública en el recorrido real de correo de cancelación (nombre, contacto, acento accesible y logo si hay); no crea un canal de notificación nuevo.
+El correo de código de cancelación y los avisos de cambios de estado al destinatario usan la identidad visual pública del operador. Los avisos de estado incluyen un enlace al seguimiento del envío. Ambos flujos viven en el Worker RabbitMQ. La recuperación de contraseña pertenece a identidad y el Push operativo se dirige al repartidor. [Procesador de avisos de estado](../../src/NexoRuta.Worker/Messaging/RecipientStateEmailProcessor.cs) · [Prueba SMTP aislada con Mailpit](../../tests/NexoRuta.IntegrationTests/Operacion/RecipientMailpitTests.cs)
+
+Cuando Redis está habilitado, la lectura de la identidad vigente puede usar una entrada de caché ligada al operador y a la versión publicada. [Consulta de identidad visual](../../src/NexoRuta.Infrastructure/Administracion/EfConsultaIdentidadVisualOperador.cs)
 
 El correo mantiene una alternativa de texto. La plantilla HTML escapa los textos, usa logo inline validado si existe y solo usa color de marca como fondo si el contraste con texto claro u oscuro alcanza WCAG AA; si no, usa superficie/texto semánticos predeterminados y conserva el color como acento.
 

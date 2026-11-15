@@ -70,5 +70,6 @@ Migraciones nuevas: `20261019225246_AddRecipientEmail`, `20261019225313_RequireR
 ## Verificación de la regla terminal
 
 La matriz autenticada y pública, repetición tras conciliación tardía, error de código, rollback, RLS, actualización directa de estado y carreras con entrega/devolución se verifican en PostgreSQL efímero. La evidencia y los comandos del bloque del 24/10/2026 están en [auditoría del bloque de cancelación terminal](../../../docs/auditorias/cu07/07-bloque-cancelacion-terminal.md). Este bloque no implementa importación ni cierra el resto de la máquina de estados.
-## Pendientes
-Falta SMTP real configurado, aceptación de push remoto con API HTTPS y recorrido completo en S21. Las pruebas usan PostgreSQL y RabbitMQ reales aislados, más un remitente de correo controlado; no acreditan entrega a un buzón real. iOS no está compilado ni probado. Este corte no implementa una recogida posterior a entrega ni modifica sus reglas por inferencia.
+## Configuración y aceptación operativa
+
+El Worker en modo RabbitMQ registra el consumidor de códigos y valida su configuración `Email:Smtp` al arrancar. El envío de avisos al repartidor usa el Worker en modo `Push`. Las comprobaciones del corte se hicieron con PostgreSQL y RabbitMQ aislados y un remitente controlado. La entrega a un buzón externo y la recepción en un dispositivo se verifican en el entorno objetivo. [Configuración del Worker](../../src/NexoRuta.Worker/Program.cs) · [Consumidor de códigos por correo](../../src/NexoRuta.Worker/Messaging/CancellationCodeEmailConsumer.cs) · [Pruebas de Push por cancelación pública](../../tests/NexoRuta.IntegrationTests/Notificaciones/CancelacionPublicaPushTests.cs)

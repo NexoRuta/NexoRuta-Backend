@@ -75,8 +75,9 @@ Never purge an entire DLQ as an inspection or recovery shortcut.
 
 ## Remaining reliability boundaries
 
-- Automatic recovery does not retry the initial connection attempt. A failed
-  start requires the host/service supervisor to restart it.
+- The tracking consumer retries the initial RabbitMQ connection through the
+  Worker connection helper every five seconds until cancellation.
+  [Connection helper](../../src/NexoRuta.Worker/Messaging/RabbitMqWorkerConnection.cs)
 - Publisher confirms protect client publications, not the retry queue's internal
   TTL dead-letter hop. Existing classic queues do not provide quorum at-least-once
   dead-lettering. Do not change queue type/arguments on deployed queues in place.
@@ -88,8 +89,10 @@ and [dead-letter safety](https://www.rabbitmq.com/docs/dlx#safety).
 
 ## Safe automated checks
 
-Use Docker Desktop and the filtered Testcontainers suites; never the legacy
-unfiltered integration suite with its external PostgreSQL fallback:
+The filtered tracking suites use isolated PostgreSQL and a temporary RabbitMQ
+broker. Docker must support Linux containers for the broker. The PostgreSQL
+fixture owns its database server and also supports an isolated native Linux mode.
+See the [fixture setup](../../tests/NexoRuta.IntegrationTests/Fixtures/README.md).
 
 ```powershell
 dotnet build NexoRuta.sln --configuration Release

@@ -1,6 +1,8 @@
 # CU-04 — Reglas operativas del operador
 
-> **Estado actual:** Fases 2–4 implementadas. La migración de CU-04 y una corrección del trigger fueron aplicadas al Compose local `nexoruta`; API y Backoffice recorrieron por HTTP el flujo de borrador, conflicto, publicación e historial. La revisión visual real en escritorio y móvil sigue pendiente porque esta sesión no dispuso de automatización de navegador. CU-04 no se declara cerrado hasta esa comprobación manual.
+**Estado vigente del Backend.** El operador consulta, edita y publica sus reglas operativas mediante la API de configuración. El alta de envíos exige una publicación vigente y conserva su `VersionReglasId`. Las publicaciones posteriores se aplican a nuevos envíos y los anteriores conservan su referencia original. [Contrato de reglas](../../src/NexoRuta.Api/Features/ReglasOperativas/Controllers/ReglasOperativasController.cs) · [Pruebas de reglas en admisión](../../tests/NexoRuta.IntegrationTests/Envios/ReglasEnvioAdmisionHttpTests.cs)
+
+Las secciones de diseño y fases conservan la evidencia del corte. La verificación por HTTP del borrador, publicación e historial se realizó en el entorno local de aquel corte. La aceptación visual de Backoffice tiene su propia evidencia.
 
 ## 1. Alcance y trazabilidad
 
@@ -136,7 +138,7 @@ CU-07, al admitir un envío y después de conocer el operador y modalidad selecc
 
 La FK a una publicación inmutable conserva máximos, intervalo, pruebas, motivos y política que aplican; los eventos futuros guardan la versión, códigos seleccionados y timestamps que efectivamente usaron. El plazo absoluto y la ventana concreta de CU-02 se guardan como compromiso del envío, no se recalculan desde una nueva duración o franja. CU-11/CU-20/CU-21/CU-22/CU-26 leen la versión referenciada, no la raíz vigente.
 
-`Envio` no tiene hoy estos campos. La integración y el cambio de modelo corresponden a CU-07/CU-09 y CU-11, no a este corte. Los envíos existentes se dejan intactos y no reciben una publicación automáticamente; su compatibilidad se resolverá al integrar el consumidor correspondiente, antes de procesarlos con reglas nuevas. Esta decisión futura no bloquea la tabla de reglas porque la migración de esta fase no modifica `Envio`.
+En el corte inicial, la migración de configuración se limitó al modelo de reglas. La integración posterior incorporó `Envio.VersionReglasId` como referencia de la publicación aplicada al admitir cada envío. [Migración de integración con admisión](../../src/NexoRuta.Infrastructure/Persistence/Migrations/20261020232808_BindShipmentToPublishedOperationalRules.cs)
 
 ## 6. Autorización y RLS
 

@@ -25,7 +25,7 @@ tests/
 Dockerfile
 ```
 
-La solución apunta a .NET 10 e incluye pruebas unitarias, de integración con PostgreSQL y de arquitectura. Las pruebas de arquitectura verifican los límites entre las capas internas y los adaptadores. El workflow de Backend compila y ejecuta las suites en PRs de `develop` hacia `main`. [Workflow de CI](.github/workflows/ci.yml)
+La solución apunta a .NET 10 e incluye pruebas unitarias, de integración con PostgreSQL y de arquitectura. Las pruebas de arquitectura verifican los límites entre las capas internas y los adaptadores. CI ejecuta las suites en PRs con destino `develop` o `main`. Las promociones a `main` deben salir de `develop` del mismo repositorio. [Workflow de CI](.github/workflows/ci.yml)
 
 ## Alta de envíos
 
@@ -35,17 +35,14 @@ La solución apunta a .NET 10 e incluye pruebas unitarias, de integración con P
 
 ## Requisitos y comandos locales
 
-- .NET SDK 10. En el checkout combinado, `global.json` de la raíz selecciona SDK `10.0.401`; un clon aislado de este submódulo no incluye ese selector.
-- Docker Desktop/Engine para imágenes, el entorno Compose del repositorio principal o PostgreSQL temporal exclusivo de pruebas. Este repositorio no contiene un `compose.yaml`.
+- .NET SDK `10.0.401`, fijado por el [global.json del Backend](global.json).
+- Docker Desktop/Engine con contenedores Linux para imágenes y dependencias de pruebas. El [overlay operativo](compose.operacion.yaml) se combina con el Compose del repositorio principal.
 
 Desde la raíz de este repositorio:
 
 ```bash
-dotnet restore NexoRuta.sln --nologo
+dotnet restore NexoRuta.sln --locked-mode --nologo
 dotnet build NexoRuta.sln --no-restore --nologo
-# La integración utiliza contenedores temporales propios; requiere Docker.
-# y verificar el aislamiento indicado en la sección siguiente.
-dotnet test NexoRuta.sln --no-build --no-restore --nologo
 ```
 
 Para ejecutar la API y el Worker localmente:
@@ -57,9 +54,11 @@ dotnet run --project src/NexoRuta.Worker/NexoRuta.Worker.csproj
 
 El perfil `http` de la API usa `http://localhost:5041`; OpenAPI está en `/openapi/v1.json` solo en Development. Login: `POST /api/auth/login` con JWT Bearer, hashing Identity y permisos efectivos consultados en PostgreSQL en cada petición. `X-NexoRuta-Acceso` no autentica ni selecciona al usuario.
 
+La API expone `GET /live` para comprobar el proceso y `GET /ready` o `GET /health` para comprobar si está lista para recibir tráfico. [Pruebas de salud](tests/NexoRuta.IntegrationTests/Hosting/HealthEndpointTests.cs)
+
 El esquema (`DatabaseInitialization:ApplyMigrations`) y el bootstrap (`DatabaseInitialization:SeedData`) son operaciones independientes, desactivadas por defecto. Habilitarlas es una operación administrativa explícita sobre el destino confirmado. No ejecutar migraciones ni reinicializaciones de la base de desarrollo como parte de los tests.
 
-La [renovación móvil](docs/workflow/sesiones-moviles.md) agrega ingreso, refresh y logout sobre la identidad central. Vigencia inicial configurable de 30 días absolutos, rotación y revocación por sesión. La migración y la validación local están documentadas; la integración MAUI permanece pendiente.
+La sesión móvil usa la identidad central y tiene una vigencia inicial configurable de 30 días absolutos, rotación de refresh y revocación por sesión. Los endpoints de reparto verifican el perfil y los permisos vigentes. [Contrato de sesiones móviles](docs/workflow/sesiones-moviles.md)
 
 Cuando se habilita el bootstrap, configurar `AccesoInicial:OperadorId` y `ComercioId` con UUID persistentes, sus nombres y emails, contraseñas por secretos de entorno y, opcionalmente, `OperadorRolCodigo` / `ComercioRolCodigo`. `Bootstrap:Roles` admite una lista arbitraria con `Codigo`, `Nombre`, **uno** de `OperadorId` / `ComercioId` y `Permisos` (códigos globales). No hay cuatro roles obligatorios ni UUID/contraseñas predeterminados. El bootstrap identifica organizaciones por UUID, crea roles/grants solo durante la primera inicialización por organización y conserva nombres editados, revocaciones, roles eliminados, asignaciones y hashes existentes. Reparar el acceso de un usuario existente no le asigna privilegios automáticamente.
 
@@ -67,25 +66,25 @@ La gestión posterior usa `/api/roles`, `/api/roles/permisos`, `/api/roles/{id}/
 
 ## Pruebas PostgreSQL: destino aislado obligatorio
 
-Las fixtures crean contenedores **propios de PostgreSQL 18**, verifican identidad del contenedor, base, usuario y versión antes de migrar y crean bases por escenario. No existe fallback a desarrollo ni se interpreta `NEXORUTA_TEST_POSTGRES`. El borrado de contenedores temporales elimina sus bases; no se ejecuta SQL de borrado contra una base externa. Docker debe estar disponible. La suite completa también usa servicios temporales de mensajería.
+Por defecto, las fixtures crean un contenedor propio de PostgreSQL 18 con PostGIS. También admiten un clúster privado en Linux con `NEXORUTA_TEST_POSTGRES_MODE=native`. Verifican el destino antes de migrar y crean bases por escenario. La suite completa también necesita servicios temporales de mensajería y otras dependencias preparadas por CI. [Aislamiento de PostgreSQL](tests/NexoRuta.IntegrationTests/Fixtures/README.md) · [Configuración de integración en CI](.github/workflows/ci.yml)
 
 ```powershell
-dotnet restore NexoRuta.sln
+dotnet restore NexoRuta.sln --locked-mode
 dotnet build NexoRuta.sln --no-restore
 dotnet test NexoRuta.sln --no-build --no-restore
 ```
 
 CU-01 conserva pruebas de migración histórica/rollback, inicialización vacía, repetición del bootstrap, aislamiento de roles, revocación JWT y restricciones de pertenencia con SQL directo. Un rollback con códigos de rol repetidos entre organizaciones se rechaza transaccionalmente: requiere consolidación administrativa explícita, nunca fusiona permisos automáticamente.
 
-## Alcance de la rama backend
+## Historial del refactor de envíos
 
-La rama `feature/refactor-envios`, basada en `develop`, no es exclusivamente
-estructural. Además de separar tipos y alinear namespaces, agrupa resultados de
+La rama histórica `feature/refactor-envios`, basada en `develop`, separó tipos
+y alineó namespaces. Ese corte agrupó resultados de
 Application, introduce contratos HTTP propios y mapeo explícito, refuerza
 validaciones, elimina Demo y explicita EF Core Relational 10.0.12 en Infrastructure.
 Cambiaron contratos internos de Application; no se afirma compatibilidad binaria.
-Las propiedades JSON de los endpoints existentes se mantienen mediante el mapeo;
-la corrección cultural de límites decimales no implica OpenAPI idéntico.
+En ese corte el mapeo conservó las propiedades JSON de los endpoints existentes.
+El contrato actual de envíos está en [CU-07](docs/cu/CU-07-alta-envios.md).
 
 El [alcance del refactor](docs/workflow/refactor-envios.md) distingue estas unidades
 y sus límites. Los cambios de frontend se revisan en su propio repositorio y no

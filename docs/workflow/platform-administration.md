@@ -55,7 +55,7 @@ This remains an explicit administrative alternative, distinct from demonstration
 4. Enter the email, password and password confirmation at the prompts. Password input is hidden; the shared rule requires a valid normalized email and a password of at least 12 characters that is not entirely whitespace.
 5. Exit `0` means account/role/access committed together. Exit `1` means initialization failed or was refused. Exit `2` means invalid invocation, redirected input, or confirmation mismatch. No session/JWT is returned.
 
-The command rejects extra arguments and redirected credential input, requires no JWT key, opens no HTTP listener, and never invokes automatic migrations or `DatosInicialesSeeder`, even when their configuration switches are enabled. Existing email (including case/whitespace variants) or completed initialization is a refusal: no password replacement, elevation, additional access or repair. A singleton database constraint also arbitrates concurrent first-account attempts. Loss of the initial account is **not** repaired automatically; recovery/reset and global user management are out of scope.
+The interactive `platform-admin create` command rejects extra arguments and redirected credential input. It runs before the HTTP server and the automatic migration and seed hooks. Existing email or completed initialization causes a refusal. A singleton database constraint also arbitrates concurrent first-account attempts. Password recovery is a separate flow and can reset a platform account through the authentication API. [Account recovery endpoints](../../src/NexoRuta.Api/Controllers/AuthController.cs) · [Password recovery tests](../../tests/NexoRuta.IntegrationTests/Administracion/PasswordRecoveryHttpTests.cs)
 
 ## API contract
 
