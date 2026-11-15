@@ -179,7 +179,11 @@ public sealed partial class EfRutasRepository(NexoRutaDbContext db, TimeProvider
                 && o.Tipo == "FinJornada" && o.Resultado == "Aplicada"
                 && pendientes.Select(b => b.RutaCustodiaId).Contains(o.RutaId)
             select new { o.RutaId, o.AccesoId, o.IncidenciasCierre }).ToArrayAsync(ct);
-        bool TieneIncidencia(Bulto b) => cierres.Any(c => c.RutaId == b.RutaCustodiaId && c.AccesoId == b.AccesoCustodioId
+        var automaticos = await db.Database.SqlQuery<CierreAutomatico>(
+            $"""SELECT "RutaId","RepartidorAccesoId" AS "AccesoId","IncidenciasCierre"::text AS "IncidenciasCierre" FROM public."CierresDiarios" WHERE "OperadorId"={operadorId} AND "Resultado"='Aplicada' """)
+            .Where(c => pendientes.Select(b => b.RutaCustodiaId).Contains(c.RutaId)).ToArrayAsync(ct);
+        bool TieneIncidencia(Bulto b) => cierres.Select(c => new CierreAutomatico { RutaId=c.RutaId,AccesoId=c.AccesoId,IncidenciasCierre=c.IncidenciasCierre })
+            .Concat(automaticos).Any(c => c.RutaId == b.RutaCustodiaId && c.AccesoId == b.AccesoCustodioId
             && LeerIncidencias(c.IncidenciasCierre).Any(i => i.BultoId == b.Id && i.EnvioId == envioId && i.VersionBulto == b.Version));
         if (bultos.Length == 0 || bultos.Any(x => x.Custodia is not (EstadoCustodiaBulto.SinRecepcion or EstadoCustodiaBulto.PendienteDeposito or EstadoCustodiaBulto.Deposito)
             && !(x.Custodia == EstadoCustodiaBulto.Repartidor && TieneIncidencia(x))))
@@ -262,11 +266,13 @@ public sealed partial class EfRutasRepository(NexoRutaDbContext db, TimeProvider
         }).ToArray();
         var cierres = await db.OperacionesJornada.AsNoTracking().Where(o => o.OperadorId == hoja.OperadorId && o.RutaId == hoja.Id
             && o.Tipo == "FinJornada" && o.Resultado == "Aplicada").Select(o => o.IncidenciasCierre).ToArrayAsync(ct);
+        var automaticos = await db.Database.SqlQuery<string>(
+            $"""SELECT "IncidenciasCierre"::text AS "Value" FROM public."CierresDiarios" WHERE "RutaId"={hoja.Id} AND "OperadorId"={hoja.OperadorId} AND "Resultado"='Aplicada' """).ToArrayAsync(ct);
         var estadoTemporal=await EstadoTemporalActual(hoja,ct);
         return new(hoja.Id, hoja.JornadaId, hoja.RepartidorAccesoId, hoja.VehiculoId, hoja.VehiculoMatricula, hoja.Fecha,
             hoja.Estado.ToString(), hoja.Version, hoja.UltimaSecuencia,
             new(politica.Version, politica.ZonaHoraria, politica.MaximoParadas,
-                politica.RequiereFotoIntento, politica.BloquearDiscrepanciasCarga), paradas, cierres.SelectMany(LeerIncidencias).ToArray(),
+                politica.RequiereFotoIntento, politica.BloquearDiscrepanciasCarga), paradas, cierres.Concat(automaticos).SelectMany(LeerIncidencias).ToArray(),
             hoja.ReservaRecursosActiva, hoja.PlanTemporal is not { } t ? null : new(t.SalidaPlanificadaEnUtc, t.ZonaHoraria, t.BaseVersion,
                 t.DireccionBase, t.LatitudBase, t.LongitudBase, t.BaseConfirmadaEnUtc, t.BaseConfirmadaPorAccesoId,
                 t.ServicioPredeterminadoMinutos, t.MargenRetornoMinutos, t.VersionRutaAlPlanificar, t.OrdenEnvios),
@@ -285,6 +291,12 @@ public sealed partial class EfRutasRepository(NexoRutaDbContext db, TimeProvider
         v.RequisitosPrueba.Any(p => p.Tipo == TipoPruebaEntrega.NombreReceptor),
         v.RequisitosPrueba.Any(p => p.Tipo == TipoPruebaEntrega.DocumentoReceptor),
         v.Motivos.Where(m => m.Disponible).OrderBy(m => m.Codigo).Select(m => new MotivoNoEntregaDatos(m.Codigo, m.Descripcion)).ToArray()) { PermiteEntregaParcial = v.PermiteEntregaParcial };
+    private sealed class CierreAutomatico
+    {
+        public Guid RutaId { get; set; }
+        public Guid AccesoId { get; set; }
+        public string IncidenciasCierre { get; set; } = "[]";
+    }
     private static IncidenciaCierreDatos[] LeerIncidencias(string json) =>
         JsonSerializer.Deserialize<IncidenciaCierreDatos[]>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
     private Task Contexto(Guid op, CancellationToken ct) => db.Database.ExecuteSqlInterpolatedAsync($"SELECT set_config('nexoruta.operador_id', {op.ToString()}, true)", ct);
