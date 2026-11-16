@@ -881,6 +881,9 @@ public sealed class DatosDemoSeeder(
         }
         versionFinalEnvio = await db.Envios.AsNoTracking().Where(x => x.OperadorId == operador.Id && x.Id == envio.Id)
             .Select(x => x.Version).SingleAsync(ct);
+        // Each fixture inserts the transfer header and its lines separately. A previous
+        // fixture checks this constraint eagerly, so defer it again before the next insert.
+        await db.Database.ExecuteSqlRawAsync("SET CONSTRAINTS return_transfer_lines_required DEFERRED", ct);
         var transferencia = await devoluciones.TransferirAsync(operador.Contexto, envio.Id,
             new(Guid.CreateVersion7(), versionFinalEnvio,
                 bultosADevolver.Select(x => new BultoDevolucionComando(x.Id, x.Version)).ToArray(),
