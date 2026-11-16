@@ -152,3 +152,53 @@ Before implementing the next functional change:
 
 None of Identity, roles, new policies, RLS, relationship models, migrations or
 authorization behavior is implemented by this refactor.
+
+## C1 — Traducción de geocodificación (2026-11-15)
+
+Base remota backend y gitlink raíz: `ad63712d649b4c178f75ebecf7ac3aa3b0e3d3d5`;
+raíz `3b00ef8ad43d525b1276cb7116c2dc8cec65590a`. Ambos develop limpios se
+actualizaron con fetch y pull ff-only antes de crear `fix/controladores-validacion`.
+`DestinosEnvioController.EjecutarGeocodificacionAsync` traduce solo las dos
+excepciones del proveedor. Rutas, permisos, política, validación, conflictos,
+cancelaciones y respuestas exitosas se conservan.
+
+Pruebas locales SDK 10.0.401: base 24/24 (búsqueda simulada, destinos HTTP y
+request). C1 ampliado 33/33 (26 simuladas, 6 destinos HTTP y 1 OpenAPI previo a
+C2). Se verificaron las tres acciones con 200, 503, 429 de cuota y temporal,
+`ProblemDetails`, detalles, códigos, `Retry-After`, `no-store`, cancelación y
+excepciones ajenas. El middleware real rechaza con 429 vacío antes del proveedor.
+En el host MVC simulado los 429 no incluyen `title`/`type`; se conserva esa forma.
+Las primeras aserciones añadidas asumían esos campos y la identidad del token
+interno de HttpClient: se corrigieron las pruebas, sin cambiar el contrato.
+Sin llamadas externas ni datos operativos. La captura OpenAPI queda fuera de Git;
+se comparará después de C2. La integración/PR y los SHA finales se registran en
+la auditoría raíz `docs/auditorias/controladores-validacion.md`.
+
+## C2 — Medidas de bultos compartidas (2026-11-15)
+
+`MedidasBulto` en Domain define los límites invariantes inclusivos y la precisión
+por comparación, sin modificar la entrada. API conserva Range por campo y usa
+la comprobación de precisión en DosDecimales; CSV usa ambas comprobaciones antes
+de huella/admisión. Bulto conserva sus excepciones anteriores. DosDecimales no
+impone rango a vehículos. Flujos y contratos en [CU-08](../cu/CU-08-bultos.md).
+
+C2 local: 57/57 (request 21, CSV HTTP 20, capacidad/vehículos/OpenAPI 16).
+Unitarias específicas de precisión, creación, geocodificador y parser CSV: 39/39.
+Se verificaron los extremos inclusivos, fuera de rango, cero, negativos,
+`1.230` válido y `1.234` inválido; es-UY/en-US, mensajes y nombres de campos del
+400, excepciones del constructor, rollback CSV e idempotencia con ceros finales.
+CSV conserva el negativo como InvalidDecimal por sintaxis; JSON lo rechaza por
+rango. Se añadió cobertura a las pruebas existentes, sin cambiar esa diferencia.
+
+OpenAPI completo generado antes/después: objetos JSON idénticos. SHA-256 del
+JSON canónico (claves ordenadas, separadores compactos, UTF-8 sin ASCII escapes):
+`048497de390864048cee3ec976d797c9ac6405a4c73312eea998eeb02507eeba`.
+Bulto conserva minimum/multipleOf 0.01 y maximum 999999999 en los cuatro campos;
+vehículos conserva sus máximos propios. Sin diferencia de contrato detectada.
+
+Regresión combinada final: 106/106 (búsqueda simulada 26, destinos HTTP 6,
+request 21, CSV HTTP 20, capacidad/OpenAPI 16, tarifas/admisión 12 y retiros C37 5).
+Unitarias específicas recompiladas sobre el código final: 39/39. Los retiros
+incluyen 1/500/501/1500 bultos, idempotencia, recepción y entrega al comercio.
+[PR backend #62](https://github.com/NexoRuta/NexoRuta-Backend/pull/62), destino
+develop. El registro raíz incorpora los SHA de commits, gitlinks e integración.

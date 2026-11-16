@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using System.ComponentModel.DataAnnotations;
 using NexoRuta.Api.Validation;
+using NexoRuta.Domain.Envios;
 
 namespace NexoRuta.Api.Features.Envios.Contracts.Requests;
 
@@ -34,16 +35,16 @@ public sealed class BultoDeclaradoRequest
     [Required, StringLength(80)]
     public string Codigo { get; set; } = "";
 
-    [Required, Range(typeof(decimal), "0.01", "999999999", ParseLimitsInInvariantCulture = true)]
+    [Required, Range(typeof(decimal), MedidasBulto.MinimoTexto, MedidasBulto.MaximoTexto, ParseLimitsInInvariantCulture = true)]
     [DosDecimales] public decimal PesoGramos { get; set; }
 
-    [Required, Range(typeof(decimal), "0.01", "999999999", ParseLimitsInInvariantCulture = true)]
+    [Required, Range(typeof(decimal), MedidasBulto.MinimoTexto, MedidasBulto.MaximoTexto, ParseLimitsInInvariantCulture = true)]
     [DosDecimales] public decimal LargoCentimetros { get; set; }
 
-    [Required, Range(typeof(decimal), "0.01", "999999999", ParseLimitsInInvariantCulture = true)]
+    [Required, Range(typeof(decimal), MedidasBulto.MinimoTexto, MedidasBulto.MaximoTexto, ParseLimitsInInvariantCulture = true)]
     [DosDecimales] public decimal AnchoCentimetros { get; set; }
 
-    [Required, Range(typeof(decimal), "0.01", "999999999", ParseLimitsInInvariantCulture = true)]
+    [Required, Range(typeof(decimal), MedidasBulto.MinimoTexto, MedidasBulto.MaximoTexto, ParseLimitsInInvariantCulture = true)]
     [DosDecimales] public decimal AltoCentimetros { get; set; }
 }
 

@@ -44,3 +44,8 @@ referenciaExterna,nombreDestinatario,emailDestinatario,direccion,codigoBulto,pes
 - [RlsRestrictedHttpFlowTests](../../tests/NexoRuta.IntegrationTests/Seguridad/RlsRestrictedHttpFlowTests.cs) cubre la visibilidad entre organizaciones con un rol PostgreSQL restringido.
 
 Ver también [CU-08 — Bultos](CU-08-bultos.md), [destinos y geocodificación](destinos-envios.md) y [cancelación de envíos](cancelacion-envios.md).
+
+Las medidas declaradas en alta, retiro, cotización y CSV usan la
+[regla compartida de bultos](CU-08-bultos.md#regla-compartida-de-medidas).
+La validación JSON conserva 400 por campo; CSV conserva 422 por fila con sus
+códigos y mensajes de sintaxis, rango o precisión, antes de la admisión atómica.

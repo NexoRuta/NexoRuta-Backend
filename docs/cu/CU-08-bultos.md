@@ -18,3 +18,29 @@ El Backend asigna un UUIDv7 a cada bulto. PostgreSQL vincula cada bulto con su e
 - `GET /api/envios/{id}/etiquetas` devuelve un PDF con una etiqueta por bulto persistido para los actores autorizados. [Controlador de envíos](../../src/NexoRuta.Api/Features/Envios/Controllers/EnviosController.cs) · [EtiquetasEnvioHttpTests](../../tests/NexoRuta.IntegrationTests/Envios/EtiquetasEnvioHttpTests.cs)
 - [ShipmentCsvImportHttpTests](../../tests/NexoRuta.IntegrationTests/Envios/ShipmentCsvImportHttpTests.cs) verifica la persistencia de varios bultos por JSON y CSV, el reenvío con filas reordenadas y el rechazo atómico cuando el segundo bulto del alta individual es inválido.
 - [PrecisionCargaTests](../../tests/NexoRuta.UnitTests/Envios/PrecisionCargaTests.cs), [CrearEnvioRequestTests](../../tests/NexoRuta.IntegrationTests/Envios/CrearEnvioRequestTests.cs) y [CapacidadVigenteHttpTests](../../tests/NexoRuta.IntegrationTests/Reparto/CapacidadVigenteHttpTests.cs) cubren precisión efectiva, límites del contrato HTTP y esquema OpenAPI.
+
+## Regla compartida de medidas
+
+`NexoRuta.Domain.Envios.MedidasBulto` define los límites inclusivos mediante texto
+invariante (`0.01`–`999999999`), deriva los límites decimales y comprueba rango y
+precisión efectiva sin modificar el valor. `Bulto` usa `EsValida` después de sus
+comprobaciones de positividad, conservando tipos, parámetros y mensajes de sus
+excepciones. No cambian gramos ni centímetros.
+
+`BultoDeclaradoRequest` conserva `[Range]` por campo con esos mismos límites y
+`[DosDecimales]`; se mantienen los nombres de campo y mensajes del 400 y los
+mínimos/máximos de OpenAPI. `DosDecimales` comparte únicamente la comprobación de
+precisión: no impone el rango de bultos a vehículos, cuyos máximos publicados
+siguen siendo `9999999999999999` g y `9999999999999999999999` cm³.
+
+Alta, retiro (`POST /api/retiros`) y cotización (`POST /api/envios/cotizacion`)
+reciben el mismo request. Alta/retiro construyen `Bulto`; la cotización valida
+primero el request. La importación CSV usa la misma regla en su validación por
+fila antes de calcular la huella y vuelve a atravesar el constructor al admitir.
+Conserva `OutOfRange`, `InvalidPrecision` y sus mensajes; un negativo en CSV
+sigue siendo `InvalidDecimal` por su sintaxis sin signo. Un lote rechazado no
+persiste envíos, identidades ni Outbox.
+
+`1.230` es válido y `1.234` se rechaza: no se redondea la entrada. Las regresiones
+comprueban los extremos, cero, negativos, fuera de rango y cada medida, con
+cultura `es-UY`/`en-US`, contrato HTTP y esquema OpenAPI generado.

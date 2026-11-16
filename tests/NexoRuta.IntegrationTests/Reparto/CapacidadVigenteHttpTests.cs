@@ -45,7 +45,14 @@ public sealed class CapacidadVigenteHttpTests(PostgresFixture postgres) : IClass
             ("VehiculoContract", new[] { "pesoMaximoGramos", "volumenMaximoCm3" }),
             ("BultoDeclaradoRequest", new[] { "pesoGramos", "largoCentimetros", "anchoCentimetros", "altoCentimetros" })
         })
-            foreach (var field in fields) Assert.Equal(0.01m, schemas.GetProperty(schema).GetProperty("properties").GetProperty(field).GetProperty("multipleOf").GetDecimal());
+            foreach (var field in fields)
+            {
+                var property = schemas.GetProperty(schema).GetProperty("properties").GetProperty(field);
+                Assert.Equal(0.01m, property.GetProperty("multipleOf").GetDecimal());
+                Assert.Equal(0.01m, property.GetProperty("minimum").GetDecimal());
+                Assert.Equal(schema == "BultoDeclaradoRequest" ? 999999999m : field == "pesoMaximoGramos" ? 9999999999999999m : 9999999999999999999999m,
+                    property.GetProperty("maximum").GetDecimal());
+            }
     }
 
     [Theory]

@@ -44,3 +44,24 @@ El contador de consumo usa PostgreSQL y se comparte entre procesos. La reserva s
 - [GeocodificadorMapboxTemporalTests](../../tests/NexoRuta.UnitTests/Envios/GeocodificadorMapboxTemporalTests.cs) cubre el modo temporal, los requisitos de configuración, la reserva de consumo y la respuesta ante datos inválidos con un proveedor simulado.
 - [ConsumoGeocodificacionPostgresTests](../../tests/NexoRuta.IntegrationTests/Envios/ConsumoGeocodificacionPostgresTests.cs) cubre el presupuesto en PostgreSQL aislado.
 - El corte del 01/11/2026 introdujo búsqueda Geoapify para destinos y el contador persistente. El selector vigente pasó a Mapbox temporal para destinos y reutiliza ese contador. [Evidencia histórica del contador](../../../docs/auditorias/geocodificacion/resultado.md) · [Evolución del selector](../../../docs/auditorias/geocodificacion/03-selector-guardar-reabrir.md)
+
+### Traducción HTTP de errores de búsqueda
+
+`DestinosEnvioController.EjecutarGeocodificacionAsync` concentra únicamente
+`GeocodificacionNoDisponibleException` (503 con su detalle) y
+`GeocodificacionLimiteException` (429). Lo usan `Proponer`, `Buscar` y
+`BuscarParaAlta`; cada acción conserva su validación, 404/409 y respuesta exitosa.
+Las cancelaciones y las demás excepciones se propagan. Las respuestas de estas
+acciones conservan `Cache-Control: no-store` y los cuerpos `ProblemDetails`.
+
+- Límite temporal del consumo: `Retry-After: 1`, `code: geocoding_rate_limited`.
+- Cuota agotada: `Retry-After: 86400`, `code: geocoding_quota_exhausted`.
+  El adaptador vigente clasifica también los HTTP 402/429 externos como cuota agotada.
+- Indisponibilidad: 503, sin `code` ni `Retry-After` del proveedor.
+
+El middleware de la política `geocodificacion` puede rechazar antes de ejecutar
+la acción: su 429 tiene cuerpo vacío y el `Retry-After` de su ventana HTTP.
+No es el `ProblemDetails` con `code` del proveedor/consumo compartido.
+`BusquedaDestinoSimuladaHttpTests` verifica estados, cuerpos y encabezados en las
+tres acciones sin consumo externo; `DestinosEnvioHttpTests` verifica además el
+rechazo real del middleware y los flujos con PostgreSQL restringido.
