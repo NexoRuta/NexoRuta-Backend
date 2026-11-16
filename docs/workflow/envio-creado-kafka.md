@@ -1,9 +1,9 @@
 # Publish EnvioCreado.v1 through the transactional outbox
 
-Shipment creation already saves EnvioCreado and GenerarSeguimiento in the same EF
-SaveChanges transaction. Kafka now dispatches the existing Kafka row; it does not
-generate another event or alter the shipment payload/transaction. There is no
-production Kafka consumer in this implementation.
+Shipment admission records `EnvioCreado` and `GenerarSeguimiento` in PostgreSQL
+in the transaction that admits the shipment. The Kafka dispatcher publishes the
+persisted `EnvioCreado` row. Other Kafka handlers and consumers in this Backend
+use separate event contracts. [Transactional boundaries](../adr/consistencia-y-outbox.md)
 
 ## Event contract
 
@@ -30,21 +30,22 @@ This is an internal business event, not the public tracking HTTP contract. Tenan
 headers convey context, not proof of authorization: future consumers must validate
 the trusted source and enforce their own tenant boundary.
 
-## Two independent host processes
+## Worker modes and dependencies
 
-Use the same Worker executable in **two processes**, not two transports in one
-host. The existing RabbitMQ consumer intentionally stops its host after uncertain
-transfer/ACK failures. Kafka must not share that shutdown boundary.
+Run RabbitMQ and Kafka in separate processes of the same Worker executable.
+This allows the tracking consumer to stop its host after an uncertain transfer or
+ACK independently of Kafka.
 
 | Process | `Messaging:Transport` | Registered services |
 | --- | --- | --- |
-| Existing RabbitMQ worker | `RabbitMq` (default) | Rabbit outbox Worker and tracking consumer |
-| Kafka dispatcher | `Kafka` | KafkaOutboxWorker and KafkaEnvioCreadoPublisher only |
+| RabbitMQ worker | `RabbitMq` (default) | Rabbit Outbox publication, tracking generation and email consumers for cancellation, recipient state and password recovery. |
+| Kafka worker | `Kafka` | Kafka Outbox publication and consumers for operational board, management reporting, operational history, commerce notices and password-recovery audit. |
 
-Both use the existing PostgreSQL connection configuration. Kafka mode does not
-require RabbitMQ credentials or the tracking AES key. A Kafka outage does not stop
-the RabbitMQ process, and vice versa. Provisioning/startup supervision of the second
-process is an infrastructure follow-up: Compose has **not** been changed.
+Both modes use `ConnectionStrings:Postgres`. Kafka mode also requires
+`MongoDb:ConnectionString` and `MongoDb:Database`. The
+[Worker startup](../../src/NexoRuta.Worker/Program.cs) lists the registrations
+and the [operational Compose overlay](../../compose.operacion.yaml) configures
+the operational stream for the combined local stack.
 
 After supplying connection/security configuration externally, select the Kafka
 process with a command-line override (do not put secrets on the command line):
@@ -76,8 +77,8 @@ host if initialization fails or the native producer enters a fatal state.
 
 The application does not provision topics. Before starting Kafka mode, provision
 the topic, ACLs, TLS/SASL, replication factor, min.insync.replicas and retention.
-Testcontainers uses a single KRaft broker with replication factor 1 only for tests;
-that does **not** validate production durability or high availability.
+The isolated tests use a single KRaft broker with replication factor 1.
+Production durability and high availability depend on the deployed cluster.
 
 ## Delivery and restart semantics
 
@@ -136,9 +137,9 @@ validation tasks. This feature alone does not make Kafka production-ready.
 
 ## Isolated validation
 
-Docker Desktop must run Linux containers. Testcontainers provisions Kafka, RabbitMQ
-and PostgreSQL with dynamic addresses and disposes only resources owned by tests.
-No shared database migration or unfiltered legacy integration suite is required.
+Docker must support Linux containers for Kafka and RabbitMQ. The suites use their
+own brokers and PostgreSQL environment. See the
+[PostgreSQL fixture setup](../../tests/NexoRuta.IntegrationTests/Fixtures/README.md).
 
 ```powershell
 dotnet build NexoRuta.sln --configuration Release
