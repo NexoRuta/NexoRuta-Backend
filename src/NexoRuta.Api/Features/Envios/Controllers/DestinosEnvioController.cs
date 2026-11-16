@@ -24,10 +24,15 @@ public sealed class DestinosEnvioController([FromKeyedServices("destino-mapbox-t
     public async Task<IActionResult> Proponer(Guid id, CancellationToken ct)
     {
         Response.Headers.CacheControl = "no-store";
-        try { var propuestas = await casos.ProponerAsync(id, ct); return propuestas is null ? NotFound() : Ok(propuestas); }
+        try
+        {
+            return await EjecutarGeocodificacionAsync(async () =>
+            {
+                var propuestas = await casos.ProponerAsync(id, ct);
+                return propuestas is null ? NotFound() : Ok(propuestas);
+            });
+        }
         catch (ConflictoRepartoException ex) { return Problem(ex.Message, statusCode: 409); }
-        catch (GeocodificacionNoDisponibleException ex) { return Problem(ex.Message, statusCode: 503); }
-        catch (GeocodificacionLimiteException ex) { return Limite(ex); }
     }
     [HttpPost("busqueda"), EnableRateLimiting("geocodificacion")]
     [ProducesResponseType<PropuestasDestinoDatos>(200), ProducesResponseType(400), ProducesResponseType(401), ProducesResponseType(403), ProducesResponseType(404), ProducesResponseType(409), ProducesResponseType(429), ProducesResponseType(503)]
@@ -35,10 +40,15 @@ public sealed class DestinosEnvioController([FromKeyedServices("destino-mapbox-t
     {
         Response.Headers.CacheControl = "no-store";
         if (request.Consulta.Trim().Length < 3) return BadRequest();
-        try { var propuestas = await casos.ProponerAsync(id, ct, request.Consulta.Trim()); return propuestas is null ? NotFound() : Ok(propuestas); }
+        try
+        {
+            return await EjecutarGeocodificacionAsync(async () =>
+            {
+                var propuestas = await casos.ProponerAsync(id, ct, request.Consulta.Trim());
+                return propuestas is null ? NotFound() : Ok(propuestas);
+            });
+        }
         catch (ConflictoRepartoException ex) { return Problem(ex.Message, statusCode: 409); }
-        catch (GeocodificacionNoDisponibleException ex) { return Problem(ex.Message, statusCode: 503); }
-        catch (GeocodificacionLimiteException ex) { return Limite(ex); }
     }
     [HttpPost("/api/envios/destino/busqueda"), EnableRateLimiting("geocodificacion")]
     [ProducesResponseType<PropuestasDestinoDatos>(200), ProducesResponseType(400), ProducesResponseType(401), ProducesResponseType(403), ProducesResponseType(429), ProducesResponseType(503)]
@@ -46,7 +56,12 @@ public sealed class DestinosEnvioController([FromKeyedServices("destino-mapbox-t
     {
         Response.Headers.CacheControl = "no-store";
         if (request.Consulta.Trim().Length < 3) return BadRequest();
-        try { return Ok(await casos.BuscarParaAltaAsync(request.Consulta.Trim(), ct)); }
+        return await EjecutarGeocodificacionAsync(async () => Ok(await casos.BuscarParaAltaAsync(request.Consulta.Trim(), ct)));
+    }
+
+    private async Task<IActionResult> EjecutarGeocodificacionAsync(Func<Task<IActionResult>> ejecutar)
+    {
+        try { return await ejecutar(); }
         catch (GeocodificacionNoDisponibleException ex) { return Problem(ex.Message, statusCode: 503); }
         catch (GeocodificacionLimiteException ex) { return Limite(ex); }
     }

@@ -152,3 +152,24 @@ Before implementing the next functional change:
 
 None of Identity, roles, new policies, RLS, relationship models, migrations or
 authorization behavior is implemented by this refactor.
+
+## C1 — Traducción de geocodificación (2026-11-15)
+
+Base remota backend y gitlink raíz: `ad63712d649b4c178f75ebecf7ac3aa3b0e3d3d5`;
+raíz `3b00ef8ad43d525b1276cb7116c2dc8cec65590a`. Ambos develop limpios se
+actualizaron con fetch y pull ff-only antes de crear `fix/controladores-validacion`.
+`DestinosEnvioController.EjecutarGeocodificacionAsync` traduce solo las dos
+excepciones del proveedor. Rutas, permisos, política, validación, conflictos,
+cancelaciones y respuestas exitosas se conservan.
+
+Pruebas locales SDK 10.0.401: base 24/24 (búsqueda simulada, destinos HTTP y
+request). C1 ampliado 33/33 (26 simuladas, 6 destinos HTTP y 1 OpenAPI previo a
+C2). Se verificaron las tres acciones con 200, 503, 429 de cuota y temporal,
+`ProblemDetails`, detalles, códigos, `Retry-After`, `no-store`, cancelación y
+excepciones ajenas. El middleware real rechaza con 429 vacío antes del proveedor.
+En el host MVC simulado los 429 no incluyen `title`/`type`; se conserva esa forma.
+Las primeras aserciones añadidas asumían esos campos y la identidad del token
+interno de HttpClient: se corrigieron las pruebas, sin cambiar el contrato.
+Sin llamadas externas ni datos operativos. La captura OpenAPI queda fuera de Git;
+se comparará después de C2. La integración/PR y los SHA finales se registran en
+la auditoría raíz `docs/auditorias/controladores-validacion.md`.

@@ -1,6 +1,10 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Claims;
+using System.Text.Json;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using NexoRuta.Api.Features.Envios.Contracts.Requests;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.RateLimiting;
@@ -52,21 +56,103 @@ public sealed class BusquedaDestinoSimuladaHttpTests
         Assert.Equal(2, provider.Requests.Count); // Saving/reopening never geocodes.
     }
 
-    [Theory]
-    [InlineData(402, 429)]
-    [InlineData(429, 429)]
-    [InlineData(401, 503)]
-    [InlineData(500, 503)]
-    public async Task ErroresExternosNoRevelanClaveNiModificanDestino(int upstream, int expected)
+    public static IEnumerable<object[]> RespuestasProveedor() =>
+        from action in new[] { "propuestas", "busqueda", "alta" }
+        from status in new[] { 200, 402, 429, 401, 500 }
+        select new object[] { action, status };
+
+    private static Task<HttpResponseMessage> Consultar(HttpClient client, string action) => action switch
+    {
+        "propuestas" => client.PostAsync($"/api/envios/{Shipment}/destino/propuestas", null),
+        "busqueda" => client.PostAsJsonAsync($"/api/envios/{Shipment}/destino/busqueda", new { Consulta = "Calle" }),
+        _ => client.PostAsJsonAsync("/api/envios/destino/busqueda", new { Consulta = "Calle" })
+    };
+
+    [Theory, MemberData(nameof(RespuestasProveedor))]
+    public async Task TresAccionesConservanEstadoCuerpoYEncabezadosDelProveedor(string action, int upstream)
     {
         var provider = new Provider { Status = upstream }; var repo = new Repository();
         await using var app = await Host(repo, provider); using var client = app.GetTestClient();
-        using var response = await client.PostAsJsonAsync($"/api/envios/{Shipment}/destino/busqueda", new { Consulta = "Calle" });
+        using var response = await Consultar(client, action);
+        var expected = upstream == 200 ? 200 : upstream is 402 or 429 ? 429 : 503;
         Assert.Equal(expected, (int)response.StatusCode);
+        Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
         var body = await response.Content.ReadAsStringAsync();
         Assert.DoesNotContain("UPSTREAM_PRIVATE", body); Assert.DoesNotContain("pk.synthetic-key", body);
+        if (expected == 200)
+        {
+            var result = JsonSerializer.Deserialize<PropuestasDestinoDatos>(body, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+            Assert.Equal(action == "alta" ? Guid.Empty : Shipment, result.EnvioId);
+            Assert.Equal(action == "alta" ? "Calle" : "Registrada 123", result.Direccion);
+            Assert.Equal("Calle sintética 123", Assert.Single(result.Propuestas).Descripcion);
+            Assert.False(response.Headers.Contains("Retry-After"));
+        }
+        else
+            await VerificarProblema(response, expected, expected == 429 ? true : null);
         Assert.Null(repo.Current.Latitud); Assert.Equal(0, repo.Current.Version);
-        Assert.Single(provider.Requests);
+        Assert.Single(provider.Requests); // El middleware admitió la solicitud: el error viene del proveedor.
+    }
+
+    private static async Task VerificarProblema(HttpResponseMessage response, int status, bool? exhausted)
+    {
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(status, body.GetProperty("status").GetInt32());
+        if (status == 503)
+        {
+            Assert.Equal("Service Unavailable", body.GetProperty("title").GetString());
+            Assert.Equal("https://tools.ietf.org/html/rfc9110#section-15.6.4", body.GetProperty("type").GetString());
+        }
+        else
+        {
+            Assert.False(body.TryGetProperty("title", out _));
+            Assert.False(body.TryGetProperty("type", out _));
+        }
+        Assert.Equal(exhausted switch
+        {
+            true => "Se agotó la cuota de búsqueda de direcciones. Podés seleccionar el punto manualmente en el mapa.",
+            false => "Se alcanzó el límite temporal de búsqueda. Esperá un momento o seleccioná el punto en el mapa.",
+            null => "No se pudo consultar la dirección. Podés corregir y confirmar el punto manualmente o volver a intentar más tarde."
+        }, body.GetProperty("detail").GetString());
+        if (exhausted.HasValue)
+        {
+            Assert.Equal(exhausted.Value ? "86400" : "1", response.Headers.GetValues("Retry-After").Single());
+            Assert.Equal(exhausted.Value ? "geocoding_quota_exhausted" : "geocoding_rate_limited", body.GetProperty("code").GetString());
+        }
+        else
+        {
+            Assert.False(response.Headers.Contains("Retry-After"));
+            Assert.False(body.TryGetProperty("code", out _));
+        }
+    }
+
+    [Theory]
+    [InlineData("propuestas")]
+    [InlineData("busqueda")]
+    [InlineData("alta")]
+    public async Task CancelacionYOtrasExcepcionesSePropagan(string action)
+    {
+        foreach (var cancel in new[] { false, true })
+        {
+            using var cts = new CancellationTokenSource();
+            Exception failure = cancel ? new OperationCanceledException(cts.Token) : new NotSupportedException("synthetic");
+            var provider = new Provider { Failure = failure, BeforeFailure = () => { if (failure is OperationCanceledException) cts.Cancel(); } };
+            await using var app = await Host(new Repository(), provider);
+            using var scope = app.Services.CreateScope();
+            var controller = new DestinosEnvioController(scope.ServiceProvider.GetRequiredKeyedService<GestionarDestinoEnvioUseCase>(GeocodificadorMapboxTemporal.Servicio))
+                { ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() } };
+            Task<IActionResult> Invoke() => action switch
+            {
+                "propuestas" => controller.Proponer(Shipment, cts.Token),
+                "busqueda" => controller.Buscar(Shipment, new BuscarDestinoRequest { Consulta = "Calle" }, cts.Token),
+                _ => controller.BuscarParaAlta(new BuscarDestinoRequest { Consulta = "Calle" }, cts.Token)
+            };
+            var propagated = await Assert.ThrowsAnyAsync<Exception>(Invoke);
+            if (cancel)
+                Assert.True(Assert.IsAssignableFrom<OperationCanceledException>(propagated).CancellationToken.IsCancellationRequested);
+            else
+                Assert.Same(failure, propagated);
+        }
     }
 
     [Fact]
@@ -89,19 +175,25 @@ public sealed class BusquedaDestinoSimuladaHttpTests
         Assert.Empty(provider.Requests);
     }
 
-    [Fact]
-    public async Task CuotaLocalDevuelve429SinLlamarAlProveedor()
+    [Theory]
+    [InlineData("propuestas", true)]
+    [InlineData("propuestas", false)]
+    [InlineData("busqueda", true)]
+    [InlineData("busqueda", false)]
+    [InlineData("alta", true)]
+    [InlineData("alta", false)]
+    public async Task LimiteDeConsumoDevuelve429SinLlamarAlProveedor(string action, bool exhausted)
     {
         var provider = new Provider(); var repo = new Repository();
-        await using var app = await Host(repo, provider, quota: true); using var client = app.GetTestClient();
-        using var response = await client.PostAsJsonAsync($"/api/envios/{Shipment}/destino/busqueda", new { Consulta = "Calle" });
+        await using var app = await Host(repo, provider, quota: exhausted); using var client = app.GetTestClient();
+        using var response = await Consultar(client, action);
         Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
-        Assert.Equal("86400", response.Headers.GetValues("Retry-After").Single());
-        Assert.Contains("geocoding_quota_exhausted", await response.Content.ReadAsStringAsync());
+        Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
+        await VerificarProblema(response, 429, exhausted);
         Assert.Empty(provider.Requests);
     }
 
-    private static async Task<WebApplication> Host(Repository repo, Provider provider, bool enabled = true, bool quota = false)
+    private static async Task<WebApplication> Host(Repository repo, Provider provider, bool enabled = true, bool? quota = null)
     {
         var builder = WebApplication.CreateBuilder(); builder.WebHost.UseTestServer();
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
@@ -136,18 +228,21 @@ public sealed class BusquedaDestinoSimuladaHttpTests
             return Task.FromResult(true);
         }
     }
-    private sealed class Budget(bool exhausted) : IConsumoGeocodificacion
-    { public Task ReservarAsync(CancellationToken ct) => exhausted ? throw new GeocodificacionLimiteException(true) : Task.CompletedTask; }
+    private sealed class Budget(bool? exhausted) : IConsumoGeocodificacion
+    { public Task ReservarAsync(CancellationToken ct) => exhausted.HasValue ? throw new GeocodificacionLimiteException(exhausted.Value) : Task.CompletedTask; }
     private sealed class ClientFactory(Provider provider) : IHttpClientFactory
     { public HttpClient CreateClient(string name) => new(provider, disposeHandler: false); }
     private sealed class Provider : HttpMessageHandler
     {
         public int Status = 200;
+        public Exception? Failure;
+        public Action? BeforeFailure;
         public List<Uri> Requests { get; } = [];
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Assert.Equal("api.mapbox.com", request.RequestUri!.Host);
             Requests.Add(request.RequestUri);
+            if (Failure is not null) { BeforeFailure?.Invoke(); throw Failure; }
             return Task.FromResult(new HttpResponseMessage((HttpStatusCode)Status)
             { Content = new StringContent(Status == 200 ? """{"features":[{"geometry":{"coordinates":[-56.2,-34.9]},"properties":{"full_address":"Calle sintética 123"}}]}""" : "UPSTREAM_PRIVATE") });
         }

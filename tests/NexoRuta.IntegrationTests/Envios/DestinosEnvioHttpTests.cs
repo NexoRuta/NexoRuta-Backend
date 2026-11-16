@@ -176,6 +176,30 @@ public sealed class DestinosEnvioHttpTests(PostgresFixture postgres) : IClassFix
         Assert.Equal(2, (await db.Direcciones.AsNoTracking().SingleAsync()).Version);
     }
 
+    [Fact]
+    public async Task Middleware429NoEsUnProblemaDelProveedorNiEjecutaLaAccion()
+    {
+        var data = await postgres.CreateDatabaseAsync();
+        var geo = new GeocodificadorPrueba();
+        using var factory = new IntegrationApiFactory(data, settings: new Dictionary<string, string?>
+            { ["Geocoding:Consumo:SolicitudesPorMinutoUsuario"] = "1" });
+        using var host = factory.WithWebHostBuilder(b => b.ConfigureTestServices(s =>
+            s.AddKeyedScoped<NexoRuta.Application.Envios.UseCases.GestionarDestinoEnvioUseCase>(
+                NexoRuta.Infrastructure.Envios.Geocodificacion.GeocodificadorMapboxTemporal.Servicio, (p, _) => new(
+                    p.GetRequiredService<NexoRuta.Application.Administracion.Interfaces.IUsuarioActual>(),
+                    p.GetRequiredService<NexoRuta.Application.Envios.Repositories.IDestinosEnvioRepository>(), geo))));
+        using var client = host.CreateClient();
+        await using var db = data.CreateDbContext();
+        await client.SetBearerForAccessAsync(data, (await db.AccesosUsuario.SingleAsync(x => x.ComercioId != null)).Id);
+        using var first = await client.PostAsJsonAsync("/api/envios/destino/busqueda", new { Consulta = "Calle" });
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        using var limited = await client.PostAsJsonAsync("/api/envios/destino/busqueda", new { Consulta = "Otra calle" });
+        Assert.Equal(HttpStatusCode.TooManyRequests, limited.StatusCode);
+        Assert.InRange(int.Parse(limited.Headers.GetValues("Retry-After").Single()), 1, 60);
+        Assert.Equal("", await limited.Content.ReadAsStringAsync());
+        Assert.Single(geo.Consultas);
+    }
+
     private sealed class GeocodificadorPrueba : IGeocodificador
     {
         public List<string> Consultas { get; } = [];
