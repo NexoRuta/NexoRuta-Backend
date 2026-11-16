@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text;
 using Xunit.Abstractions;
 using Confluent.Kafka;
 using Confluent.Kafka.Admin;
@@ -65,7 +66,18 @@ public sealed class OperationalProjectionTests(PostgresFixture postgres, KafkaFi
         var expected=facts.Select(x=>x.EventId).Distinct().Count();
         using (var producer = new ProducerBuilder<string, string>(new ProducerConfig { BootstrapServers = kafka.BootstrapServers, Acks = Acks.All }).Build())
             foreach (var value in facts)
-                await producer.ProduceAsync(topic, new Message<string, string> { Key = value.OperadorId.ToString("D") + ":" + value.EntidadId.ToString("D"), Value = JsonSerializer.Serialize(value, OperationalConsumer.Json) }, ct);
+                await producer.ProduceAsync(topic, new Message<string, string>
+                {
+                    Key = value.OperadorId.ToString("D") + ":" + value.EntidadId.ToString("D"),
+                    Value = JsonSerializer.Serialize(value, OperationalConsumer.Json),
+                    Headers = new Headers
+                    {
+                        { "eventId", Encoding.UTF8.GetBytes(value.EventId.ToString("D")) },
+                        { "eventType", Encoding.UTF8.GetBytes(value.Tipo) },
+                        { "eventVersion", Encoding.UTF8.GetBytes("1") },
+                        { "correlationId", Encoding.UTF8.GetBytes(value.CorrelacionId.ToString("D")) }
+                    }
+                }, ct);
         // Only the documentary consumer fails. The independent board must catch up
         // while MongoDB is paused; then the same group recovers its uncommitted offset.
         await mongo.PauseAsync(ct);
