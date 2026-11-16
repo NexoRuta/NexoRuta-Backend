@@ -26,4 +26,10 @@ public interface IEnviosRepository
         Guid? operadorId,
         Guid? comercioId,
         CancellationToken cancellationToken = default);
+
+    Task<EnvioDetalle?> ObtenerPorIdAsync(
+        Guid envioId,
+        Guid? operadorId,
+        Guid? comercioId,
+        CancellationToken cancellationToken = default);
 }

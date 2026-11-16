@@ -248,5 +248,9 @@ public sealed class CrearEnvioUseCaseTests
             Filtro = (operadorId, comercioId);
             return Task.FromResult<IReadOnlyList<EnvioDetalle>>([]);
         }
+
+        public Task<EnvioDetalle?> ObtenerPorIdAsync(
+            Guid envioId, Guid? operadorId, Guid? comercioId, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
     }
 }

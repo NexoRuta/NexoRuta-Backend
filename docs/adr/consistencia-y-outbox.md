@@ -1,6 +1,6 @@
 # ADR — Consistencia transaccional y Outbox
 
-**Estado**. Decisión implementada para la admisión de envíos, la publicación asíncrona y los consumidores descritos abajo. El cierre diario automático y el reintento administrativo de mensajes internos siguen pendientes.
+**Estado**. Decisión implementada para la admisión de envíos, la publicación asíncrona, los consumidores, el cierre diario automático y el reintento administrativo de publicaciones internas fallidas descritos abajo.
 
 ## Contexto y decisión
 
@@ -31,7 +31,7 @@ Puede haber una nueva entrega si el broker aceptó el mensaje pero se perdió su
 
 | Dónde falló | Recuperación vigente |
 | --- | --- |
-| Publicación desde `OutboxMessages` | Los errores de publicación RabbitMQ/Kafka se reintentan al llegar el próximo intento programado. Una reserva vencida puede reclamarse. Para un fallo persistente se diagnostica por ID de mensaje, destino y error antes de corregir la causa. |
+| Publicación desde `OutboxMessages` | Los errores de publicación RabbitMQ/Kafka se reintentan al llegar el próximo intento programado. Una reserva vencida puede reclamarse. La administración permite seleccionar una publicación interna fallida elegible del operador y solicitar su reintento individual, auditado y por el circuito normal. Excluye mensajes publicados, procesados, reservados o con consumidor activo. [Contrato y elegibilidad](../workflow/reintento-mensajes-internos.md) |
 | Consumo RabbitMQ de `GenerarSeguimiento` | Un error transitorio vuelve a la cola de reintento con espera de 30 segundos y conserva el presupuesto de fallos de procesamiento. Un mensaje inválido pasa a fallidos de inmediato. Al tercer fallo de procesamiento pasa a `nexoruta.seguimiento.fallidos`. En cada traslado se envía el ACK del original después de que RabbitMQ confirme la republicación. |
 | Cola de fallidos de seguimiento | Existe un procedimiento operativo manual. Tras corregir la causa, se valida el trabajo persistido, se republica el mensaje seleccionado con su ID y payload originales, y se confirma el original de la cola de fallidos después de recibir el *publisher confirm*. |
 | Entrega HTTP a un comercio | El Worker `HttpWebhooks` trabaja sobre `WebhookDeliveries`, sin depender de los brokers. Persiste el intento antes del HTTP y marca `Entregado` ante `2xx` con reserva vigente. Reintenta fallos recuperables con espera creciente y un límite. Los fallos permanentes o agotados quedan consultables para reenvío autorizado y auditado. |
@@ -40,10 +40,10 @@ El trabajo HTTP es único por `(EventoId, SuscripcionId)`. Los reenvíos conserv
 
 [Procedimiento para fallidos RabbitMQ](../workflow/seguimiento-rabbitmq-dlq.md#recover-or-discard-one-selected-message) · [Contrato HTTP, reintentos y reenvíos](../webhooks/http.md)
 
-## Pendientes de implementación
+## Cierre automático y reintento administrativo
 
-- **Cierre diario automático (AP-09)**. Falta ejecutar el cierre diario mediante el Worker. El comando `FinJornada` y el barrido de plazos de validación de evidencias son flujos existentes con otros disparadores. [Alcance funcional](../workflow/alcance-funcional.md) · [Cierre de jornada](../cu/cierre-jornada.md)
-- **Reintento administrativo de mensajes internos**. Falta una operación administrativa de la aplicación para seleccionar y relanzar mensajes internos fallidos con autorización y auditoría. El procedimiento manual de RabbitMQ y el reenvío HTTP de webhooks son mecanismos vigentes con sus propios alcances.
+- **Cierre diario automático (AP-09)**. El Worker cierra hojas `EnCurso` al terminar su fecha operativa en la zona de su política histórica. Escanea al iniciar y cada 30 segundos; una transacción guarda el claim único, los efectos de dominio y la auditoría. Conserva custodia, incidencias, pruebas y plazos; no libera ocupación física ni admite nuevas operaciones físicas después del cierre. `FinJornada` y el barrido de plazos mantienen sus disparadores. [Cierre y recuperación](../cu/cierre-jornada.md#ap-09-cierre-diario-automático-del-worker)
+- **Reintento administrativo de mensajes internos**. La aplicación exige permisos y ámbito de operador, motivo y una identidad de solicitud. Conserva MessageId, payload e historial; serializa peticiones repetidas/concurrentes y comprueba recibos y trabajo en curso antes de habilitar al publicador normal. Es una recuperación de publicación: los fallos de consumo conservan DLQ/recibos, y los correos, Push y webhooks mantienen sus circuitos. [Operación administrativa](../workflow/reintento-mensajes-internos.md)
 
 ## Evidencia automatizada
 
@@ -51,3 +51,5 @@ El trabajo HTTP es único por `(EventoId, SuscripcionId)`. Los reenvíos conserv
 - [KafkaOutboxTests](../../tests/NexoRuta.IntegrationTests/Messaging/KafkaOutboxTests.cs) y [KafkaOutboxReservationTests](../../tests/NexoRuta.IntegrationTests/Messaging/KafkaOutboxReservationTests.cs) cubren confirmación, reservas y republicación con el mismo ID.
 - [GenerarSeguimientoConsumerExitoTests](../../tests/NexoRuta.IntegrationTests/Seguimiento/Seguimiento/GenerarSeguimientoConsumerExitoTests.cs) y [GenerarSeguimientoConsumerTests](../../tests/NexoRuta.IntegrationTests/Seguimiento/GenerarSeguimientoConsumerTests.cs) cubren redelivery, deduplicación, ACK y traslado a reintento o fallidos.
 - [WebhooksHttpTests](../../tests/NexoRuta.IntegrationTests/Webhooks/WebhooksHttpTests.cs) y [WebhooksFullStackTests](../../tests/NexoRuta.IntegrationTests/Webhooks/WebhooksFullStackTests.cs) cubren captura transaccional, snapshots, reservas, agotamiento y reenvío.
+- [Cierre diario alojado](../../tests/NexoRuta.IntegrationTests/Reparto/OperacionesRepartoHttpTests.CierreDiario.cs) prueba el disparador automático con reloj controlado, dos Workers y recuperación tras reiniciar sobre PostgreSQL real.
+- [AdministrativeOutboxRetryTests](../../tests/NexoRuta.IntegrationTests/Messaging/AdministrativeOutboxRetryTests.cs) cubre autorización/RLS, auditoría, concurrencia, exclusión de procesados/en curso y recuperación real mediante publicador/consumidor RabbitMQ sin segundo efecto.

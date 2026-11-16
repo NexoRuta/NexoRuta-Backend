@@ -73,7 +73,8 @@ public sealed class RlsActorContractTests
             "nexoruta.target_user_id", "nexoruta.target_role_id", "nexoruta.auth_access_id",
             "nexoruta.auth_user_id", "nexoruta.auth_org_id", "nexoruta.auth_role_id",
             "nexoruta.history_source_type", "nexoruta.history_source_id", "nexoruta.history_operation_id",
-            "nexoruta.history_correlation_id", "nexoruta.history_occurred_at", "nexoruta.history_fact_code", "nexoruta.history_process"
+            "nexoruta.history_correlation_id", "nexoruta.history_occurred_at", "nexoruta.history_fact_code", "nexoruta.history_process",
+            "nexoruta.traceparent"
         ];
         var actual = typeof(RlsContextContract).GetFields(BindingFlags.Public | BindingFlags.Static)
             .Where(field => field.IsLiteral && field.FieldType == typeof(string))
@@ -161,5 +162,8 @@ public sealed class RlsActorContractTests
     }
 
     private static string HistoricalPolicySql() => string.Join("\n",
-        new EnablePostgreSqlRls().UpOperations.Concat(new NexoRuta.Infrastructure.Persistence.Migrations.AddCanonicalShipmentHistory().UpOperations).OfType<SqlOperation>().Select(operation => operation.Sql));
+        new EnablePostgreSqlRls().UpOperations
+            .Concat(new AddCanonicalShipmentHistory().UpOperations)
+            .Concat(new ObservabilityCorrelationSnapshots().UpOperations)
+            .OfType<SqlOperation>().Select(operation => operation.Sql));
 }

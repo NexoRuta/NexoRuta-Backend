@@ -34,7 +34,12 @@ var connectionString = builder.Configuration.GetConnectionString("Postgres")
 builder.Services.AddDbContext<NexoRutaDbContext>(options => options.UseNexoRutaPostgres(connectionString));
 builder.Services.AddScoped<EfOutboxRepository>();
 builder.Services.AddSingleton<TimeProvider>(TimeProvider.System);
-if (transport != "HttpWebhooks") builder.Services.AddHostedService<ProofValidationDeadlineWorker>();
+if (transport != "HttpWebhooks")
+{
+    builder.Services.AddHostedService<ProofValidationDeadlineWorker>();
+    builder.Services.AddScoped<NexoRuta.Infrastructure.Reparto.DailyClosingExecutor>();
+    builder.Services.AddHostedService<DailyClosingWorker>();
+}
 
 if (transport == "HttpWebhooks")
 {

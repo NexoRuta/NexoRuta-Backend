@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using System.Text;
 using Confluent.Kafka;
 using Confluent.Kafka.Admin;
 using Microsoft.Extensions.Configuration;
@@ -45,7 +46,14 @@ public sealed class OperationalConsumerHealthTests(KafkaFixture kafka) : IClassF
             await producer.ProduceAsync(new TopicPartition(topic, 1), new Message<string, string>
             {
                 Key = fact.OperadorId.ToString("D") + ":" + fact.EntidadId.ToString("D"),
-                Value = JsonSerializer.Serialize(fact, OperationalConsumer.Json)
+                Value = JsonSerializer.Serialize(fact, OperationalConsumer.Json),
+                Headers = new Headers
+                {
+                    { "eventId", Encoding.UTF8.GetBytes(fact.EventId.ToString("D")) },
+                    { "eventType", Encoding.UTF8.GetBytes(fact.Tipo) },
+                    { "eventVersion", Encoding.UTF8.GetBytes("1") },
+                    { "correlationId", Encoding.UTF8.GetBytes(fact.CorrelacionId.ToString("D")) }
+                }
             }, ct);
             await consumer.HealthAfterEvent.Task.WaitAsync(TimeSpan.FromSeconds(20), ct);
             Assert.Equal(1, consumer.Projected);

@@ -1,7 +1,10 @@
+using System.Data.Common;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using NexoRuta.Api.Features.Envios.Contracts.Requests;
 using NexoRuta.IntegrationTests.Fixtures;
 using NexoRuta.IntegrationTests.Seguridad;
@@ -54,7 +57,9 @@ public sealed class EtiquetasEnvioHttpTests(PostgresFixture postgres) : IClassFi
             foreign.Add(await db.AccesosUsuario.Where(a => a.ComercioId == initial.ComercioId).Select(a => a.Id).SingleAsync());
         }
         var runtime = await RlsRestrictedHttpFlowTests.RestrictApiAsync(data);
-        using var factory = new IntegrationApiFactory(runtime, settings: RlsRestrictedHttpFlowTests.ApiSettings());
+        var shipmentQueries = new ShipmentQueryObserver();
+        using var factory = new IntegrationApiFactory(runtime, settings: RlsRestrictedHttpFlowTests.ApiSettings(),
+            interceptors: [shipmentQueries]);
         using var client = factory.CreateHttpClient();
         await client.SetBearerForAccessAsync(data, ownerAccess.Id);
         var ownerAuthorization = client.DefaultRequestHeaders.Authorization;
@@ -69,8 +74,10 @@ public sealed class EtiquetasEnvioHttpTests(PostgresFixture postgres) : IClassFi
         var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
         var before = await client.GetStringAsync("/api/envios");
         var outbox = await db.OutboxMessages.CountAsync();
+        shipmentQueries.Reads.Clear();
         using var pdf = await client.GetAsync($"/api/envios/{id}/etiquetas");
         Assert.Equal(HttpStatusCode.OK, pdf.StatusCode);
+        shipmentQueries.AssertScopedTo(id);
         Assert.Equal("application/pdf", pdf.Content.Headers.ContentType!.MediaType);
         Assert.Equal("attachment", pdf.Content.Headers.ContentDisposition!.DispositionType);
         Assert.True(pdf.Headers.CacheControl!.NoStore);
@@ -100,15 +107,22 @@ public sealed class EtiquetasEnvioHttpTests(PostgresFixture postgres) : IClassFi
         {
             await client.SetBearerForAccessAsync(data, access);
             Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/envios")).StatusCode);
+            shipmentQueries.Reads.Clear();
             Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/envios/{id}/etiquetas")).StatusCode);
+            shipmentQueries.AssertScopedTo(id);
         }
         var otherOperator = await db.AccesosUsuario.Where(a => a.OperadorId != null && a.OperadorId != op).Select(a => a.Id).FirstAsync();
         await client.SetBearerForAccessAsync(data, otherOperator);
+        shipmentQueries.Reads.Clear();
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/envios/{id}/etiquetas")).StatusCode);
+        shipmentQueries.AssertScopedTo(id);
         var operatorAccess = await db.AccesosUsuario.FirstAsync(a => a.OperadorId == op);
         await client.SetBearerForAccessAsync(data, operatorAccess.Id);
         var operatorAuthorization = client.DefaultRequestHeaders.Authorization;
-        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/envios/{Guid.NewGuid()}/etiquetas")).StatusCode);
+        var missingId = Guid.NewGuid();
+        shipmentQueries.Reads.Clear();
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/envios/{missingId}/etiquetas")).StatusCode);
+        shipmentQueries.AssertScopedTo(missingId);
         using var operatorPdf = await client.GetAsync($"/api/envios/{id}/etiquetas");
         Assert.Equal(HttpStatusCode.OK, operatorPdf.StatusCode);
         Assert.True(operatorPdf.Headers.CacheControl!.NoStore);
@@ -124,5 +138,31 @@ public sealed class EtiquetasEnvioHttpTests(PostgresFixture postgres) : IClassFi
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"/api/envios/{id}/etiquetas")).StatusCode);
         client.DefaultRequestHeaders.Authorization = null;
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync($"/api/envios/{id}/etiquetas")).StatusCode);
+    }
+
+    private sealed class ShipmentQueryObserver : DbCommandInterceptor
+    {
+        public List<(string Sql, Dictionary<string, Guid> Parameters, bool InTransaction)> Reads { get; } = [];
+
+        public void AssertScopedTo(Guid shipmentId)
+        {
+            var read = Assert.Single(Reads);
+            var idParameter = Assert.Single(read.Parameters, p => p.Value == shipmentId);
+            Assert.Matches(@"WHERE[\s\S]*\.""Id""\s*=\s*@" + Regex.Escape(idParameter.Key.TrimStart('@')), read.Sql);
+            Assert.True(read.InTransaction);
+        }
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.Contains("FROM \"Envios\"", StringComparison.Ordinal))
+                Reads.Add((command.CommandText, command.Parameters.Cast<DbParameter>()
+                    .Where(parameter => parameter.Value is Guid)
+                    .ToDictionary(parameter => parameter.ParameterName, parameter => (Guid)parameter.Value!),
+                    command.Transaction is not null));
+
+            return ValueTask.FromResult(result);
+        }
     }
 }

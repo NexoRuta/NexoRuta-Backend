@@ -78,9 +78,11 @@ public sealed class DatosDemoFixtureCargaHttpTests(PostgresFixture postgres) : I
         var loadUser = await verification.Usuarios.AsNoTracking().SingleAsync(x => x.Email == LoadEmail);
         var access = await verification.AccesosUsuario.AsNoTracking().SingleAsync(x => x.UsuarioId == loadUser.Id);
         Assert.False(access.EsPropietario);
+        // Password replacement revokes the previous session; least privilege is checked with the new one.
+        Assert.Equal(HttpStatusCode.Unauthorized, (await loadClient.GetAsync("/api/usuarios/actual/permisos")).StatusCode);
         Assert.Equal(CatalogoPermisos.Para(TipoAccesoUsuario.Operador)
             .Single(x => x.Codigo == "reparto.ejecutar").Codigo,
-            (await loadClient.GetFromJsonAsync<string[]>("/api/usuarios/actual/permisos"))!.Single());
+            (await newPasswordClient.GetFromJsonAsync<string[]>("/api/usuarios/actual/permisos"))!.Single());
     }
 
     private static async Task Login(HttpClient client, string email, string password)

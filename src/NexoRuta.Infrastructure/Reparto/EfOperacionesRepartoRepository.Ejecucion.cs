@@ -91,23 +91,7 @@ public sealed partial class EfOperacionesRepartoRepository
             return "Rendición declarada. El depósito debe confirmar la recepción física.";
         }
         if (op.Tipo == "FinJornada")
-        {
-            var asignadosSinSalida = envios.Count(e => e.Estado == EstadoEnvio.AsignadoRuta);
-            foreach (var parada in hoja.Paradas.Where(x => x.Activa))
-            {
-                var envio = envios.Single(e => e.Id == parada.EnvioId);
-                if (envio.Estado == EstadoEnvio.AsignadoRuta)
-                    hoja.SuspenderParada(envio.Id, "Jornada cerrada antes de la salida; requiere reasignación operativa.");
-                else if (parada.ResultadoVisita == "Pendiente")
-                    hoja.SuspenderParada(envio.Id, "Jornada cerrada sin completar esta visita.");
-            }
-            hoja.RegistrarFin(op.OcurridaEn);
-            var faltantes = bultos.Count(b => b.RutaCustodiaId == hoja.Id && b.Custodia == EstadoCustodiaBulto.Repartidor);
-            var avisos = new List<string>();
-            if (asignadosSinSalida > 0) avisos.Add($"{asignadosSinSalida} envío(s) permanecen asignados sin salida y requieren reasignación operativa.");
-            if (faltantes > 0) avisos.Add($"{faltantes} bulto(s) siguen sin entrega ni rendición. Se conserva su custodia; no se confirmó recepción en depósito.");
-            return avisos.Count == 0 ? null : $"Jornada cerrada. {string.Join(" ", avisos)}";
-        }
+            return CierreJornada.Finalizar(hoja, envios, bultos, op.OcurridaEn);
         var actual = envios.SingleOrDefault(x => x.Id == op.EnvioId);
         var paradaActual = hoja.Paradas.SingleOrDefault(x => x.EnvioId == op.EnvioId);
         Exigir(actual is not null && paradaActual is not null, "El envío no pertenece a esta hoja.");
