@@ -606,6 +606,8 @@ public sealed class DatosDemoSeeder(
 
     private async Task PublicarReglasAsync(OrganizacionDemo operador, DateTimeOffset publicadoEn, CancellationToken ct)
     {
+        await db.Database.ExecuteSqlRawAsync(
+            "SET CONSTRAINTS operational_rules_current_publication_check DEFERRED", ct);
         var raiz = ReglasOperativasOperador.Crear(operador.Id, publicadoEn);
         db.ReglasOperativasOperadores.Add(raiz);
         await db.SaveChangesAsync(ct);
@@ -633,6 +635,9 @@ public sealed class DatosDemoSeeder(
         await db.SaveChangesAsync(ct);
         raiz.Publicar(version, publicadoEn);
         await db.SaveChangesAsync(ct);
+        // Validate this publication before any later fixture publishes another version.
+        await db.Database.ExecuteSqlRawAsync(
+            "SET CONSTRAINTS operational_rules_current_publication_check IMMEDIATE", ct);
     }
 
     private async Task<EnvioDemo> CrearEnvioAsync(OrganizacionDemo comercio, OrganizacionDemo operador,
@@ -910,6 +915,8 @@ public sealed class DatosDemoSeeder(
     private async Task<Guid> AsegurarReglasEntregaParcialAp04Async(OrganizacionDemo operador,
         Guid versionActualId, DateTimeOffset publicadaEnUtc, CancellationToken ct)
     {
+        await db.Database.ExecuteSqlRawAsync(
+            "SET CONSTRAINTS operational_rules_current_publication_check DEFERRED", ct);
         // Publish temporarily so the imported shipment captures a real active version.
         // The seed restores the previous behavior after the physical return is recorded.
         var fuente = await db.VersionesReglasOperativas.Include(x => x.RequisitosPrueba).Include(x => x.Motivos)
