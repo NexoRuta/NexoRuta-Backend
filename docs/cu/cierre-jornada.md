@@ -19,7 +19,7 @@ Si el bulto aparece y vuelve físicamente al depósito, el endpoint de recepció
 
 Según DEC-07, al cerrar antes de la salida el envío permanece `AsignadoRuta`, la parada se suspende y la custodia se conserva. La reasignación requiere estado y versiones vigentes, una ruta elegible y los bultos correspondientes en depósito. El cierre registra una incidencia por cada bulto que cumple el criterio de custodia de la jornada. [Escritura de incidencias](../../src/NexoRuta.Infrastructure/Reparto/EfOperacionesRepartoRepository.cs)
 
-Las pruebas del Backend cubren secuencia, repetición, conservación de custodia, recepción posterior, cierre antes de la salida y vencimientos independientes. El cierre diario automático por Worker permanece pendiente. [Pruebas de jornada](../../tests/NexoRuta.IntegrationTests/Reparto/OperacionesRepartoHttpTests.cs) · [Pruebas de plazos por bulto](../../tests/NexoRuta.IntegrationTests/Reparto/OperacionesRepartoHttpTests.PlazosBultos.cs) · [Pendientes del Worker](../adr/consistencia-y-outbox.md#pendientes-de-implementación)
+Las pruebas del Backend cubren secuencia, repetición, conservación de custodia, recepción posterior, cierre antes de la salida y vencimientos independientes. El cierre diario automático se ejecuta conforme a [AP-09](#ap-09-cierre-diario-automático-del-worker). [Pruebas de jornada](../../tests/NexoRuta.IntegrationTests/Reparto/OperacionesRepartoHttpTests.cs) · [Pruebas de plazos por bulto](../../tests/NexoRuta.IntegrationTests/Reparto/OperacionesRepartoHttpTests.PlazosBultos.cs) · [Consistencia del Worker](../adr/consistencia-y-outbox.md#cierre-automático-y-reintento-administrativo)
 
 ## CU-06 B2: cierre administrativo separado de disponibilidad (01/11/2026)
 

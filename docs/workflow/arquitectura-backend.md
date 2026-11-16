@@ -80,7 +80,7 @@ La API vuelve a validar el acceso y establece el contexto RLS dentro de la misma
 - Tarifas y reglas operativas son configurables y versionadas. Un envío conserva la tarifa y el tratamiento aplicados al registrarse; una edición posterior no debe alterarlo retroactivamente.
 - La asignación de un envío a rutas exige control de concurrencia para impedir doble asignación. EF Core y migraciones son obligatorios; se requiere demostrar concurrencia optimista sobre entidades susceptibles de edición simultánea.
 - La sincronización sin conexión necesita política documentada de conflictos e idempotencia de eventos. No definirla implícitamente en un controlador.
-- Persistir los eventos junto con los cambios de negocio mediante Outbox y publicar después del commit. Los consumidores deduplican sus efectos y la recuperación depende del transporte. El cierre diario automático y el reintento administrativo de mensajes internos siguen pendientes. [ADR de consistencia y Outbox](../adr/consistencia-y-outbox.md)
+- Persistir los eventos junto con los cambios de negocio mediante Outbox y publicar después del commit. Los consumidores deduplican sus efectos y la recuperación depende del transporte. El Worker ejecuta el cierre diario automático y la aplicación permite solicitar reintentos auditados de publicaciones internas fallidas elegibles. [ADR de consistencia y Outbox](../adr/consistencia-y-outbox.md)
 
 ## Infraestructura y decisiones pendientes
 
