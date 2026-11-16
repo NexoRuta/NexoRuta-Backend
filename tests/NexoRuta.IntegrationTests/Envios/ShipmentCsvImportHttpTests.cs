@@ -87,6 +87,85 @@ public sealed class ShipmentCsvImportHttpTests(PostgresFixture postgres, ITestOu
     }
 
     [Fact]
+    public async Task AltaRetiroYCotizacionConservanErroresPorCampoSinRedondear()
+    {
+        var data = await postgres.CreateDatabaseAsync();
+        using var factory = data.CreateShippingApiFactory(); using var client = factory.CreateHttpClient();
+        await using var db = data.CreateDbContext();
+        var (operatorId, accessId) = await GetCommerceAccessAsync(db);
+        await client.SetBearerForAccessAsync(data, accessId);
+        object Request(decimal value) => new { OperadorId = operatorId, Servicio = ServiciosEnvioTestData.Declarar(operatorId),
+            DestinatarioNombre = "Ada", DestinatarioEmail = "ada@example.test", Direccion = "Dirección sintética",
+            Bultos = new[] { new { Codigo = "MEDIDAS", PesoGramos = value, LargoCentimetros = value, AnchoCentimetros = value, AltoCentimetros = value } } };
+        foreach (var endpoint in new[] { "/api/envios", "/api/retiros", "/api/envios/cotizacion" })
+        foreach (var value in new[] { 0m, -1m, 0.009m, 1000000000m, 1.234m })
+        {
+            using var response = await client.PostAsJsonAsync(endpoint, Request(value));
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+            var body = await Body(response);
+            Assert.Equal(400, body.GetProperty("status").GetInt32());
+            var errors = body.GetProperty("errors");
+            Assert.Equal(4, errors.EnumerateObject().Count());
+            foreach (var field in new[] { "PesoGramos", "LargoCentimetros", "AnchoCentimetros", "AltoCentimetros" })
+            {
+                var messages = errors.GetProperty($"Bultos[0].{field}").EnumerateArray().Select(m => m.GetString()).ToArray();
+                var expected = new List<string>();
+                if (value < 0.01m || value > 999999999m) expected.Add($"The field {field} must be between 0.01 and 999999999.");
+                if (decimal.Round(value, 2) != value) expected.Add("Ingresá como máximo dos decimales efectivos.");
+                Assert.Equal(expected.Order(), messages.Order());
+            }
+        }
+        Assert.Empty(await db.Envios.ToArrayAsync()); Assert.Empty(await db.Bultos.ToArrayAsync());
+        Assert.Empty(await db.OutboxMessages.ToArrayAsync());
+        using var accepted = await client.PostAsJsonAsync("/api/envios", Request(1.230m));
+        Assert.Equal(HttpStatusCode.Created, accepted.StatusCode);
+        var bulto = await db.Bultos.AsNoTracking().SingleAsync();
+        Assert.Equal(1.23m, bulto.PesoGramos); Assert.Equal(1.23m, bulto.LargoCentimetros);
+        Assert.Equal(1.23m, bulto.AnchoCentimetros); Assert.Equal(1.23m, bulto.AltoCentimetros);
+    }
+
+    [Fact]
+    public async Task CsvConservaRangosPrecisionYErroresDeSintaxisPorCampo()
+    {
+        var data = await postgres.CreateDatabaseAsync();
+        using var factory = data.CreateShippingApiFactory(); using var client = factory.CreateHttpClient();
+        await using var db = data.CreateDbContext();
+        var (operatorId, accessId) = await GetCommerceAccessAsync(db);
+        await client.SetBearerForAccessAsync(data, accessId);
+        foreach (var (value, code, message) in new[]
+        {
+            ("0", "OutOfRange", "El valor debe estar entre 0.01 y 999999999."),
+            ("0.009", "OutOfRange", "El valor debe estar entre 0.01 y 999999999."),
+            ("1000000000", "OutOfRange", "El valor debe estar entre 0.01 y 999999999."),
+            ("1.234", "InvalidPrecision", "Ingresá como máximo dos decimales efectivos."),
+            ("-1", "InvalidDecimal", "Usá un decimal con punto, sin separador de miles ni notación exponencial.")
+        })
+        {
+            var row = Row("INVALID", weight: value, length: value).Split(',');
+            row[7] = value; row[8] = value;
+            using var response = await ImportAsync(client, Csv(string.Join(',', row)), operatorId);
+            Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+            var errors = (await Body(response)).GetProperty("filas")[0].GetProperty("errores").EnumerateArray().ToArray();
+            foreach (var field in new[] { "pesoGramos", "largoCentimetros", "anchoCentimetros", "altoCentimetros" })
+            {
+                var error = Assert.Single(errors, e => e.GetProperty("campo").GetString() == field);
+                Assert.Equal(code, error.GetProperty("codigo").GetString());
+                Assert.Equal(message, error.GetProperty("mensaje").GetString());
+            }
+        }
+        Assert.Empty(await db.Envios.ToArrayAsync()); Assert.Empty(await db.IdentidadesEnvioImportado.ToArrayAsync());
+        Assert.Empty(await db.OutboxMessages.ToArrayAsync());
+        foreach (var value in new[] { "0.01", "999999999", "1.230" })
+        {
+            using var response = await ImportAsync(client, Csv(Row("VALID-" + value, weight: value)), operatorId);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var number = decimal.Parse(value, System.Globalization.CultureInfo.InvariantCulture);
+            Assert.Equal(number, (await db.Bultos.AsNoTracking().SingleAsync(b => b.Codigo == "BOX-VALID-" + value && b.PesoGramos == number)).PesoGramos);
+        }
+    }
+
+    [Fact]
     public async Task ImportRejectsEffectivePrecisionBeforeHashingAndKeepsTrailingZeroIdempotency()
     {
         var data = await postgres.CreateDatabaseAsync();

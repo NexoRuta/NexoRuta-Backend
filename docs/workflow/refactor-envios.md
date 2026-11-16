@@ -173,3 +173,32 @@ interno de HttpClient: se corrigieron las pruebas, sin cambiar el contrato.
 Sin llamadas externas ni datos operativos. La captura OpenAPI queda fuera de Git;
 se comparará después de C2. La integración/PR y los SHA finales se registran en
 la auditoría raíz `docs/auditorias/controladores-validacion.md`.
+
+## C2 — Medidas de bultos compartidas (2026-11-15)
+
+`MedidasBulto` en Domain define los límites invariantes inclusivos y la precisión
+por comparación, sin modificar la entrada. API conserva Range por campo y usa
+la comprobación de precisión en DosDecimales; CSV usa ambas comprobaciones antes
+de huella/admisión. Bulto conserva sus excepciones anteriores. DosDecimales no
+impone rango a vehículos. Flujos y contratos en [CU-08](../cu/CU-08-bultos.md).
+
+C2 local: 57/57 (request 21, CSV HTTP 20, capacidad/vehículos/OpenAPI 16).
+Unitarias específicas de precisión, creación, geocodificador y parser CSV: 39/39.
+Se verificaron los extremos inclusivos, fuera de rango, cero, negativos,
+`1.230` válido y `1.234` inválido; es-UY/en-US, mensajes y nombres de campos del
+400, excepciones del constructor, rollback CSV e idempotencia con ceros finales.
+CSV conserva el negativo como InvalidDecimal por sintaxis; JSON lo rechaza por
+rango. Se añadió cobertura a las pruebas existentes, sin cambiar esa diferencia.
+
+OpenAPI completo generado antes/después: objetos JSON idénticos. SHA-256 del
+JSON canónico (claves ordenadas, separadores compactos, UTF-8 sin ASCII escapes):
+`048497de390864048cee3ec976d797c9ac6405a4c73312eea998eeb02507eeba`.
+Bulto conserva minimum/multipleOf 0.01 y maximum 999999999 en los cuatro campos;
+vehículos conserva sus máximos propios. Sin diferencia de contrato detectada.
+
+Regresión combinada final: 106/106 (búsqueda simulada 26, destinos HTTP 6,
+request 21, CSV HTTP 20, capacidad/OpenAPI 16, tarifas/admisión 12 y retiros C37 5).
+Unitarias específicas recompiladas sobre el código final: 39/39. Los retiros
+incluyen 1/500/501/1500 bultos, idempotencia, recepción y entrega al comercio.
+[PR backend #62](https://github.com/NexoRuta/NexoRuta-Backend/pull/62), destino
+develop. El registro raíz incorpora los SHA de commits, gitlinks e integración.

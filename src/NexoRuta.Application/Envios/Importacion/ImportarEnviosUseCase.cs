@@ -9,6 +9,7 @@ using NexoRuta.Application.Envios.Exceptions;
 using NexoRuta.Application.Envios.Repositories;
 using NexoRuta.Application.Envios.UseCases;
 using NexoRuta.Application.Reparto.Exceptions;
+using NexoRuta.Domain.Envios;
 
 namespace NexoRuta.Application.Envios.Importacion;
 
@@ -315,12 +316,12 @@ public sealed class ImportarEnviosUseCase(
             errors.Add(new("InvalidDecimal", field, "Usá un decimal con punto, sin separador de miles ni notación exponencial."));
             return null;
         }
-        if (number is < 0.01m or > 999_999_999m)
+        if (!MedidasBulto.EstaEnRango(number))
         {
             errors.Add(new("OutOfRange", field, "El valor debe estar entre 0.01 y 999999999."));
             return null;
         }
-        if (decimal.Round(number, 2) != number)
+        if (!MedidasBulto.TieneHastaDosDecimalesEfectivos(number))
         {
             errors.Add(new("InvalidPrecision", field, "Ingresá como máximo dos decimales efectivos."));
             return null;

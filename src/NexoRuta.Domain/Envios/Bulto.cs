@@ -72,7 +72,7 @@ public sealed class Bulto
         if (altoCentimetros <= 0)
             throw new ArgumentOutOfRangeException(nameof(altoCentimetros), "El alto debe ser positivo.");
         if (new[] { pesoGramos, largoCentimetros, anchoCentimetros, altoCentimetros }
-            .Any(x => x is < 0.01m or > 999999999m || decimal.Round(x, 2) != x))
+            .Any(x => !MedidasBulto.EsValida(x)))
             throw new ArgumentException("Las medidas admiten valores entre 0.01 y 999999999, con hasta dos decimales efectivos.");
 
         Id = Guid.CreateVersion7();
