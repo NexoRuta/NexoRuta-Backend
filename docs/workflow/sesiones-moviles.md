@@ -1,6 +1,6 @@
 # Sesiones móviles renovables — M01 / T03.a
 
-Decisión del usuario del 17/10/2026: conservar la autenticación JWT y el hasher Identity actuales, con usuarios y roles centrales, y agregar renovación móvil por **30 días desde el ingreso**, configurable. El proyecto todavía no fue desplegado: se implementa un contrato vigente, sin mecanismos de compatibilidad con versiones anteriores.
+La sesión móvil usa la autenticación JWT y el hasher Identity de las cuentas centrales. La renovación tiene una vigencia absoluta configurable de **30 días desde el ingreso** por defecto.
 
 ## Contrato HTTP
 
@@ -14,7 +14,11 @@ Los tres endpoints son JSON y envían `Cache-Control: no-store`. El token de ren
 
 La respuesta de ingreso/renovación contiene `accessToken`, `tokenType` (`Bearer`), `expiresAtUtc`, `refreshToken`, `refreshExpiresAtUtc` y `sesionId`. Se publica mediante OpenAPI; ningún cliente debe inventar estos campos o decodificar el token opaco para obtener identidad.
 
-La sesión renovable admite por ahora cuentas activas de operador con rol. Credenciales válidas de comercio, plataforma, identidad sin organización u operador suspendido no crean sesión móvil. **No acredita perfil repartidor ni autorización para rutas**: esos contratos siguen pendientes de T03.b y cada operación deberá autorizarlos en servidor.
+La sesión renovable admite cuentas activas de operador con rol. Las demás clases de acceso reciben `401`. El ingreso autentica la cuenta, y el acceso a reparto requiere además las comprobaciones vigentes de perfil, permisos y pertenencia de la operación.
+
+- `GET /api/mobile/perfil` devuelve el perfil de repartidor vigente a la cuenta autorizada. [Contrato de perfil](../../src/NexoRuta.Api/Features/Reparto/Controllers/RepartidoresController.cs) · [Pruebas de perfil y permisos](../../tests/NexoRuta.IntegrationTests/Reparto/RepartidoresHttpTests.cs)
+- `POST /api/mobile/jornadas/{jornadaId}/operaciones` y `PUT /api/mobile/jornadas/{jornadaId}/evidencias/{archivoId}` exigen `reparto.ejecutar` y verifican el acceso a la jornada en el servidor. [Contrato de operaciones](../../src/NexoRuta.Api/Features/Reparto/Controllers/OperacionesRepartoController.cs)
+- La API permite registrar y retirar instalaciones y consultar o confirmar avisos. El Worker en modo `Push` despacha los avisos mediante FCM cuando está configurado. [Contrato de notificaciones](../../src/NexoRuta.Api/Features/Notificaciones/Controllers/NotificacionesRepartoController.cs) · [Pruebas de Push](../../tests/NexoRuta.IntegrationTests/Notificaciones/PushOutboxTests.cs)
 
 El login web `POST /api/auth/login` sigue siendo el ingreso de los clientes web actuales, con su propia respuesta. Ambos flujos usan el mismo caso de uso de credenciales, hash de contraseña y cuentas; no hay otro registro de usuarios ni otro proveedor de identidad. La app móvil no ofrece registro público.
 
@@ -31,7 +35,7 @@ El login web `POST /api/auth/login` sigue siendo el ingreso de los clientes web 
 
 El cliente debe serializar la renovación y guardar el par de tokens de forma segura. Ante una respuesta de renovación perdida, reenviar el token anterior puede activar la detección de reutilización: deberá solicitar ingreso nuevamente a la misma cuenta conservando pendientes. No se implementa una ventana que acepte tokens consumidos.
 
-El backend no conoce el trabajo aún no enviado por el teléfono. La app deberá bloquear logout/cambio de cuenta mientras tenga pendientes; esta API por sí sola no implementa ese requisito ni la continuidad offline o la biometría.
+El contrato de sesión opera sobre los datos que el teléfono ya envió al servidor. `POST /api/mobile/sync-status` recibe una instantánea de la cola móvil por instalación y secuencia para observabilidad. El manejo de pendientes locales, cambio de cuenta y biometría corresponde al cliente móvil. [Contrato de estado de sincronización](../../src/NexoRuta.Api/Features/Reparto/Controllers/EstadoSincronizacionMovilController.cs)
 
 ## Persistencia y migración
 
@@ -39,9 +43,9 @@ El backend no conoce el trabajo aún no enviado por el teléfono. La app deberá
 
 Rollback: elimina únicamente las dos tablas nuevas y su restricción adicional. Las sesiones renovables emitidas se pierden y exigirán nuevo ingreso. Usuarios, cuentas y roles permanecen. Se debe coordinar código y esquema al actualizar; no hay soporte para servir contratos anteriores ni un modo de compatibilidad.
 
-No se configura todavía una purga de sesiones/historial expirados: su retención debe acordarse antes de producción. RLS, perfil repartidor y administración de dispositivos/push permanecen pendientes. No se modificó el sistema de colas ni se genera outbox al renovar o revocar credenciales.
+La retención y purga de sesiones e historial expirados siguen pendientes de definición. La renovación y revocación de credenciales escriben el estado de sesión en PostgreSQL. Las operaciones autenticadas de negocio aplican el contexto RLS que les corresponde. [Middleware de contexto RLS](../../src/NexoRuta.Api/Core/Security/RlsTransactionMiddleware.cs)
 
-## Verificación del corte
+## Evidencia histórica del corte de sesiones
 
 - API Release compilada; 17 pruebas unitarias seleccionadas y 3 de arquitectura correctas.
 - 93 pruebas HTTP/integración correctas en PostgreSQL 18 temporal: sesión móvil, JWT, usuario actual, plataforma y alta propia. Se verificaron además los 18 casos de sesión móvil tras retirar la compatibilidad descartada.
@@ -49,9 +53,9 @@ No se configura todavía una purga de sesiones/historial expirados: su retenció
 - 39 pruebas de contrato del cliente web contra el OpenAPI real correctas. El modelo EF no tiene cambios sin migración.
 - Base local actualizada desde `ShipmentCommerce` hasta la nueva migración. Se conservaron los IDs y conteos previos: 2 usuarios, 2 accesos, 2 envíos y 2 bultos.
 
-No se acredita ingreso/renovación desde MAUI, almacenamiento de tokens, biometría ni jornada offline. Es el corte backend que permitirá esa integración.
+La evidencia de este corte cubre el Backend. [Suite HTTP de sesiones móviles](../../tests/NexoRuta.IntegrationTests/Seguridad/SesionesMovilesHttpTests.cs)
 
-## Entorno local utilizado
+## Entorno local del corte histórico
 
 El puerto 5432 del host estaba ocupado. `compose.local.yaml`, en la raíz del checkout combinado, publica PostgreSQL en `127.0.0.1:55433`, coincidiendo con `appsettings.Development.json`. API local usa `http://localhost:5041`.
 

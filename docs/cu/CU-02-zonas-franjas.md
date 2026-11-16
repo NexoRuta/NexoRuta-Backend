@@ -14,7 +14,7 @@ El relevamiento y el diseño acordado conservan la trazabilidad funcional; las s
 | Franjas | Oferta semanal por zona y día ISO, en hora local America/Montevideo; sin feriados, cupos ni reservas. |
 | Coincidencias | La consulta devuelve todas las zonas activas del operador que cubren el punto. No elige una fila arbitraria. |
 | Historia | Cada cambio crea una revisión inmutable con una fotografía de toda la zona, geometría y franjas. La columna de concurrencia por sí sola no sustituye esa historia. |
-| Envíos | CU-02 entrega zona, revisión y oferta. CU-07/otros casos resolverán selección y promesa concreta; aquí no se cambia Envio ni su alta. |
+| Envíos | CU-02 aporta zona, revisión y oferta. El alta usa el servicio seleccionado y registra la revisión de cobertura aplicada con la tarifa. [CU-07](CU-07-alta-envios.md) · [CU-03](CU-03-tarifas.md) |
 
 ## Trazabilidad y diferencias entre fuentes
 

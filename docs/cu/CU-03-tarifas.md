@@ -1,14 +1,12 @@
 # CU-03 — Tarifas configurables
 
-**Estado: Fase 2 backend implementada, CU-03 no está completo.** Este documento conserva el diseño y distingue lo ya incorporado de lo pendiente. CU-03 configura y publica el cuadro tarifario; CU-09 calculará y registrará el importe de un envío usando la versión vigente. La creación de envíos todavía no consume este módulo.
+## Estado vigente del Backend
 
-| Estado | Alcance |
-|---|---|
-| **Implementado** | Dominio de tarifario/versiones/tarifas/ajustes; calculador puro; casos de uso de consulta, borrador, edición, publicación y simulación; repositorio EF; migración PostgreSQL con RLS, claves compuestas, concurrencia e inmutabilidad. |
-| **Comprobado** | Pruebas unitarias del cálculo y reglas de dominio; pruebas efímeras PostgreSQL/PostGIS de migraciones, decimales, referencias, RLS restringida, publicación/copia/inmutabilidad y carreras de edición/publicación. Ver detalle en [Fase 2: evidencia](#11-fase-2-backend-evidencia). |
-| **Pendiente** | Controladores HTTP, ApiClient, OpenAPI, Backoffice y recorrido local. CU-09 aún debe integrar el calculador y guardar el snapshot de precio/revisión de zona dentro del alta. No se aplicó la migración al PostgreSQL persistente. |
+CU-03 configura, simula y publica versiones del tarifario del operador. La API de configuración expone borrador, publicación e historial. Las publicaciones se conservan con su versión, bajo RLS. [Contrato HTTP de tarifas](../../src/NexoRuta.Api/Features/Tarifas/Controllers/TarifarioController.cs) · [Pruebas HTTP de CU-03](../../tests/NexoRuta.IntegrationTests/Tarifas/TarifarioHttpTests.cs)
 
-El calculador recibe configuración tarifaria y bultos ya preparados: no accede a repositorios, no autoriza al actor y no resuelve la versión vigente. El simulador obtiene y autoriza esa configuración antes de invocarlo; CU-09 deberá hacer lo mismo dentro de su flujo de alta.
+El alta individual y la importación CSV calculan la tarifa con todos los bultos y la configuración de la modalidad y zona seleccionadas. La admisión guarda en `TarifasEnvio` el resultado, la versión tarifaria, el servicio y la revisión de cobertura con las coordenadas usadas. Una cotización con una versión esperada obsoleta produce conflicto. Las consultas del envío exponen el cargo registrado y su historial. [Integración de tarifa en admisión](../../src/NexoRuta.Infrastructure/Envios/Repositories/TarifasAdmision.cs) · [Pruebas de tarifa aplicada](../../tests/NexoRuta.IntegrationTests/Envios/TarifaAdmisionHttpTests.cs) · [CU-07](CU-07-alta-envios.md)
+
+Las secciones numeradas conservan el diseño original y la evidencia de cada fase. Las referencias a trabajo futuro describen el estado al cierre de esa fase.
 
 ## 1. Alcance y trazabilidad
 
@@ -339,9 +337,9 @@ Se crearon únicamente registros tarifarios de demostración identificados por n
 
 - El PDF, §5.1 (p. 3 impresa; p. 4 del archivo), asigna al operador la configuración de tarifas al menos por zona, peso, volumen y modalidad estándar/urgente, con recargos y bonificaciones desde una interfaz y sin modificar código/desplegar. El recorrido y la interfaz cubren esa configuración, edición, publicación e historial.
 - El PDF, §5.2 (p. 4 impresa; p. 5 del archivo), describe el cálculo automático al registrar el envío usando la tarifa vigente. La hoja `CU obligatorios`, fila 6, asigna CU-03 a M01/Backoffice, actor Operador/administrador y remite a §5.1. La hoja `Dependencias`, fila 5, indica que CU-09 consume CU-03 mediante el ID de versión tarifaria. Esos elementos de cálculo/uso en el alta pertenecen a CU-09 y no se implementaron aquí.
-- El PDF, §6.6 (p. 6 impresa; p. 7 del archivo), requiere que la configuración sea modificable en ejecución y que el tratamiento histórico de los envíos no cambie retroactivamente. CU-03 conserva publicaciones inmutables; el snapshot tarifario y la revisión geográfica concretos asociados a un envío siguen siendo trabajo de CU-09.
+- El PDF, §6.6 (p. 6 impresa; p. 7 del archivo), requiere configuración modificable en ejecución y conservación del tratamiento histórico. Este corte entregó publicaciones inmutables. La integración posterior de CU-09 conserva el cargo y la revisión geográfica aplicados al envío, como indica el estado vigente.
 - Se verificó la capitalización real de la planilla: `docs/alcance/Calcs/Casos de Uso - Responsables.xlsm` (no `calcs`). La fila 6 identifica la aplicación, actor y módulo indicados arriba; no consigna una persona responsable nominal. No se ejecutaron macros.
-- Dictamen: CU-03 (configuración, borradores, publicación, historial y simulación) está implementado y se comprobó en entorno local integrado. CU-09 continúa pendiente: aplicar el cálculo al alta, conservar el snapshot monetario/versionado/revisión geográfica y mantener la selección de operador por envío. No se introdujo relación permanente Comercio–operador ni se declara completo el laboratorio.
+- Dictamen del corte: la configuración, los borradores, la publicación, el historial y la simulación de CU-03 se comprobaron en entorno local integrado. La admisión con tarifa aplicada se incorporó después y tiene su propia evidencia HTTP.
 
 ### Acceso para validación del usuario
 
