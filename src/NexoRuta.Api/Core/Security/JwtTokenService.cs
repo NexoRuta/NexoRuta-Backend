@@ -12,7 +12,8 @@ public sealed class JwtTokenService(JwtConfiguracion config, TimeProvider reloj)
         SesionIniciada sesion, Guid? sesionMovilId = null, DateTimeOffset? finSesion = null)
     {
         var ahora = reloj.GetUtcNow().UtcDateTime;
-        var expiracion = ahora.AddMinutes(15);
+        var vigenciaMinutos = sesionMovilId.HasValue ? 15 : config.VigenciaWebMinutos;
+        var expiracion = ahora.AddMinutes(vigenciaMinutos);
         if (finSesion is not null && finSesion.Value.UtcDateTime < expiracion)
             expiracion = finSesion.Value.UtcDateTime;
 
