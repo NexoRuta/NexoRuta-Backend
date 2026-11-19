@@ -5,9 +5,12 @@ token. It does not create links, extend their 24-hour lifetime, revoke them, wri
 delivery state, or publish broker messages. `EntregasSeguimiento` stores ciphertext,
 nonce and tag; its operator/shipment/hash identifies the corresponding link.
 
-## Temporary identity boundary
+## Identity boundary
 
-The route runs only in Development and requires an authenticated organization Bearer token. The seguimiento-demo policy is an additional environment gate; it does not authenticate a caller or select an actor. The API validates the JWT and persisted access, and shipment visibility is limited to its assigned commerce or selected operator. A missing or inaccessible shipment returns 404. X-NexoRuta-Acceso does not grant identity or impersonation.
+The route requires an authenticated organization Bearer token in every environment.
+The API validates the JWT and persisted access. Shipment visibility is limited
+to its assigned commerce or selected operator. A missing or inaccessible
+shipment returns 404. X-NexoRuta-Acceso does not grant identity or impersonation.
 
 ## Response
 
@@ -34,8 +37,9 @@ externally; do not generate a replacement or copy it into versioned configuratio
 Recovery needs that key only for a currently valid link. Missing/wrong keys return
 503 without changing the existing token.
 
-Set `Tracking:PublicBaseUrl` to the public **API** base while no Tracking frontend
-exists. Development default matches the HTTP launch profile: `http://localhost:5041`.
+Set `Tracking:PublicBaseUrl` to the public **API** base. Commerce uses its own
+Tracking frontend origin when it opens the shipment page in the browser.
+The Development API default matches the HTTP launch profile `http://localhost:5041`.
 For a different listener, override `Tracking__PublicBaseUrl` in the API environment.
 Base paths are preserved; HTTP(S) is required, credentials/query/fragment rejected.
 The resulting path is `/api/public/seguimiento/{original-token}`. HTTPS is preferable
