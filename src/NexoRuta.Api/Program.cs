@@ -198,12 +198,6 @@ builder.Services.AddAuthorization(options =>
                 AccesoSeleccionado.ClaimTipoAcceso,
                 nameof(TipoAccesoUsuario.Comercio)));
 
-    // Política demo existente.
-    options.AddPolicy("seguimiento-demo", policy =>
-        policy.RequireAuthenticatedUser()
-            .RequireAssertion(
-                _ => builder.Environment.IsDevelopment()));
-
     // Políticas RBAC.
     foreach (var permiso in CatalogoPermisos.Todos)
     {
@@ -272,8 +266,7 @@ app.UseForwardedHeaders();
         await scope.ServiceProvider.GetRequiredService<DatosInicialesSeeder>().SeedAsync();
 }
 
-if (app.Environment.IsDevelopment())
-    app.MapOpenApi();
+app.MapOpenApi();
 
 app.UseRouting();
 app.Use(ApiTelemetry.MeasureRequestAsync);

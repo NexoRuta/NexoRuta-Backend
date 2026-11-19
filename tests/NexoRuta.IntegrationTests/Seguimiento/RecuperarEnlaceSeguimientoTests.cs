@@ -94,7 +94,7 @@ public sealed class RecuperarEnlaceSeguimientoTests(PostgresFixture postgres) : 
     }
 
     [Fact]
-    public async Task IdentityScopeAndEnvironmentAreEnforcedWithoutLeakingShipmentExistence()
+    public async Task IdentityScopeIsEnforcedAndProductionCanRecoverTheOriginalTrackingLink()
     {
         var database = await postgres.CreateDatabaseAsync();
         using var factory = new IntegrationApiFactory(database, "Development", Settings());
@@ -136,13 +136,39 @@ public sealed class RecuperarEnlaceSeguimientoTests(PostgresFixture postgres) : 
         Assert.Equal(HttpStatusCode.Accepted, (await client.SendAsync(allowed)).StatusCode);
         await using var sharedKeys = await SharedDataProtectionTestStore.CreateAsync(database);
         await SharedRateLimitTestStore.InstallAlwaysAllowingStoreAsync(database);
-        var productionSettings = Settings();
+        const string productionOrigin = "https://api.example.test";
+        var productionSettings = Settings(productionOrigin);
         sharedKeys.Configure(productionSettings);
         productionSettings["ConnectionStrings:RateLimits"] = database.ConnectionString;
         using var production = new IntegrationApiFactory(database, "Production", productionSettings);
         using var productionClient = production.CreateHttpClient();
-        using var forbidden = await RequestAsync(productionClient, database, envio.Id, owner);
-        Assert.Equal(HttpStatusCode.Forbidden, (await productionClient.SendAsync(forbidden)).StatusCode);
+
+        var messageId = await PublishedTrackingJobTestData.CreatePublishedTrackingJobAsync(database, envio.OperadorId, envio.Id);
+        string original;
+        await using (var db = database.CreateDbContext())
+        {
+            await Processor(db, productionSettings).EjecutarAsync(messageId, envio.OperadorId, envio.Id);
+            original = Cipher(productionSettings).Descifrar(await db.EntregasSeguimiento.SingleAsync());
+        }
+        using var ownShipment = await RequestAsync(productionClient, database, envio.Id, owner);
+        using var recovered = await productionClient.SendAsync(ownShipment);
+        Assert.Equal(HttpStatusCode.OK, recovered.StatusCode);
+        Assert.True(recovered.Headers.CacheControl?.NoStore);
+        var link = await recovered.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("vigente", link.GetProperty("estado").GetString());
+        Assert.Equal($"{productionOrigin}/api/public/seguimiento/{original}", link.GetProperty("url").GetString());
+
+        foreach (var access in new[] { otherOperator, otherCommerce })
+        {
+            using var outsideOrganization = await RequestAsync(productionClient, database, envio.Id, access);
+            using var response = await productionClient.SendAsync(outsideOrganization);
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+        using var productionAnonymous = production.CreateHttpClient();
+        using var publicTracking = await productionAnonymous.GetAsync($"/api/public/seguimiento/{original}");
+        Assert.Equal(HttpStatusCode.OK, publicTracking.StatusCode);
+        using var openApi = await productionAnonymous.GetAsync("/openapi/v1.json");
+        Assert.Equal(HttpStatusCode.OK, openApi.StatusCode);
     }
 
     [Theory]
